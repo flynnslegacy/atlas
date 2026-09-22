@@ -50,6 +50,27 @@ def en_lettres(n: int) -> str:
     return f"{base}-{_UNITES[unite]}"
 
 
+def dire_heure(h: int, m: int) -> str:
+    """« Il est une heure cinq. », « Il est minuit. », « Il est midi dix. »…"""
+    if h == 0:
+        heure = "minuit"
+    elif h == 12:
+        heure = "midi"
+    elif h == 1:
+        heure = "une heure"
+    else:
+        heure = f"{en_lettres(h)} heures"
+    minutes = f" {en_lettres(m)}" if m else ""
+    return f"Il est {heure}{minutes}."
+
+
+def _heure_actuelle() -> tuple[int, int]:
+    # Une seule lecture : deux appels à now() autour d'un changement d'heure
+    # donneraient l'heure d'avant avec les minutes d'après.
+    maintenant = dt.datetime.now()
+    return maintenant.hour, maintenant.minute
+
+
 class Cerveau(Protocol):
     def repondre(self, texte: str) -> AsyncIterator[str]:
         """Rend la réponse en fragments, au fil de l'eau."""
@@ -58,13 +79,12 @@ class Cerveau(Protocol):
 
 class CerveauBouchon:
     def __init__(self, heure: Callable[[], tuple[int, int]] | None = None) -> None:
-        self._heure = heure or (lambda: (dt.datetime.now().hour, dt.datetime.now().minute))
+        self._heure = heure or _heure_actuelle
 
     async def repondre(self, texte: str) -> AsyncIterator[str]:
         demande = texte.lower()
         if "heure" in demande:
-            h, m = self._heure()
-            phrase = f"Il est {en_lettres(h)} heures {en_lettres(m)}."
+            phrase = dire_heure(*self._heure())
         elif "bonjour" in demande or "salut" in demande:
             phrase = "Bonjour David. Je t'écoute."
         else:

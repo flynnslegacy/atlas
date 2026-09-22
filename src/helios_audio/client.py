@@ -237,13 +237,14 @@ async def principal() -> None:
 
     adaptateur = TypeAdapter(MessageCore)
     logging.basicConfig(level=logging.INFO)
-    peripherique = await ouvrir_peripherique()
+    # Réglages et réveilleur d'abord : une variable mal formée ou un modèle absent
+    # doit échouer avant que le périphérique audio soit ouvert.
     reglages = lire_reglages()
-
     if os.environ.get("HELIOS_REVEILLEUR", "touche") == "motcle":
         reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord(), seuil=reglages.seuil_reveil)
     else:
         reveilleur = ReveilleurTouche()
+    peripherique = await ouvrir_peripherique()
 
     async with websockets.connect(URL_CORE) as ws:
         transport = TransportWebSocket(ws)
