@@ -166,6 +166,13 @@ l'environnement au démarrage (`lire_reglages()`), avec pour défauts les
 valeurs actuelles — rien ne change tant que tu ne touches à rien. Une fois
 les valeurs choisies grâce au banc, édite `.env.example` (et ton `.env`) :
 
+**Les réglages de `.env` ne prennent effet qu'à travers les cibles `make`**
+(`make run-audio`, `make run-core`, `make bench`…) : c'est le `Makefile` qui
+charge `.env` et le passe aux commandes. Lancer `python -m helios_audio.client`
+à la main ne lit pas `.env`. Crée ton `.env` en copiant `.env.example`, et sur
+le MacBook vérifie en particulier `HELIOS_CORE_URL` : elle doit pointer vers
+la machine où tourne le Core, pas vers `127.0.0.1` (le défaut du code).
+
 - `HELIOS_REVEIL_SEUIL` (défaut `0.5`) — le seuil du mot de réveil. Prends la
   plus petite valeur testée par `make bench` qui donne, dans `reveil`, une
   `detection` > 0.95 avec un `faux_par_heure` < 1.

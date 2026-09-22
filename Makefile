@@ -1,3 +1,7 @@
+# Charge .env s'il existe (sans erreur s'il manque) et le passe à chaque recette.
+-include .env
+export
+
 .PHONY: install test lint format bench run-core run-audio
 
 install:
