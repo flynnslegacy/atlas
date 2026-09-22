@@ -213,6 +213,42 @@ async def test_le_bargein_se_desarme_quand_l_audio_a_fini_de_jouer():
     assert p.vidages == 0
 
 
+async def test_une_phrase_en_vol_de_la_reponse_coupee_ne_revient_jamais():
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 2)
+    c = _client(t, p, parole=[True] * 2 + [True] * 4, reveil_au=None)
+    await _jouer(c, id_enonce=3, blocs=1)
+    await c.boucle_capture()  # barge-in sur l'énoncé 3
+    assert [type(m) for m in t.json] == [Interruption]
+
+    # La phrase suivante de la réponse coupée était déjà en vol.
+    await _jouer(c, id_enonce=3, blocs=5, rang=2)
+    assert p.joues == [BLOC], "aucune trame de l'énoncé 3 ne sonne après la coupure"
+
+    # Le barge-in n'est pas ré-armé : la parole qui suit est capturée, pas prise
+    # pour une seconde interruption.
+    p.ajouter([BLOC] * 4)
+    await c.boucle_capture()
+    assert sum(isinstance(m, Interruption) for m in t.json) == 1
+
+    # La réponse suivante, elle, est jouée normalement.
+    await _jouer(c, id_enonce=4, blocs=2)
+    assert p.joues == [BLOC] * 3
+
+
+async def test_une_nouvelle_phrase_du_meme_enonce_ne_remet_pas_le_bargein_a_zero():
+    t, p = FauxTransport(), FauxPeripherique([BLOC])
+    c = _client(t, p, parole=[True, True], reveil_au=None)  # seuil : deux blocs
+    await _jouer(c, id_enonce=1, blocs=1)
+    await c.boucle_capture()  # un bloc de parole : pas encore d'interruption
+    assert t.json == []
+
+    await _jouer(c, id_enonce=1, blocs=1, rang=2)
+    p.ajouter([BLOC])
+    await c.boucle_capture()  # le second bloc atteint le seuil
+
+    assert any(isinstance(m, Interruption) for m in t.json)
+
+
 def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):
     monkeypatch.delenv("HELIOS_REVEIL_SEUIL", raising=False)
     monkeypatch.delenv("HELIOS_SILENCE_MS", raising=False)

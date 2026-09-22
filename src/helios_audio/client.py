@@ -21,7 +21,6 @@ from helios_core.protocole import (
     DUREE_BLOC_MS,
     Bonjour,
     Dire,
-    Etat,
     FinEnonce,
     Interruption,
     Reveil,
@@ -83,6 +82,9 @@ class ClientAudio:
         self._reveilleur = reveilleur
         self._capture = False
         self._id_courant = 0
+        # Plus grand identifiant d'énoncé coupé : ni ses phrases encore en vol ni
+        # ses trames ne doivent plus jamais sonner, ni ré-armer le barge-in.
+        self._id_coupe = 0
         self._bargein = bargein or Endpointeur(silence_ms=400, parole_min_ms=300)
         self._horloge = horloge or time.monotonic
         # Échéance, sur notre propre horloge, de la fin de l'audio déjà confié au
@@ -122,31 +124,38 @@ class ClientAudio:
         if self._bargein.ajouter(self._detecteur.parle(bloc)) != "debut":
             return
         _journal.info("interruption détectée")
-        self._fin_lecture = 0.0  # l'audio vient d'être vidé
-        self._id_courant = 0  # écarte les trames déjà en vol de la réponse coupée
+        self._couper()
         await self._peripherique.vider()
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
         self._capture = True
         self._endpointeur.reinitialiser()
 
+    def _couper(self) -> None:
+        """Marque l'énoncé courant comme coupé ; son audio vient d'être vidé."""
+        self._id_coupe = max(self._id_coupe, self._id_courant)
+        self._id_courant = 0
+        self._fin_lecture = 0.0
+
     # --- Core vers haut-parleur -------------------------------------------
 
     async def sur_message(self, msg) -> None:
         if isinstance(msg, Dire):
-            self._id_courant = msg.id_enonce
-            self._bargein.reinitialiser()
+            if msg.id_enonce <= self._id_coupe:
+                return  # phrase en vol d'une réponse coupée : on l'ignore
+            if msg.id_enonce != self._id_courant:
+                # Nouvel énoncé seulement : remettre le compteur à zéro à chaque
+                # phrase effacerait la parole que l'utilisateur a déjà accumulée.
+                self._id_courant = msg.id_enonce
+                self._bargein.reinitialiser()
         elif isinstance(msg, StopAudio):
-            self._fin_lecture = 0.0  # l'audio vient d'être vidé
-            self._id_courant = 0  # écarte les trames déjà en vol de la réponse coupée
+            self._couper()
             await self._peripherique.vider()
-        elif isinstance(msg, Etat) and msg.valeur == "parole":
-            # Seule l'horloge de lecture arme ou désarme le barge-in : « repos » et
-            # « ecoute » disent que le Core a fini d'envoyer, pas que le son est joué.
-            self._bargein.reinitialiser()
+        # Etat n'arme ni ne désarme rien : « repos » dit que le Core a fini
+        # d'ENVOYER, pas que le son est joué. Seule l'horloge de lecture tranche.
 
     async def sur_trame(self, trame: bytes) -> None:
         identifiant, pcm = decoder_audio_sortant(trame)
-        if identifiant != self._id_courant:
+        if identifiant <= self._id_coupe or identifiant != self._id_courant:
             return  # trame d'un énoncé interrompu : on la jette
         await self._peripherique.jouer(pcm)
         self._fin_lecture = max(self._horloge(), self._fin_lecture) + DUREE_BLOC_S
