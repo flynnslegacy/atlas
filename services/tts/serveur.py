@@ -42,7 +42,12 @@ class MoteurTTS(Protocol):
     voix_defaut: str  # voix utilisée quand ni la requête ni ATLAS_TTS_VOIX n'en donnent
 
     def synthetiser(self, texte: str, voix: str) -> Iterator[bytes]:
-        """Rend des morceaux de PCM 16 kHz mono s16le."""
+        """Rend des morceaux de PCM 16 kHz mono s16le.
+
+        Appelée par la route avant la réponse HTTP : une exception levée à l'appel
+        devient un 503. Un moteur peut donc travailler dès l'appel (Qwen3) ou
+        paresseusement, à la lecture des morceaux (Piper).
+        """
         ...
 
     def verifier(self, voix: str) -> None:
@@ -270,10 +275,15 @@ class MoteurQwen3:
             self._preparer(voix)
 
     def synthetiser(self, texte: str, voix: str) -> Iterator[bytes]:
+        """Génère toute la phrase dès l'appel, puis rend ses blocs de 20 ms.
+
+        Qwen3 ne rend rien avant la fin de la génération : travailler avant la réponse
+        HTTP ne retarde pas le premier son, et un échec (chargement, mémoire GPU,
+        génération) devient un 503 au lieu d'un 200 muet. Le verrou est rendu avant
+        que le premier bloc ne parte : un client qui se déconnecte ne peut pas le garder.
+        """
         voix = voix or voix_par_defaut(self)
         plafond_s = plafond_duree(texte)
-        # Aucun yield sous le verrou : un client qui se déconnecte en plein flux
-        # abandonne le générateur hors du verrou, qui ne peut donc pas rester pris.
         with self._verrou:
             modele, empreinte = self._preparer(voix)
             wavs, frequence = modele.generate_voice_clone(
@@ -301,9 +311,9 @@ class MoteurQwen3:
         ramene = soxr.resample(audio, frequence, FREQUENCE_SORTIE)
         pcm = (np.clip(ramene, -1.0, 1.0) * 32767).astype("<i2").tobytes()
         blocs, reste = en_blocs(pcm)
-        yield from blocs
         if reste:
-            yield reste + b"\x00" * (TAILLE_MORCEAU - len(reste))
+            blocs.append(reste + b"\x00" * (TAILLE_MORCEAU - len(reste)))
+        return iter(blocs)
 
 
 _moteurs: dict[str, MoteurTTS] = {"piper": MoteurPiper(), "qwen3": MoteurQwen3()}
@@ -392,9 +402,17 @@ def synthetiser(
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+    # Appelé AVANT le flux, pour la même raison : un moteur qui travaille dès l'appel
+    # (Qwen3) peut encore échouer avec un vrai code d'erreur.
+    try:
+        blocs = moteur.synthetiser(demande.text, voix)
+    except Exception as e:
+        _journal.exception("synthèse impossible avec le moteur %s", moteur.nom)
+        raise HTTPException(status_code=503, detail=f"moteur de voix indisponible : {e}") from e
+
     def flux() -> Iterator[bytes]:
         yield entete_wav_streaming()
-        yield from moteur.synthetiser(demande.text, voix)
+        yield from blocs
 
     return StreamingResponse(flux(), media_type="audio/wav")
 

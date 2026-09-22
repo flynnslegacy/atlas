@@ -164,20 +164,27 @@ def test_des_syntheses_simultanees_chargent_une_fois_et_ne_generent_jamais_en_pa
     assert modele.chevauchement_max == 1
 
 
-@pytest.mark.parametrize("fermer", [True, False])
-def test_un_flux_abandonne_en_pleine_phrase_ne_bloque_pas_le_moteur(dossier_voix, fermer):
-    # Le client HTTP se déconnecte en pleine phrase : le générateur est fermé, ou reste
-    # suspendu sans que personne ne le ferme. Dans les deux cas, le verrou est libre.
+def test_la_synthese_travaille_des_l_appel_avant_toute_lecture(dossier_voix):
+    # Tout se fait avant que la route ne réponde : un échec y devient un 503.
+    modele = FauxModele()
+    moteur, chargeur = moteur_avec(dossier_voix, modele)
+
+    moteur.synthetiser("Bonjour David.", "atlas_reference")
+
+    assert len(chargeur.appels) == 1
+    assert len(modele.generations) == 1
+
+
+def test_le_moteur_est_libre_des_que_la_synthese_est_rendue(dossier_voix):
+    # Le client HTTP se déconnecte en pleine phrase : les blocs restants sont abandonnés
+    # sans être lus. Le verrou, lui, a été rendu avant le premier bloc.
     moteur, _ = moteur_avec(dossier_voix, FauxModele())
-    generateur = moteur.synthetiser("Bonjour David.", "atlas_reference")
-    next(generateur)
-    if fermer:
-        generateur.close()
+    blocs = moteur.synthetiser("Bonjour David.", "atlas_reference")
+    next(blocs)
 
     suivante = threading.Thread(target=tout_synthetiser, args=(moteur,), daemon=True)
     suivante.start()
     suivante.join(timeout=5)
-    generateur.close()
 
     assert not suivante.is_alive()
 
