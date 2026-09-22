@@ -147,6 +147,11 @@ def encoder_audio_sortant(id_enonce: int, pcm: bytes) -> bytes:
 def decoder_audio_sortant(trame: bytes) -> tuple[int, bytes]:
     if not trame or trame[0] != _TYPE_AUDIO_SORTANT:
         raise ValueError("trame audio sortante attendue")
+    if len(trame) < 5:
+        raise ValueError(
+            f"trame audio sortante trop courte : {len(trame)} octets, "
+            f"attendu au moins 5 (type + id_enonce)"
+        )
     (id_enonce,) = struct.unpack(">I", trame[1:5])
     pcm = trame[5:]
     _verifier_bloc(pcm)

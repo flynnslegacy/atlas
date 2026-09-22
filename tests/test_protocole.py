@@ -49,3 +49,14 @@ def test_un_bloc_de_mauvaise_taille_est_refuse():
 def test_une_trame_sortante_lue_comme_entrante_est_refusee():
     with pytest.raises(ValueError):
         decoder_audio_entrant(encoder_audio_sortant(1, b"\x00" * TAILLE_BLOC_OCTETS))
+
+
+def test_une_trame_sortante_trop_courte_est_refusee():
+    with pytest.raises(ValueError):
+        decoder_audio_sortant(bytes([0x02, 0x00, 0x00]))
+
+
+def test_le_mauvais_octet_de_type_est_refuse_a_taille_egale():
+    trame = bytes([0x02]) + b"\x00" * TAILLE_BLOC_OCTETS
+    with pytest.raises(ValueError):
+        decoder_audio_entrant(trame)
