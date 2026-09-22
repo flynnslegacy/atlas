@@ -30,6 +30,9 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# La spec et le plan sont des documents approuvés : leurs blocs de code sont
+# illustratifs, un formateur n'a pas à les réécrire (ruling R31).
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
