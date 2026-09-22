@@ -92,7 +92,7 @@ connaissance de cause.
 | D3 | Architecture en trois étages (M5 audio / néo cerveau / Unraid GPU) | Seule combinaison qui donne à la fois le 24/7 et un cerveau ayant accès aux fichiers de travail. |
 | D4 | Client audio natif sur le M5, pas le navigateur | L'interruption en pleine phrase impose un micro ouvert pendant la lecture et une annulation d'écho. Le Web Speech API ne le permet pas. |
 | D5 | STT local (faster-whisper) sur le GPU Unraid | Le français est bon, la latence maîtrisée, rien ne sort du réseau. |
-| D6 | TTS local Qwen3-TTS, repli Piper/Kokoro | Choix de David. Le repli est nécessaire car le support français et la latence restent à valider (voir §12). |
+| D6 | TTS local Qwen3-TTS par clonage d'une voix conçue une fois ; repli Piper | Choix de David, confirmé par le spike S1 le 22/09/2026 (écoute à l'aveugle puis clonage). Verdict : `docs/superpowers/spikes/2026-09-22-s1-tts-francais.md`. |
 | D7 | Wake word « Hey Atlas » entraîné sur mesure | openWakeWord permet l'entraînement d'un modèle custom sur le GPU. Le nom du projet prime sur la facilité. |
 | D8 | Mémoire en fichiers Markdown versionnés, index vectoriel par-dessus | Relisible, corrigeable et versionnable à la main. Claude Code lit nativement les fichiers. La mémoire ne devient jamais une boîte noire. |
 | D9 | Permissions graduées N1/N2/N3, portées par le code | Un modèle de langage ne s'auto-autorise jamais. Le niveau est une propriété de l'outil, pas une décision du LLM. |
@@ -216,7 +216,7 @@ sont partagés avec ComfyUI. Le comportement redevient « toujours chargé » av
 
 ### 6.4 `atlas-tts` (Unraid, Docker)
 
-Qwen3-TTS, avec Piper FR ou Kokoro en repli configurable.
+Qwen3-TTS (modèle `Base` 1.7B), qui clone une voix de référence conçue une fois. Piper FR reste le repli configurable.
 
 ```
 POST /synthesize    body: {"text": str, "voice": str}
@@ -225,6 +225,12 @@ POST /synthesize    body: {"text": str, "voice": str}
 
 Le streaming par morceaux est une exigence, pas un confort : c'est ce qui permet de
 commencer à parler avant que la phrase entière soit synthétisée.
+
+**Exception approuvée par David le 22/09/2026 (spike S1).** Qwen3-TTS ne rend l'audio
+qu'une fois le morceau entier généré. Atlas l'accepte : environ une seconde de plus avant
+le premier mot, en échange d'une voix nettement plus naturelle. Le Core découpe les
+réponses en morceaux courts pour tenir ce délai, et le banc de mesure le suit. Piper, en
+repli, streame.
 
 ### 6.5 `atlas-web` (servi par le Core)
 
@@ -412,7 +418,7 @@ avant toute ligne de code structurant, et chacune a un repli déjà identifié.
 
 | # | Question | Repli si la réponse est non |
 |---|---|---|
-| S1 | Qwen3-TTS tient-il en français sur le 4070 Ti ? Qualité de voix, latence du premier morceau, VRAM en cohabitation avec ComfyUI. | Piper FR ou Kokoro. L'interface `/synthesize` est identique, donc le repli ne coûte qu'un changement de conteneur. |
+| S1 | Qwen3-TTS tient-il en français sur le 4070 Ti ? Qualité de voix, latence du premier morceau, VRAM en cohabitation avec ComfyUI. **Tranché le 22/09/2026 : oui, par clonage, avec une exception sur le streaming. Voir le verdict.** | Piper FR ou Kokoro. L'interface `/synthesize` est identique, donc le repli ne coûte qu'un changement de conteneur. |
 | S2 | L'AEC d'Apple (Voice Processing, via un binaire Swift) supprime-t-il assez d'écho pour que le barge-in soit utilisable sur enceintes ? | Casque : l'AEC devient inutile, le barge-in reste fonctionnel, le confort baisse. |
 | S3 | Un skill Hermes peut-il appeler un endpoint HTTP externe et rendre la réponse dans Telegram ? | Application web installée sur l'écran d'accueil de l'iPhone, comme envisagé initialement. |
 
