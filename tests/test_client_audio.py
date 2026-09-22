@@ -18,12 +18,15 @@ class FauxTransport:
     def __init__(self) -> None:
         self.json: list = []
         self.binaire: list[bytes] = []
+        self.flux: list = []  # messages et blocs, dans l'ordre d'envoi
 
     async def envoyer_json(self, msg) -> None:
         self.json.append(msg)
+        self.flux.append(msg.type)
 
     async def envoyer_binaire(self, trame: bytes) -> None:
         self.binaire.append(trame)
+        self.flux.append(decoder_audio_entrant(trame))
 
     def types(self) -> list[str]:
         return [m.type for m in self.json]
@@ -247,6 +250,52 @@ async def test_une_nouvelle_phrase_du_meme_enonce_ne_remet_pas_le_bargein_a_zero
     await c.boucle_capture()  # le second bloc atteint le seuil
 
     assert any(isinstance(m, Interruption) for m in t.json)
+
+
+def _bloc(n: int) -> bytes:
+    return bytes([n]) * 640
+
+
+async def test_la_parole_qui_declenche_le_bargein_part_vers_le_core():
+    # Seuil de barge-in : deux blocs. « Non » tient dans les blocs 3 et 4.
+    blocs = [_bloc(n) for n in range(1, 6)]
+    t, p = FauxTransport(), FauxPeripherique(blocs)
+    c = _client(t, p, parole=[False, False, True, True, True], reveil_au=None)
+    await _jouer(c, id_enonce=1, blocs=1)
+
+    await c.boucle_capture()
+
+    # D'abord l'interruption, puis le pré-roulement, puis la suite de la capture.
+    assert t.flux == ["interruption", *blocs]
+
+
+async def test_le_mot_de_reveil_ne_part_pas_vers_le_core():
+    t, p = FauxTransport(), FauxPeripherique([_bloc(n) for n in range(1, 4)])
+    c = _client(t, p, parole=[True] * 3, reveil_au=0)
+
+    await c.boucle_capture()
+
+    assert t.flux == ["reveil", _bloc(2), _bloc(3)]
+
+
+async def test_une_capture_sans_parole_se_clot_au_bout_de_cinq_secondes():
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * (1 + 250 + 10))
+    c = _client(t, p, parole=[], reveil_au=0)  # un faux réveil, puis personne ne parle
+
+    await c.boucle_capture()
+
+    assert t.types() == ["reveil", "fin_enonce"]
+    assert len(t.binaire) == 250, "cinq secondes de blocs, puis le micro se ferme"
+
+
+async def test_une_capture_continue_se_clot_au_bout_de_trente_secondes():
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * (1 + 1500 + 10))
+    c = _client(t, p, parole=[True] * 1600, reveil_au=0)  # la pièce ne se tait jamais
+
+    await c.boucle_capture()
+
+    assert t.types() == ["reveil", "fin_enonce"]
+    assert len(t.binaire) == 1500, "trente secondes de blocs, puis le micro se ferme"
 
 
 def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):

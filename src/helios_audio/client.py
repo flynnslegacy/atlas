@@ -13,6 +13,7 @@ import contextlib
 import logging
 import os
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -39,6 +40,15 @@ URL_CORE = os.environ.get("HELIOS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
 
 DUREE_BLOC_S = DUREE_BLOC_MS / 1000  # 0,020 s joués par trame
 MARGE_SORTIE_S = 0.15  # latence de sortie du haut-parleur, à régler au banc
+
+# Garde-fous de la capture : sans eux, un faux réveil ou un « Stop ! » isolé
+# laisserait le micro ouvert vers le Core indéfiniment.
+DELAI_SANS_PAROLE_S = 5.0
+DUREE_MAX_ENONCE_S = 30.0
+# Le temps de capture se compte en blocs, pas à l'horloge murale.
+_BLOCS_PAR_S = 1000 // DUREE_BLOC_MS
+_BLOCS_SANS_PAROLE = round(DELAI_SANS_PAROLE_S * _BLOCS_PAR_S)
+_BLOCS_MAX_ENONCE = round(DUREE_MAX_ENONCE_S * _BLOCS_PAR_S)
 
 
 @dataclass(frozen=True)
@@ -90,6 +100,13 @@ class ClientAudio:
         # Échéance, sur notre propre horloge, de la fin de l'audio déjà confié au
         # haut-parleur. Le Core finit d'ENVOYER bien avant que le son finisse de jouer.
         self._fin_lecture = 0.0
+        # Derniers blocs entendus pendant la surveillance du barge-in, avec leur
+        # verdict de voix : la parole qui déclenche l'interruption (« Non, attends… »)
+        # doit partir vers le Core, sinon Whisper perd le premier mot.
+        seuil_blocs = self._bargein._blocs_parole_min  # seuil de l'endpointeur de barge-in
+        self._pre_roulement: deque[tuple[bytes, bool]] = deque(maxlen=seuil_blocs + 10)
+        self._blocs_captures = 0
+        self._parole_vue = False
 
     def _helios_parle_encore(self) -> bool:
         # Une échéance expire d'elle-même : le micro ne peut jamais rester sourd.
@@ -109,32 +126,66 @@ class ClientAudio:
             return
 
         if not self._capture:
+            # Pas de pré-roulement ici : envoyer « Hey Helios » à Whisper
+            # polluerait la transcription.
             if self._reveilleur.examiner(bloc):
-                self._capture = True
-                self._endpointeur.reinitialiser()
+                self._ouvrir_capture()
                 await self._transport.envoyer_json(Reveil(confiance=1.0, horodatage=time.time()))
             return
 
+        await self._capturer(bloc, self._detecteur.parle(bloc))
+
+    def _ouvrir_capture(self) -> None:
+        self._capture = True
+        self._endpointeur.reinitialiser()
+        self._blocs_captures = 0
+        self._parole_vue = False
+
+    async def _capturer(self, bloc: bytes, parle: bool) -> None:
+        """Envoie un bloc capturé au Core et décide si l'énoncé est terminé."""
         await self._transport.envoyer_binaire(encoder_audio_entrant(bloc))
-        if self._endpointeur.ajouter(self._detecteur.parle(bloc)) == "fin":
-            self._capture = False
-            await self._transport.envoyer_json(FinEnonce(duree_ms=0))
+        self._blocs_captures += 1
+        decision = self._endpointeur.ajouter(parle)
+        if decision == "debut":
+            self._parole_vue = True
+
+        if decision == "fin":
+            await self._clore_capture()
+        elif self._blocs_captures >= _BLOCS_MAX_ENONCE:
+            _journal.info("capture close : durée maximale d'un énoncé atteinte")
+            await self._clore_capture()
+        elif not self._parole_vue and self._blocs_captures >= _BLOCS_SANS_PAROLE:
+            _journal.info("capture close : aucune parole entendue")
+            await self._clore_capture()
+
+    async def _clore_capture(self) -> None:
+        self._capture = False
+        await self._transport.envoyer_json(FinEnonce(duree_ms=0))
 
     async def _surveiller_bargein(self, bloc: bytes) -> None:
-        if self._bargein.ajouter(self._detecteur.parle(bloc)) != "debut":
+        parle = self._detecteur.parle(bloc)
+        self._pre_roulement.append((bloc, parle))
+        if self._bargein.ajouter(parle) != "debut":
             return
         _journal.info("interruption détectée")
+        pre_roulement = list(self._pre_roulement)
         self._couper()
         await self._peripherique.vider()
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
-        self._capture = True
-        self._endpointeur.reinitialiser()
+        self._ouvrir_capture()
+        # Le pré-roulement est capturé comme le reste : envoyé, et compté par
+        # l'endpointeur, qui sait ainsi que la parole a déjà commencé.
+        for bloc_passe, parle_passe in pre_roulement:
+            if not self._capture:
+                break
+            await self._capturer(bloc_passe, parle_passe)
 
     def _couper(self) -> None:
         """Marque l'énoncé courant comme coupé ; son audio vient d'être vidé."""
         self._id_coupe = max(self._id_coupe, self._id_courant)
         self._id_courant = 0
         self._fin_lecture = 0.0
+        self._pre_roulement.clear()
 
     # --- Core vers haut-parleur -------------------------------------------
 
@@ -147,6 +198,7 @@ class ClientAudio:
                 # phrase effacerait la parole que l'utilisateur a déjà accumulée.
                 self._id_courant = msg.id_enonce
                 self._bargein.reinitialiser()
+                self._pre_roulement.clear()
         elif isinstance(msg, StopAudio):
             self._couper()
             await self._peripherique.vider()
