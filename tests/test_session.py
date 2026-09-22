@@ -206,6 +206,23 @@ async def test_une_interruption_pendant_la_reflexion_mene_au_repos():
     await s.fermer()
 
 
+async def test_une_interruption_au_repos_repasse_en_ecoute():
+    c = Collecteur()
+    s = _session(c)
+    # Aucun tour en cours : la session est déjà au repos quand l'interruption arrive
+    # (le cas de quelqu'un qui coupe Helios juste à la fin de sa phrase).
+    await s.sur_message(Interruption(horodatage=1.0))
+
+    assert [m for m in c.json if isinstance(m, Etat)][-1].valeur == "ecoute"
+
+    # L'audio suivant doit maintenant être mis en tampon.
+    await s.sur_audio(b"\x00" * 640)
+    await s.sur_message(FinEnonce(duree_ms=20))
+    await asyncio.sleep(0.01)
+    assert [d.texte for d in c.json if isinstance(d, Dire)]
+    await s.fermer()
+
+
 async def test_un_echec_de_transcription_produit_une_erreur_et_revient_au_repos():
     c = Collecteur()
     s = Session(

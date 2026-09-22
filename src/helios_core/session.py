@@ -98,6 +98,14 @@ class Session:
         elif self._machine.valeur == "reflexion":
             self._machine.aller_vers("repos")
             await self._etat("repos")
+        elif self._machine.valeur == "repos":
+            # Le tour s'est déjà terminé quand l'interruption arrive (on a coupé
+            # juste à la fin de la phrase) : sans cette branche, le Core reste au
+            # repos sans écouter, alors que le client, lui, s'est déjà remis à
+            # capturer et à envoyer de l'audio.
+            self._machine.aller_vers("ecoute")
+            self._tampon.clear()
+            await self._etat("ecoute")
 
     async def _annuler_tache(self) -> None:
         if self._tache and not self._tache.done():

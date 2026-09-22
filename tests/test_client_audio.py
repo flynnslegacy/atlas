@@ -140,3 +140,25 @@ async def test_parler_pendant_la_parole_declenche_l_interruption():
 
     assert any(isinstance(m, Interruption) for m in t.json)
     assert p.vidages >= 1
+
+
+async def test_apres_le_bargein_une_trame_deja_en_vol_n_est_pas_jouee():
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
+    c = _client(t, p, parole=[True] * 6, reveil_au=None)
+    await c.sur_message(Dire(id_enonce=1, rang=1, texte="Un."))
+    await c.boucle_capture()  # détecte le barge-in et coupe l'énoncé 1
+
+    # Trame de la réponse coupée, remise après le vidage : elle ne doit pas sonner.
+    await c.sur_trame(encoder_audio_sortant(1, BLOC))
+    assert p.joues == []
+
+
+async def test_apres_un_stop_audio_une_trame_deja_en_vol_n_est_pas_jouee():
+    t, p = FauxTransport(), FauxPeripherique([])
+    c = _client(t, p, parole=[])
+    await c.sur_message(Dire(id_enonce=1, rang=1, texte="Un."))
+    await c.sur_message(StopAudio(id_enonce=1))
+
+    # Trame de la réponse coupée, remise après le vidage : elle ne doit pas sonner.
+    await c.sur_trame(encoder_audio_sortant(1, BLOC))
+    assert p.joues == []

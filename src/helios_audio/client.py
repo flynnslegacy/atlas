@@ -85,6 +85,7 @@ class ClientAudio:
             return
         _journal.info("interruption détectée")
         self._helios_parle = False
+        self._id_courant = 0  # écarte les trames déjà en vol de la réponse coupée
         await self._peripherique.vider()
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
         self._capture = True
@@ -99,6 +100,7 @@ class ClientAudio:
             self._bargein.reinitialiser()
         elif isinstance(msg, StopAudio):
             self._helios_parle = False
+            self._id_courant = 0  # écarte les trames déjà en vol de la réponse coupée
             await self._peripherique.vider()
         elif isinstance(msg, Etat):
             if msg.valeur == "parole":
