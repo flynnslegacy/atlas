@@ -7,5 +7,5 @@ RUN pip install --no-cache-dir torch qwen-tts soundfile numpy soxr
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /spike
-COPY spike.py .
+COPY spike.py spike_s1b.py ./
 CMD ["python", "spike.py"]
