@@ -13,6 +13,7 @@ import contextlib
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
 from helios_core.protocole import (
@@ -34,6 +35,24 @@ from .vad import DetecteurVoix, Endpointeur
 _journal = logging.getLogger(__name__)
 
 URL_CORE = os.environ.get("HELIOS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
+
+
+@dataclass(frozen=True)
+class Reglages:
+    """Les trois seuils que le banc de mesure (tâche 14) sert à choisir."""
+
+    seuil_reveil: float
+    silence_ms: int
+    bargein_ms: int
+
+
+def lire_reglages() -> Reglages:
+    """Lit les réglages dans l'environnement, sinon les valeurs par défaut actuelles."""
+    return Reglages(
+        seuil_reveil=float(os.environ.get("HELIOS_REVEIL_SEUIL", "0.5")),
+        silence_ms=int(os.environ.get("HELIOS_SILENCE_MS", "400")),
+        bargein_ms=int(os.environ.get("HELIOS_BARGEIN_MS", "300")),
+    )
 
 
 class Transport(Protocol):
@@ -138,9 +157,10 @@ async def principal() -> None:
     adaptateur = TypeAdapter(MessageCore)
     logging.basicConfig(level=logging.INFO)
     peripherique = await ouvrir_peripherique()
+    reglages = lire_reglages()
 
     if os.environ.get("HELIOS_REVEILLEUR", "touche") == "motcle":
-        reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord())
+        reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord(), seuil=reglages.seuil_reveil)
     else:
         reveilleur = ReveilleurTouche()
 
@@ -150,8 +170,9 @@ async def principal() -> None:
             transport=transport,
             peripherique=peripherique,
             detecteur=DetecteurVoix(),
-            endpointeur=Endpointeur(),
+            endpointeur=Endpointeur(silence_ms=reglages.silence_ms),
             reveilleur=reveilleur,
+            bargein=Endpointeur(parole_min_ms=reglages.bargein_ms),
         )
         await transport.envoyer_json(Bonjour(client="m5", capacites=["aec", "vad"]))
         capture = asyncio.create_task(client.boucle_capture())

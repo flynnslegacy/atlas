@@ -101,14 +101,22 @@ Tant que `enregistrements/` est vide (ou absent) et que `attendus.json` vaut
 actuel du dépôt. Aucune connexion réseau n'est ouverte vers le service de
 transcription tant que `attendus.json` ne contient aucune entrée.
 
-**Un détail à connaître sur `endpointage` :** si la fin de phrase n'est
-jamais détectée sur un enregistrement (silence de fin trop bref, ou fichier
-sans réelle fin de parole), ce fichier est silencieusement absent de la
-médiane — `retard_median_ms` ne compte que les phrases où une fin a été
-trouvée. Si `retard_median_ms` semble bon mais que le nombre de phrases
-utilisées est en réalité plus petit que 20, regarde le code (`mesurer_endpointage`
-dans `bench/bench.py`) pour vérifier combien de fichiers ont réellement
-produit une fin — le JSON actuel ne reporte pas ce compte séparément.
+**Ne crois jamais `retard_median_ms` sans regarder à côté (ruling R29).**
+Chaque entrée d'`endpointage` porte aussi `fichiers_mesures` et
+`fichiers_total`. Si la fin de phrase n'est jamais détectée sur un
+enregistrement (silence de fin trop bref, ou fichier sans réelle fin de
+parole), ce fichier ne contribue rien à `retard_median_ms` —
+`fichiers_mesures` compte uniquement les phrases où une fin a été trouvée,
+`fichiers_total` compte tout ce qu'il y avait dans `phrases/`. Le piège :
+ce sont justement les phrases les plus difficiles — celles qui auraient
+donné le plus grand retard — qui risquent de ne jamais atteindre la fin ;
+les exclure tire la médiane vers le bas et fait paraître un réglage
+meilleur qu'il ne l'est. **Compare toujours `fichiers_mesures` à
+`fichiers_total` avant de retenir un `retard_median_ms` : s'ils diffèrent,
+le chiffre est optimiste et il faut comprendre pourquoi (écouter les
+fichiers manquants) avant de figer un réglage dessus.** `transcription`
+porte les deux mêmes champs par cohérence, même si elle n'exclut rien
+aujourd'hui — vérifie quand même qu'ils sont égaux.
 
 ## Résultats et réglages retenus
 
@@ -123,15 +131,24 @@ Critères d'acceptation (à appliquer sur les résultats une fois obtenus) :
 - **Durée de silence de fin de phrase** : retenir une valeur dont le
   **retard médian reste sous 400 ms** sur `phrases/`.
 
-Une fois ces valeurs choisies, elles devront être reportées :
+Le client audio (`src/helios_audio/client.py`) lit ces trois réglages dans
+l'environnement au démarrage (`lire_reglages()`), avec pour défauts les
+valeurs actuelles — rien ne change tant que tu ne touches à rien. Une fois
+les valeurs choisies grâce au banc, édite `.env.example` (et ton `.env`) :
 
-- dans `.env.example`, sous forme de nouvelles variables (aucune n'existe
-  encore pour ces deux réglages : à ce jour, `ReveilleurMotCle` prend
-  `seuil=0.5` par défaut et `src/helios_audio/client.py` construit
-  l'`Endpointeur` avec `silence_ms=400` codé en dur — voir l'appel à
-  `ReveilleurMotCle(PredicteurOpenWakeWord())` et à
-  `Endpointeur(silence_ms=400, parole_min_ms=300)` dans ce fichier),
-- ici, avec la date de la mesure et les chiffres obtenus, par exemple :
+- `HELIOS_REVEIL_SEUIL` (défaut `0.5`) — le seuil du mot de réveil. Prends la
+  plus petite valeur testée par `make bench` qui donne, dans `reveil`, une
+  `detection` > 0.95 avec un `faux_par_heure` < 1.
+- `HELIOS_SILENCE_MS` (défaut `400`) — la durée de silence qui marque la fin
+  d'une phrase dite à Helios. Prends la valeur testée par `make bench` dont
+  le `retard_median_ms` d'`endpointage` reste sous 400 ms (une fois vérifié
+  que `fichiers_mesures == fichiers_total`, voir plus haut).
+- `HELIOS_BARGEIN_MS` (défaut `300`) — la durée de parole minimale pour
+  couper Helios quand il parle (barge-in). Le banc ne le mesure pas
+  directement ; laisse la valeur par défaut sauf si l'usage réel montre
+  qu'elle coupe trop vite ou trop lentement.
+
+Reporte aussi la date et les chiffres obtenus ici, par exemple :
 
 ```
 Date : AAAA-MM-JJ

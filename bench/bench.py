@@ -86,8 +86,9 @@ def mesurer_reveil(seuil: float) -> dict:
 
 def mesurer_endpointage(silence_ms: int) -> dict:
     detecteur = DetecteurVoix()
+    fichiers = sorted(PHRASES.glob("*.wav"))
     retards = []
-    for chemin in sorted(PHRASES.glob("*.wav")):
+    for chemin in fichiers:
         e = Endpointeur(silence_ms=silence_ms)
         for n, bloc in enumerate(_blocs(chemin)):
             if e.ajouter(detecteur.parle(bloc)) == "fin":
@@ -96,6 +97,8 @@ def mesurer_endpointage(silence_ms: int) -> dict:
     return {
         "silence_ms": silence_ms,
         "retard_median_ms": sorted(retards)[len(retards) // 2] if retards else 0,
+        "fichiers_mesures": len(retards),
+        "fichiers_total": len(fichiers),
     }
 
 
@@ -115,6 +118,8 @@ async def mesurer_transcription() -> dict:
     return {
         "wer_moyen": sum(taux) / len(taux) if taux else 0.0,
         "latence_mediane_ms": sorted(latences)[len(latences) // 2] if latences else 0,
+        "fichiers_mesures": len(taux),
+        "fichiers_total": len(attendus),
     }
 
 

@@ -1,6 +1,6 @@
 import asyncio
 
-from helios_audio.client import ClientAudio
+from helios_audio.client import ClientAudio, Reglages, lire_reglages
 from helios_core.protocole import (
     Dire,
     Etat,
@@ -162,3 +162,19 @@ async def test_apres_un_stop_audio_une_trame_deja_en_vol_n_est_pas_jouee():
     # Trame de la réponse coupée, remise après le vidage : elle ne doit pas sonner.
     await c.sur_trame(encoder_audio_sortant(1, BLOC))
     assert p.joues == []
+
+
+def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):
+    monkeypatch.delenv("HELIOS_REVEIL_SEUIL", raising=False)
+    monkeypatch.delenv("HELIOS_SILENCE_MS", raising=False)
+    monkeypatch.delenv("HELIOS_BARGEIN_MS", raising=False)
+
+    assert lire_reglages() == Reglages(seuil_reveil=0.5, silence_ms=400, bargein_ms=300)
+
+
+def test_lire_reglages_prend_les_variables_d_environnement(monkeypatch):
+    monkeypatch.setenv("HELIOS_REVEIL_SEUIL", "0.7")
+    monkeypatch.setenv("HELIOS_SILENCE_MS", "600")
+    monkeypatch.setenv("HELIOS_BARGEIN_MS", "250")
+
+    assert lire_reglages() == Reglages(seuil_reveil=0.7, silence_ms=600, bargein_ms=250)
