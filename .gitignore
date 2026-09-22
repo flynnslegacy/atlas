@@ -10,3 +10,4 @@ dist/
 models/
 bench/audio/
 src/helios_aec/.build/
+bench/enregistrements/
