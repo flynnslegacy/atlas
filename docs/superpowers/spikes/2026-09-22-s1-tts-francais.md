@@ -3,6 +3,7 @@
 **Date :** 22 septembre 2026
 **Statut :** tranché par David
 **Code du spike (jetable) :** branche `spike-s1-tts`, dossier `spikes/s1-tts/`
+**Voix retenue :** `services/tts/voix/atlas_reference.wav` et son texte exact `atlas_reference.txt`
 
 ## La question
 
@@ -24,7 +25,7 @@ Trois candidats, cinq phrases pièges (chiffres, guillemets, chemin de fichier, 
 | Mémoire GPU au pic | 4,58 Go | 4,4 Go | aucune (processeur) |
 | Rend l'audio par morceaux | non | non | oui |
 
-**Défauts entendus sur la voix décrite :** un écho, des fins qui partent en silence puis en sons parasites (une phrase de 4,5 s ressortait en 12,6 s), et une voix réinventée à chaque appel.
+**Défauts entendus sur la voix décrite :** un écho, des fins qui partent en silence puis en sons parasites, et une voix réinventée à chaque appel.
 
 ## Tour 2 — concevoir la voix une fois, puis la cloner
 
@@ -32,36 +33,51 @@ C'est le mode d'emploi documenté par Qwen :
 1. **Concevoir.** Quatre prises d'une phrase de référence, générées avec VoiceDesign. La description ajoutait : « enregistrement de studio, voix sèche et proche du micro, sans écho, sans réverbération ni bruit de fond ». David a retenu la **prise n°1**.
 2. **Cloner.** L'empreinte de la voix est calculée une seule fois avec `create_voice_clone_prompt` (1,0 s). Chaque phrase est ensuite générée par `generate_voice_clone`, avec le modèle `Qwen/Qwen3-TTS-12Hz-1.7B-Base`.
 
-**Verdict de David :** « ça reste bien la même personne », « il n'y a pas d'écho », « les fins sont propres ».
+### Le bug trouvé en route, et sa cause
 
-| Phrase | Calcul | Audio généré | Audio gardé | Coupe du garde-fou |
-|---|---|---|---|---|
-| 1 | 2,92 s | 5,36 s | 2,30 s | silence puis parasites retirés |
-| 2 | 3,60 s | 7,20 s | 7,20 s | aucune |
-| 3 | 2,88 s | 5,76 s | 5,76 s | aucune |
-| 4 | 2,92 s | 5,84 s | 5,84 s | aucune |
-| 5 | 3,21 s | 6,32 s | 6,32 s | aucune |
+La première série de clonage semblait réussie : même voix, pas d'écho, fins propres. En la réécoutant, David a entendu la phrase 1 dire seulement « calmement et clairement ».
 
-Mémoire GPU au pic : **4,69 Go**.
+Les extraits ont été transcrits par le service `atlas-stt`, et la cause est apparue :
+- Le garde-fou de fin du spike, qui coupait au premier long silence, avait **retiré « calmement et clairement » de la prise de référence** : il avait confondu la pause à la virgule avec la fin de la phrase.
+- Le clonage recevait pourtant le texte complet. Le modèle croyait donc la référence inachevée, et **commençait chaque phrase en la terminant** : les cinq phrases débutaient par « calmement et clairement ».
+- Sur la phrase 1, le garde-fou avait ensuite gardé ce préfixe et supprimé la vraie phrase.
+
+**Le correctif :** donner au clonage le texte qui correspond **exactement** à l'audio de la référence. C'était la seule variable modifiée. Après correction, le préfixe a disparu des cinq phrases.
+
+### Résultats après correction
+
+Transcriptions de `atlas-stt` sur l'audio **brut**, avant tout garde-fou :
+
+| Phrase | Calcul | Audio | Transcription |
+|---|---|---|---|
+| 1 | 1,71 s | 2,88 s | « Bonjour David, il est 14h32. » |
+| 2 | 3,63 s | 7,28 s | « Le workflow « Veille concurrence » a échoué à 3 heures du matin. Erreur d'authentification sur l'API. » |
+| 3 | 2,09 s | 4,16 s | « J'ai noté ça dans projet Atlas MD. Tu veux que je te le relise ? » |
+| 4 | 2,36 s | 4,72 s | « Attention, cette action va envoyer un mail à Paul Durand. Je confirme. » |
+| 5 | 2,17 s | 4,32 s | « D'accord. Alors reprenons. Tu disais que l'offre devait tenir en une page. » |
+
+Les cinq phrases sont complètes et ne contiennent rien de plus. Mémoire GPU au pic : **4,69 Go**.
+
+**Le garde-fou de fin s'est révélé nuisible.** Appliqué à ces mêmes phrases, il a encore coupé « Erreur d'authentification sur l'API » (phrase 2) et « Je confirme » (phrase 4), en prenant les pauses naturelles pour la fin de la phrase. Au total, il a amputé du contenu réel 3 fois sur 11 : la référence, la phrase 2 et la phrase 4. Les fins parasites qu'il devait corriger venaient surtout du préfixe fantôme, et elles n'apparaissent pas dans le clonage corrigé.
 
 ## Décision
 
-- **Moteur :** Qwen3-TTS, modèle `Base` 1.7B, par clonage de la prise de référence n°1. Pour recréer la voix, il faut le fichier audio **et** le texte exact prononcé dans la prise :
-  > Bonjour, je m'appelle Atlas. Je suis là pour t'aider à organiser tes journées, à suivre tes projets et à répondre à tes questions, calmement et clairement.
+- **Moteur :** Qwen3-TTS, modèle `Base` 1.7B, par clonage de la prise de référence n°1.
+- **La voix d'Atlas est une paire indissociable :** `atlas_reference.wav` (7,1 s, 24 kHz, mono) et `atlas_reference.txt`, son texte exact :
+  > Bonjour, je m'appelle Atlas. Je suis là pour t'aider à organiser tes journées, à suivre tes projets et à répondre à tes questions.
 - **Exception à la spec, approuvée par David :** Qwen3 ne rend l'audio qu'une fois le morceau entier généré, alors que la spec §6.4 exigeait un flux par morceaux. Atlas accepte environ une seconde de plus avant le premier mot, en échange d'une voix nettement plus naturelle.
 - **Repli :** Piper reste disponible derrière la même interface `/synthesize`. Depuis le correctif du 22/09, la fréquence de chaque voix est lue dans sa configuration.
 
 ## Conséquences pour l'intégration
 
-1. **La prise de référence est irremplaçable.** La génération n'est pas déterministe : une référence perdue ne se recrée pas à l'identique. Il faut la sauvegarder, puis la monter dans le service.
+1. **Garder la paire audio-texte intacte.** Le texte doit correspondre exactement à l'audio, sinon chaque phrase commence par le texte manquant. Et la génération n'étant pas déterministe, une référence perdue ne se recrée pas : c'est pour ça qu'elle est versionnée.
 2. **Charger le modèle et calculer l'empreinte une seule fois, au démarrage**, pas à chaque requête.
-3. **Arrêter la génération tôt, pas seulement couper après.** La phrase 1 a coûté 2,92 s de calcul pour 2,30 s d'audio utile : le modèle continuait à produire du silence et des parasites. Couper après coup protège l'oreille, mais pas le délai. Il faut un plafond `max_new_tokens` proportionnel à la longueur du texte. Le nombre de jetons par seconde d'audio reste à mesurer : la documentation ne le donne pas.
-4. **Garder le garde-fou de fin** (`couper_fin`) comme filet de sécurité.
-5. **Découper les réponses en morceaux courts côté Core**, par exemple aux virgules, pour raccourcir le premier morceau et donc le délai.
-6. **Mémoire GPU :** environ 4,7 Go pour Qwen, plus Whisper, soit environ 8 à 9 Go sur 12. ComfyUI doit être au repos tant que la RTX 3090 n'est pas installée. Le service `atlas-tts` passe sur GPU.
-7. **Débit :** le calcul prend environ la moitié de la durée de l'audio. Les phrases suivantes sont donc prêtes avant la fin de la précédente, et la voix s'enchaîne sans trou.
-8. **Débit de parole :** cette voix posée parle à environ 0,08 s par caractère, contre 0,07 dans le garde-fou du spike. Il faut recalibrer.
+3. **Pas de coupe sur les silences.** Seulement un plafond de durée très large, par exemple 2,5 fois la durée attendue, qui ne touche jamais une phrase normale et qui arrête une génération qui boucle. Le rapport entre jetons générés et secondes d'audio reste à mesurer pour régler `max_new_tokens`.
+4. **Découper les réponses en morceaux courts côté Core**, par exemple aux virgules, pour raccourcir le premier morceau. À traiter avec la refonte du découpeur de phrases prévue en phase 2.
+5. **Mémoire GPU :** environ 4,7 Go pour Qwen, plus Whisper, soit environ 8 à 9 Go sur 12. ComfyUI doit être au repos tant que la RTX 3090 n'est pas installée. Le service `atlas-tts` passe sur GPU.
+6. **Débit :** le calcul prend environ la moitié de la durée de l'audio. Les phrases suivantes sont donc prêtes avant la fin de la précédente, et la voix s'enchaîne sans trou.
+7. **Débit de parole :** environ 0,06 s par caractère. Une première version de ce verdict annonçait 0,08, à tort : la seconde en trop était le préfixe fantôme.
 
-## Point encore ouvert
+## Leçon de méthode
 
-La phrase 1, « Bonjour David, il est quatorze heures trente-deux. », a été raccourcie de 5,36 s à 2,30 s par le garde-fou. David juge la fin propre, mais il reste à confirmer que « trente-deux » est entendu en entier. Un garde-fou trop agressif amputerait la fin des phrases courtes.
+Le garde-fou devait protéger l'écoute. Il a d'abord créé le bug, puis l'a masqué, parce qu'il ne gardait que la version rognée. Désormais, **on garde toujours la version brute à côté de la version traitée**, et on vérifie le contenu par transcription plutôt qu'à l'oreille seule.
