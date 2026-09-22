@@ -107,15 +107,22 @@ def cloner(prise: int) -> None:
     CLONE.mkdir(parents=True, exist_ok=True)
     reference = REFERENCES / f"ref_{prise}.wav"
     audio_ref, sr_ref = sf.read(reference, dtype="float32")
+    # Le texte doit être EXACTEMENT ce que dit l'audio de référence. S'il en dit plus,
+    # le modèle croit la référence inachevée et commence chaque phrase par la fin du texte.
+    fichier_texte = reference.with_suffix(".txt")
+    texte_reference = TEXTE_REFERENCE
+    if fichier_texte.exists():
+        texte_reference = fichier_texte.read_text(encoding="utf-8").strip()
     torch.cuda.reset_peak_memory_stats()
     modele = charger_qwen("Qwen/Qwen3-TTS-12Hz-1.7B-Base")
 
     debut = time.monotonic()
     invite = modele.create_voice_clone_prompt(
-        ref_audio=(audio_ref, sr_ref), ref_text=TEXTE_REFERENCE, x_vector_only_mode=False
+        ref_audio=(audio_ref, sr_ref), ref_text=texte_reference, x_vector_only_mode=False
     )
     rapport: dict = {
         "reference": reference.name,
+        "texte_reference": texte_reference,
         "invite_calculee_en_s": round(time.monotonic() - debut, 2),
         "phrases": [],
     }
@@ -128,6 +135,13 @@ def cloner(prise: int) -> None:
         calcul = time.monotonic() - debut
         audio = np.asarray(wavs[0], dtype=np.float32)
         brute = len(audio) / sr
+        # Version brute gardée aussi : le garde-fou ne doit plus rien pouvoir masquer.
+        sf.write(
+            CLONE / f"phrase_{rang}_brut.wav",
+            ramener_a_atlas(audio, sr),
+            FREQUENCE_ATLAS,
+            subtype="PCM_16",
+        )
         audio, regle = couper_fin(audio, sr, attendu)
         sf.write(
             CLONE / f"phrase_{rang}.wav",
