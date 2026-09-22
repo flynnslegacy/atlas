@@ -1,0 +1,83 @@
+"""Détection de voix (Silero) et décision de fin de phrase.
+
+Le modèle et la décision sont séparés : le premier est une boîte noire qu'on
+ne teste pas, le second est de la logique pure qu'on teste exhaustivement.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Literal
+
+import numpy as np
+
+DUREE_BLOC_MS = 20
+_FENETRE_SILERO = 512  # échantillons attendus par le modèle v5 à 16 kHz
+
+CHEMIN_MODELE = os.environ.get("HELIOS_VAD_MODELE", "models/silero_vad.onnx")
+
+
+class DetecteurVoix:
+    """Enveloppe Silero. Accumule jusqu'à la fenêtre attendue par le modèle."""
+
+    def __init__(self, seuil: float = 0.5, chemin: str = CHEMIN_MODELE) -> None:
+        import onnxruntime
+
+        self.seuil = seuil
+        self._session = onnxruntime.InferenceSession(chemin, providers=["CPUExecutionProvider"])
+        self._etat = np.zeros((2, 1, 128), dtype=np.float32)
+        self._reste = np.zeros(0, dtype=np.float32)
+        self._derniere = 0.0
+
+    def probabilite(self, bloc: bytes) -> float:
+        echantillons = np.frombuffer(bloc, dtype="<i2").astype(np.float32) / 32768.0
+        self._reste = np.concatenate([self._reste, echantillons])
+        while self._reste.size >= _FENETRE_SILERO:
+            fenetre = self._reste[:_FENETRE_SILERO]
+            self._reste = self._reste[_FENETRE_SILERO:]
+            sortie, self._etat = self._session.run(
+                None,
+                {
+                    "input": fenetre.reshape(1, -1),
+                    "state": self._etat,
+                    "sr": np.array(16000, dtype=np.int64),
+                },
+            )
+            self._derniere = float(sortie[0][0])
+        return self._derniere
+
+    def parle(self, bloc: bytes) -> bool:
+        return self.probabilite(bloc) >= self.seuil
+
+
+class Endpointeur:
+    """Décide du début et de la fin d'un énoncé à partir d'un flux de booléens."""
+
+    def __init__(self, silence_ms: int = 400, parole_min_ms: int = 200) -> None:
+        self._blocs_silence = max(1, silence_ms // DUREE_BLOC_MS)
+        self._blocs_parole_min = max(1, parole_min_ms // DUREE_BLOC_MS)
+        self.reinitialiser()
+
+    def reinitialiser(self) -> None:
+        self._en_cours = False
+        self._parole = 0
+        self._silence = 0
+
+    def ajouter(self, parle: bool) -> Literal["rien", "debut", "fin"]:
+        if parle:
+            self._silence = 0
+            self._parole += 1
+            if not self._en_cours and self._parole >= self._blocs_parole_min:
+                self._en_cours = True
+                return "debut"
+            return "rien"
+
+        if not self._en_cours:
+            self._parole = 0
+            return "rien"
+
+        self._silence += 1
+        if self._silence >= self._blocs_silence:
+            self.reinitialiser()
+            return "fin"
+        return "rien"
