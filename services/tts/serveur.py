@@ -53,45 +53,60 @@ class MoteurPiper:
 
     def __init__(self, dossier_modeles: str = "/modeles") -> None:
         self._dossier = dossier_modeles
+        self._dernier_processus: subprocess.Popen | None = None
+
+    def _commande(self, modele: str) -> list[str]:
+        return ["piper", "--model", modele, "--output_raw"]
 
     def synthetiser(self, texte: str, voix: str) -> Iterator[bytes]:
         modele = f"{self._dossier}/{voix or VOIX_DEFAUT}.onnx"
         proc = subprocess.Popen(
-            ["piper", "--model", modele, "--output_raw"],
+            self._commande(modele),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
+        self._dernier_processus = proc
         assert proc.stdin and proc.stdout
         proc.stdin.write(texte.encode("utf-8"))
         proc.stdin.close()
 
-        # Rééchantillonneur à état : garde son filtre d'une lecture à l'autre pour
-        # éviter les discontinuités aux frontières de bloc (soxr.resample le
-        # réinitialiserait à chaque appel).
-        rechantillonneur = soxr.ResampleStream(22050, FREQUENCE_SORTIE, 1, dtype="float32")
+        try:
+            # Rééchantillonneur à état : garde son filtre d'une lecture à l'autre pour
+            # éviter les discontinuités aux frontières de bloc (soxr.resample le
+            # réinitialiserait à chaque appel).
+            rechantillonneur = soxr.ResampleStream(22050, FREQUENCE_SORTIE, 1, dtype="float32")
 
-        orphelin = b""  # octet isolé d'un échantillon coupé par une lecture
-        tampon = b""  # PCM rééchantillonné pas encore découpé en blocs
-        while True:
-            brut = proc.stdout.read(4096)
-            if not brut:
-                break
-            donnees, orphelin = aligner_sur_echantillons(orphelin + brut)
-            if not donnees:
-                continue
-            echantillons = np.frombuffer(donnees, dtype="<i2").astype(np.float32)
-            ramene = rechantillonneur.resample_chunk(echantillons)
-            tampon += np.clip(ramene, -32768, 32767).astype("<i2").tobytes()
+            orphelin = b""  # octet isolé d'un échantillon coupé par une lecture
+            tampon = b""  # PCM rééchantillonné pas encore découpé en blocs
+            while True:
+                brut = proc.stdout.read(4096)
+                if not brut:
+                    break
+                donnees, orphelin = aligner_sur_echantillons(orphelin + brut)
+                if not donnees:
+                    continue
+                echantillons = np.frombuffer(donnees, dtype="<i2").astype(np.float32)
+                ramene = rechantillonneur.resample_chunk(echantillons)
+                tampon += np.clip(ramene, -32768, 32767).astype("<i2").tobytes()
+                blocs, tampon = en_blocs(tampon)
+                yield from blocs
+            proc.wait()
+
+            dernier = rechantillonneur.resample_chunk(np.empty(0, dtype=np.float32), last=True)
+            tampon += np.clip(dernier, -32768, 32767).astype("<i2").tobytes()
             blocs, tampon = en_blocs(tampon)
             yield from blocs
-        proc.wait()
-
-        dernier = rechantillonneur.resample_chunk(np.empty(0, dtype=np.float32), last=True)
-        tampon += np.clip(dernier, -32768, 32767).astype("<i2").tobytes()
-        blocs, tampon = en_blocs(tampon)
-        yield from blocs
-        if tampon:
-            yield tampon + b"\x00" * (TAILLE_MORCEAU - len(tampon))
+            if tampon:
+                yield tampon + b"\x00" * (TAILLE_MORCEAU - len(tampon))
+        finally:
+            # Si le générateur est abandonné en cours de route (déconnexion HTTP,
+            # GeneratorExit), le sous-processus piper ne doit pas rester orphelin :
+            # Helios coupe des phrases en plein milieu en fonctionnement normal.
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.poll() is None:
+                proc.terminate()
+            proc.wait()
 
 
 _moteurs: dict[str, MoteurTTS] = {"piper": MoteurPiper()}

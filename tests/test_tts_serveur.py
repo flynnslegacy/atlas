@@ -1,8 +1,11 @@
+import sys
+
 import pytest
 from fastapi.testclient import TestClient
 
 from services.tts.serveur import (
     TAILLE_MORCEAU,
+    MoteurPiper,
     aligner_sur_echantillons,
     app,
     en_blocs,
@@ -61,3 +64,34 @@ def test_en_blocs_conserve_le_reste():
     blocs, reste = en_blocs(b"\x00" * (TAILLE_MORCEAU + 100))
     assert len(blocs) == 1 and len(blocs[0]) == TAILLE_MORCEAU
     assert reste == b"\x00" * 100
+
+
+class MoteurSansFin(MoteurPiper):
+    """Piper de test qui n'atteint jamais EOF, pour exercer l'abandon du générateur."""
+
+    def _commande(self, modele: str) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            "import sys\nwhile True:\n sys.stdout.buffer.write(b'\\x00' * 1024)\n"
+            " sys.stdout.flush()",
+        ]
+
+
+def test_abandonner_le_generateur_termine_le_sous_processus():
+    moteur = MoteurSansFin()
+    generateur = moteur.synthetiser("peu importe", "fr")
+    next(generateur)
+    next(generateur)
+    proc = moteur._dernier_processus
+
+    generateur.close()
+
+    try:
+        proc.wait(timeout=5)
+    finally:
+        # Filet de sécurité pour ne pas laisser le processus tourner si le test échoue.
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+    assert proc.poll() is not None
