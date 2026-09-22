@@ -143,6 +143,17 @@ Copier le fichier vers le dépôt Helios:
 scp hey_helios.onnx david@[adresse_locale]:/Users/david/claude-code/Helios/models/hey_helios.onnx
 ```
 
+### 9. Télécharger les modèles de traits d'openWakeWord (sur le MacBook, une seule fois)
+
+openWakeWord 0.6 ne livre pas ses modèles de traits (melspectrogramme et plongements) : sans
+eux, `HELIOS_REVEILLEUR=motcle` échoue au démarrage même avec `hey_helios.onnx` en place. Depuis
+la racine du dépôt Helios, dans son environnement :
+
+```bash
+cd /Users/david/claude-code/Helios
+uv run python -c "import openwakeword.utils; openwakeword.utils.download_models()"
+```
+
 ---
 
 ## Vérification

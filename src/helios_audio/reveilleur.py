@@ -29,12 +29,28 @@ class Predicteur(_Protocol):
 
 class PredicteurOpenWakeWord:
     def __init__(self, chemin: str | None = None) -> None:
+        chemin = chemin or os.environ.get("HELIOS_MOT_REVEIL", "models/hey_helios.onnx")
+        if not os.path.isfile(chemin):
+            raise FileNotFoundError(
+                f"Modèle du mot de réveil introuvable : {chemin}. "
+                "Il s'entraîne en suivant scripts/entrainer_mot_reveil.md."
+            )
+
         import numpy as np
         import openwakeword
+        from onnxruntime.capi.onnxruntime_pybind11_state import NoSuchFile
 
         self._np = np
-        chemin = chemin or os.environ.get("HELIOS_MOT_REVEIL", "models/hey_helios.onnx")
-        self._modele = openwakeword.Model(wakeword_models=[chemin], inference_framework="onnx")
+        try:
+            self._modele = openwakeword.Model(wakeword_models=[chemin], inference_framework="onnx")
+        except NoSuchFile as e:
+            # Notre modèle existe (vérifié plus haut) : il manque donc ceux des traits
+            # (melspectrogramme, plongements), qu'openWakeWord 0.6 ne livre pas.
+            raise FileNotFoundError(
+                "Modèles de traits d'openWakeWord absents. Télécharge-les une fois avec :\n"
+                '  uv run python -c "import openwakeword.utils; '
+                'openwakeword.utils.download_models()"'
+            ) from e
         self._nom = list(self._modele.models.keys())[0]
 
     def score(self, bloc: bytes) -> float:
