@@ -13,10 +13,12 @@ import contextlib
 import logging
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 from helios_core.protocole import (
+    DUREE_BLOC_MS,
     Bonjour,
     Dire,
     Etat,
@@ -35,6 +37,9 @@ from .vad import DetecteurVoix, Endpointeur
 _journal = logging.getLogger(__name__)
 
 URL_CORE = os.environ.get("HELIOS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
+
+DUREE_BLOC_S = DUREE_BLOC_MS / 1000  # 0,020 s joués par trame
+MARGE_SORTIE_S = 0.15  # latence de sortie du haut-parleur, à régler au banc
 
 
 @dataclass(frozen=True)
@@ -62,7 +67,14 @@ class Transport(Protocol):
 
 class ClientAudio:
     def __init__(
-        self, transport, peripherique, detecteur, endpointeur, reveilleur, bargein=None
+        self,
+        transport,
+        peripherique,
+        detecteur,
+        endpointeur,
+        reveilleur,
+        bargein=None,
+        horloge: Callable[[], float] | None = None,
     ) -> None:
         self._transport = transport
         self._peripherique = peripherique
@@ -70,9 +82,16 @@ class ClientAudio:
         self._endpointeur = endpointeur
         self._reveilleur = reveilleur
         self._capture = False
-        self._helios_parle = False
         self._id_courant = 0
         self._bargein = bargein or Endpointeur(silence_ms=400, parole_min_ms=300)
+        self._horloge = horloge or time.monotonic
+        # Échéance, sur notre propre horloge, de la fin de l'audio déjà confié au
+        # haut-parleur. Le Core finit d'ENVOYER bien avant que le son finisse de jouer.
+        self._fin_lecture = 0.0
+
+    def _helios_parle_encore(self) -> bool:
+        # Une échéance expire d'elle-même : le micro ne peut jamais rester sourd.
+        return self._horloge() < self._fin_lecture + MARGE_SORTIE_S
 
     # --- micro vers Core --------------------------------------------------
 
@@ -83,7 +102,7 @@ class ClientAudio:
                 await self._traiter_bloc(bloc)
 
     async def _traiter_bloc(self, bloc: bytes) -> None:
-        if self._helios_parle:
+        if self._helios_parle_encore():
             await self._surveiller_bargein(bloc)
             return
 
@@ -103,7 +122,7 @@ class ClientAudio:
         if self._bargein.ajouter(self._detecteur.parle(bloc)) != "debut":
             return
         _journal.info("interruption détectée")
-        self._helios_parle = False
+        self._fin_lecture = 0.0  # l'audio vient d'être vidé
         self._id_courant = 0  # écarte les trames déjà en vol de la réponse coupée
         await self._peripherique.vider()
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
@@ -115,24 +134,22 @@ class ClientAudio:
     async def sur_message(self, msg) -> None:
         if isinstance(msg, Dire):
             self._id_courant = msg.id_enonce
-            self._helios_parle = True
             self._bargein.reinitialiser()
         elif isinstance(msg, StopAudio):
-            self._helios_parle = False
+            self._fin_lecture = 0.0  # l'audio vient d'être vidé
             self._id_courant = 0  # écarte les trames déjà en vol de la réponse coupée
             await self._peripherique.vider()
-        elif isinstance(msg, Etat):
-            if msg.valeur == "parole":
-                self._helios_parle = True
-                self._bargein.reinitialiser()
-            elif msg.valeur in ("repos", "ecoute"):
-                self._helios_parle = False
+        elif isinstance(msg, Etat) and msg.valeur == "parole":
+            # Seule l'horloge de lecture arme ou désarme le barge-in : « repos » et
+            # « ecoute » disent que le Core a fini d'envoyer, pas que le son est joué.
+            self._bargein.reinitialiser()
 
     async def sur_trame(self, trame: bytes) -> None:
         identifiant, pcm = decoder_audio_sortant(trame)
         if identifiant != self._id_courant:
             return  # trame d'un énoncé interrompu : on la jette
         await self._peripherique.jouer(pcm)
+        self._fin_lecture = max(self._horloge(), self._fin_lecture) + DUREE_BLOC_S
 
 
 class TransportWebSocket:

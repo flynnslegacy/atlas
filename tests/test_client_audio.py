@@ -29,11 +29,25 @@ class FauxTransport:
         return [m.type for m in self.json]
 
 
+class FausseHorloge:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def avancer(self, secondes: float) -> None:
+        self.t += secondes
+
+
 class FauxPeripherique:
     def __init__(self, blocs: list[bytes]) -> None:
         self._blocs = list(blocs)
         self.joues: list[bytes] = []
         self.vidages = 0
+
+    def ajouter(self, blocs: list[bytes]) -> None:
+        self._blocs.extend(blocs)
 
     async def lire_bloc(self) -> bytes:
         if not self._blocs:
@@ -70,7 +84,7 @@ class ReveilleurScript:
         return self._n == self._cible
 
 
-def _client(transport, peripherique, parole: list[bool], reveil_au=0):
+def _client(transport, peripherique, parole: list[bool], reveil_au=0, horloge=None):
     from helios_audio.vad import Endpointeur
 
     return ClientAudio(
@@ -80,7 +94,15 @@ def _client(transport, peripherique, parole: list[bool], reveil_au=0):
         endpointeur=Endpointeur(silence_ms=60, parole_min_ms=40),
         reveilleur=ReveilleurScript(reveil_au),
         bargein=Endpointeur(silence_ms=60, parole_min_ms=40),
+        horloge=horloge or FausseHorloge(),
     )
+
+
+async def _jouer(client, id_enonce: int, blocs: int, rang: int = 1) -> None:
+    """Le Core annonce une phrase et en livre l'audio d'un coup, sans attendre."""
+    await client.sur_message(Dire(id_enonce=id_enonce, rang=rang, texte="Phrase."))
+    for _ in range(blocs):
+        await client.sur_trame(encoder_audio_sortant(id_enonce, BLOC))
 
 
 async def test_le_reveil_est_annonce_puis_l_audio_part():
@@ -135,7 +157,7 @@ async def test_une_trame_perimee_n_est_pas_jouee():
 async def test_parler_pendant_la_parole_declenche_l_interruption():
     t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
     c = _client(t, p, parole=[True] * 6, reveil_au=None)
-    await c.sur_message(Etat(valeur="parole"))
+    await _jouer(c, id_enonce=1, blocs=1)
     await c.boucle_capture()
 
     assert any(isinstance(m, Interruption) for m in t.json)
@@ -145,12 +167,12 @@ async def test_parler_pendant_la_parole_declenche_l_interruption():
 async def test_apres_le_bargein_une_trame_deja_en_vol_n_est_pas_jouee():
     t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
     c = _client(t, p, parole=[True] * 6, reveil_au=None)
-    await c.sur_message(Dire(id_enonce=1, rang=1, texte="Un."))
+    await _jouer(c, id_enonce=1, blocs=1)
     await c.boucle_capture()  # détecte le barge-in et coupe l'énoncé 1
 
     # Trame de la réponse coupée, remise après le vidage : elle ne doit pas sonner.
     await c.sur_trame(encoder_audio_sortant(1, BLOC))
-    assert p.joues == []
+    assert p.joues == [BLOC], "seule la trame jouée avant la coupure a sonné"
 
 
 async def test_apres_un_stop_audio_une_trame_deja_en_vol_n_est_pas_jouee():
@@ -162,6 +184,33 @@ async def test_apres_un_stop_audio_une_trame_deja_en_vol_n_est_pas_jouee():
     # Trame de la réponse coupée, remise après le vidage : elle ne doit pas sonner.
     await c.sur_trame(encoder_audio_sortant(1, BLOC))
     assert p.joues == []
+
+
+async def test_le_bargein_reste_arme_apres_le_repos_tant_que_l_audio_se_joue():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
+    c = _client(t, p, parole=[True] * 6, reveil_au=None, horloge=h)
+    await _jouer(c, id_enonce=1, blocs=100)  # deux secondes d'audio livrées d'un coup
+    await c.sur_message(Etat(valeur="repos"))  # le Core a fini d'ENVOYER, pas de jouer
+    h.avancer(0.5)
+
+    await c.boucle_capture()
+
+    assert any(isinstance(m, Interruption) for m in t.json)
+
+
+async def test_le_bargein_se_desarme_quand_l_audio_a_fini_de_jouer():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
+    c = _client(t, p, parole=[True] * 6, reveil_au=None, horloge=h)
+    await _jouer(c, id_enonce=1, blocs=100)
+    await c.sur_message(Etat(valeur="repos"))
+    h.avancer(3.0)  # au-delà des deux secondes d'audio et de la marge de sortie
+
+    await c.boucle_capture()
+
+    assert not any(isinstance(m, Interruption) for m in t.json)
+    assert p.vidages == 0
 
 
 def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):
