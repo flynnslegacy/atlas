@@ -1,10 +1,11 @@
 import io
+import time
 import wave
 
 import pytest
 from fastapi.testclient import TestClient
 
-from services.stt.serveur import app, obtenir_transcripteur
+from services.stt.serveur import MoteurWhisper, app, obtenir_transcripteur
 
 
 class FauxTranscripteur:
@@ -60,3 +61,28 @@ def test_la_route_de_sante_repond(client):
     r = c.get("/sante")
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+def test_le_moteur_se_decharge_apres_inactivite():
+    m = MoteurWhisper("x", dechargement_s=0)
+    m._modele = object()
+    m._dernier_usage = time.monotonic() - 1
+    m.decharger_si_inactif()
+    assert m.charge is False
+
+
+def test_le_moteur_ne_se_decharge_pas_pendant_une_transcription():
+    m = MoteurWhisper("x", dechargement_s=0)
+    m._modele = object()
+    m._dernier_usage = time.monotonic() - 1
+    m._en_cours = 1
+    m.decharger_si_inactif()
+    assert m.charge is True
+
+
+def test_le_moteur_reste_charge_avant_le_delai():
+    m = MoteurWhisper("x", dechargement_s=300)
+    m._modele = object()
+    m._dernier_usage = time.monotonic()
+    m.decharger_si_inactif()
+    assert m.charge is True

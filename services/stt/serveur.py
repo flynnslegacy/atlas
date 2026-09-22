@@ -6,17 +6,21 @@ Le modèle se charge à la demande et se décharge après inactivité, parce que
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import io
 import os
 import threading
 import time
 import wave
+from contextlib import asynccontextmanager
 from typing import Protocol
 
 from fastapi import Body, Depends, FastAPI, HTTPException
 
 MODELE = os.environ.get("HELIOS_STT_MODELE", "large-v3")
 DECHARGEMENT_S = int(os.environ.get("HELIOS_STT_DECHARGEMENT_S", "300"))
+INTERVALLE_DECHARGEMENT_S = 30
 
 
 class Transcripteur(Protocol):
@@ -33,6 +37,7 @@ class MoteurWhisper:
         self._dechargement_s = dechargement_s
         self._modele = None
         self._dernier_usage = 0.0
+        self._en_cours = 0
         self._verrou = threading.Lock()
 
     @property
@@ -45,22 +50,31 @@ class MoteurWhisper:
         with self._verrou:
             if self._modele is None:
                 self._modele = WhisperModel(self._nom, device="cuda", compute_type="float16")
-            self._dernier_usage = time.monotonic()
+            self._en_cours += 1
             return self._modele
+
+    def _liberer(self) -> None:
+        with self._verrou:
+            self._en_cours -= 1
+            self._dernier_usage = time.monotonic()
 
     def decharger_si_inactif(self) -> None:
         with self._verrou:
             if (
                 self._modele is not None
+                and self._en_cours == 0
                 and time.monotonic() - self._dernier_usage > self._dechargement_s
             ):
                 self._modele = None
 
     def transcrire(self, wav: bytes) -> tuple[str, str, int]:
         modele = self._obtenir()
-        segments, info = modele.transcribe(io.BytesIO(wav), language="fr", vad_filter=False)
-        texte = "".join(s.text for s in segments).strip()
-        return texte, info.language, int(info.duration * 1000)
+        try:
+            segments, info = modele.transcribe(io.BytesIO(wav), language="fr", vad_filter=False)
+            texte = "".join(s.text for s in segments).strip()
+            return texte, info.language, int(info.duration * 1000)
+        finally:
+            self._liberer()
 
 
 _moteur = MoteurWhisper(MODELE, DECHARGEMENT_S)
@@ -70,7 +84,24 @@ def obtenir_transcripteur() -> Transcripteur:
     return _moteur
 
 
-app = FastAPI(title="helios-stt")
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    """Gère la boucle de fond pour le déchargement du modèle."""
+    tache = asyncio.create_task(_boucle_dechargement())
+    yield
+    tache.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await tache
+
+
+async def _boucle_dechargement() -> None:
+    """Boucle infinie qui décharge le modèle après inactivité."""
+    while True:
+        await asyncio.sleep(INTERVALLE_DECHARGEMENT_S)
+        await asyncio.to_thread(_moteur.decharger_si_inactif)
+
+
+app = FastAPI(title="helios-stt", lifespan=lifespan)
 
 
 def _verifier_wav(corps: bytes) -> None:
