@@ -2,7 +2,9 @@ piper-tts>=1.3.0
 numpy>=2.1
 soxr>=0.5
 soundfile>=0.12
-torch
-qwen-tts
+# Versions exactes du spike S1 sur la RTX 4070 Ti : un autre torch peut viser une
+# version de CUDA que le pilote ne supporte pas, et n'échouer qu'à l'exécution.
+torch==2.14.0
+qwen-tts==0.1.1
 fastapi>=0.115
 uvicorn[standard]>=0.32
