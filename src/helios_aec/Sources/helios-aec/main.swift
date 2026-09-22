@@ -18,8 +18,18 @@ let fileLecture = DispatchQueue(label: "helios.lecture")
 let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                            sampleRate: frequence, channels: 1, interleaved: false)!
 
-try moteur.inputNode.setVoiceProcessingEnabled(true)
-try moteur.outputNode.setVoiceProcessingEnabled(true)
+do {
+    try moteur.inputNode.setVoiceProcessingEnabled(true)
+    try moteur.outputNode.setVoiceProcessingEnabled(true)
+} catch {
+    // Même cause possible qu'à `moteur.start()` plus bas (micro refusé) :
+    // sans ce message, l'échec serait un crash Swift muet, sans rien sur
+    // la sortie d'erreur pour guider quelqu'un qui lance le binaire à la main.
+    FileHandle.standardError.write(
+        "Impossible d'activer l'annulation d'écho (micro refusé, ou périphérique indisponible) : \(error)\n"
+            .data(using: .utf8)!)
+    exit(1)
+}
 moteur.attach(lecteur)
 moteur.connect(lecteur, to: moteur.mainMixerNode, format: format)
 
@@ -42,7 +52,16 @@ final class TamponSortie {
     func ajouter(_ bloc: Data) {
         verrou.lock()
         if blocs.count >= capaciteMax {
+            // Plein : on remplace le plus ancien par le nouveau, le nombre
+            // d'éléments réellement disponibles ne change pas — donc pas de
+            // signal ici. Un signal sur cette branche désynchroniserait le
+            // compte du sémaphore du contenu réel du tableau : après une
+            // rafale d'abandons, `prendre()` finirait par franchir `wait()`
+            // sur un tableau déjà vide et planter sur `removeFirst()`.
             blocs.removeFirst()
+            blocs.append(bloc)
+            verrou.unlock()
+            return
         }
         blocs.append(bloc)
         verrou.unlock()
@@ -70,8 +89,10 @@ let filEcriture = Thread {
         do {
             try FileHandle.standardOutput.write(contentsOf: bloc)
         } catch {
-            // Python a fermé sa lecture : plus personne n'écoute, on arrête proprement.
-            exit(0)
+            // Python a fermé sa lecture (tube cassé) : ce n'est PAS un arrêt
+            // volontaire, donc code de sortie non nul pour qu'un superviseur
+            // distingue cette mort de celle d'un arrêt propre demandé.
+            exit(1)
         }
     }
 }
