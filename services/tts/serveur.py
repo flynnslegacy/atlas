@@ -173,9 +173,11 @@ class MoteurPiper:
             proc.wait()
 
 
-PLAFOND_MIN_S = 4.0
+PLAFOND_MIN_S = 8.0
 SECONDES_PAR_CARACTERE = 0.06  # débit de parole mesuré par le spike S1
-MARGE_PLAFOND = 2.5
+# 4 et non 2,5 : une phrase chargée en chiffres se dit bien plus lentement que la
+# moyenne (0,10 s par caractère pour la phrase 1 du spike).
+MARGE_PLAFOND = 4.0
 # Borne haute prudente, en attendant de mesurer les jetons générés par seconde d'audio.
 JETONS_PAR_SECONDE_MAX = 50
 
@@ -183,8 +185,8 @@ JETONS_PAR_SECONDE_MAX = 50
 def plafond_duree(texte: str) -> float:
     """Durée au-delà de laquelle une génération est tenue pour emballée.
 
-    Très large (2,5 fois la durée attendue) : elle ne doit jamais toucher une phrase
-    normale, seulement arrêter une génération qui boucle.
+    Très large (4 fois la durée attendue, 8 s au moins) : elle ne doit jamais toucher
+    une phrase normale, seulement arrêter une génération qui boucle.
     """
     return max(PLAFOND_MIN_S, len(texte) * SECONDES_PAR_CARACTERE * MARGE_PLAFOND)
 

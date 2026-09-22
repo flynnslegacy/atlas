@@ -28,8 +28,8 @@ VOIX_DU_DEPOT = Path(__file__).parent.parent / "services" / "tts" / "voix"
 
 
 def plafond_attendu(texte: str) -> float:
-    """Plafond fixé par le verdict du spike S1 : 2,5 fois 0,06 s par caractère."""
-    return max(4.0, len(texte) * 0.06 * 2.5)
+    """Plafond du service : 4 fois 0,06 s par caractère, jamais moins de 8 s."""
+    return max(8.0, len(texte) * 0.06 * 4)
 
 
 def parole(duree_s: float) -> np.ndarray:
@@ -294,18 +294,39 @@ def test_une_generation_qui_boucle_est_coupee_au_plafond_avec_un_avertissement(
 # 7. jamais de coupe sur un silence
 
 
-def test_un_silence_au_milieu_de_la_phrase_ne_coupe_rien(dossier_voix):
+def test_un_long_silence_au_milieu_de_la_phrase_ne_coupe_rien(dossier_voix):
     # Régression du spike S1 : la coupe au premier long silence a amputé de vraie parole
-    # 3 fois sur 11. Parole, 1 s de silence, parole : tout doit ressortir.
-    audio = np.concatenate([parole(1.0), np.zeros(FREQUENCE_QWEN, np.float32), parole(1.0)])
+    # 3 fois sur 11. Sur la phrase 2 du spike : 3 s de parole, 3 s de silence, 4 s de
+    # parole. Un garde-fou qui ne couperait qu'au-delà de 1,5 ou 2 s serait pris aussi.
+    texte = (
+        "Le workflow « Veille concurrence » a échoué à 3 heures du matin. "
+        "Erreur d'authentification sur l'API."
+    )
+    silence = np.zeros(3 * FREQUENCE_QWEN, np.float32)
+    audio = np.concatenate([parole(3.0), silence, parole(4.0)])
+    assert len(audio) / FREQUENCE_QWEN < plafond_attendu(texte)
     moteur, _ = moteur_avec(dossier_voix, FauxModele(audio))
 
-    blocs = tout_synthetiser(moteur)
+    blocs = tout_synthetiser(moteur, texte)
 
     pcm = np.frombuffer(b"".join(blocs), dtype="<i2")
-    assert abs(len(pcm) - 3 * 16000) <= TAILLE_MORCEAU // 2
-    # La parole d'après le silence est bien là.
-    assert np.abs(pcm[int(2.2 * 16000) : int(2.8 * 16000)]).max() > 1000
+    assert abs(len(pcm) - 10 * 16000) <= TAILLE_MORCEAU // 2
+    # La parole d'après le silence est bien là, jusqu'au bout.
+    assert np.abs(pcm[int(9.0 * 16000) : int(9.9 * 16000)]).max() > 1000
+
+
+def test_une_phrase_chargee_en_chiffres_n_est_pas_coupee(dossier_voix, caplog):
+    # 28 caractères, mais environ 6 s à dire : 0,2 s par caractère, le double de la
+    # phrase la plus lente du spike (0,10 s). Le plafond ne doit jamais la toucher.
+    texte = "Ton code est 4829 1736 5540."
+    duree_s = len(texte) * 0.2
+    moteur, _ = moteur_avec(dossier_voix, FauxModele(parole(duree_s)))
+
+    with caplog.at_level(logging.WARNING, logger=serveur._journal.name):
+        blocs = tout_synthetiser(moteur, texte)
+
+    assert abs(sum(len(bloc) for bloc in blocs) - duree_s * 16000 * 2) <= TAILLE_MORCEAU
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
 
 
 # 8. voix par défaut propre à chaque moteur
