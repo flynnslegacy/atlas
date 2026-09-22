@@ -10,9 +10,18 @@ voix anglaise par défaut. Un modèle entraîné sur une prononciation anglaise 
 
 ---
 
-## Procédure
+## Environnement
 
-Cette procédure s'exécute sur **l'Unraid**, pour bénéficier du GPU et de la capacité mémoire.
+Cette procédure s'exécute sur **l'Unraid**, pour bénéficier du GPU CUDA et de la capacité mémoire.
+
+**Pré-requis:**
+- Python 3.10 ou 3.11 (openWakeWord est compatible jusqu'à 3.11)
+- Un GPU CUDA (entraîner sur CPU est impraticable — plusieurs heures pour des résultats médiocres)
+- Environnement virtuel Python isolé (le `.[full]` installe de nombreuses dépendances lourdes)
+
+---
+
+## Procédure
 
 ### 1. Installer les outils
 
@@ -51,7 +60,7 @@ hey helios
 Hey Helios
 ```
 
-Générer ~30 000 échantillons positifs avec variation de vitesse, hauteur et réverbération:
+Générer ~30 000 échantillons positifs avec variation de vitesse et hauteur:
 
 ```bash
 python piper-sample-generator/audio_sample_generator.py \
@@ -64,6 +73,17 @@ python piper-sample-generator/audio_sample_generator.py \
   --noise_factor 0.01
 ```
 
+Cela génère des WAV 16 kHz mono avec:
+- **Variation de vitesse**: 0.8× à 1.2× (ralentir et accélérer le locuteur)
+- **Variation de hauteur**: −5 à +5 demi-tons (modifier la voix sans changer la vitesse)
+- **Bruit faible** (`noise_factor 0.01`): compenser l'audio stérile du synthétiseur
+
+**Réverbération**: La vraie réverbération (échos d'une pièce) n'est pas appliquée à cette étape. 
+Si c'est critique pour la robustesse, elle devrait être ajoutée comme étape de post-traitement 
+convolution avec des réponses impulsionnelles réelles (RIR). Pour cette première itération, 
+la variation de vitesse et hauteur + le bruit faible suffisent à généraliser au-delà de 
+l'audio synthétique pur.
+
 ### 4. Préparer les échantillons négatifs
 
 Combiner plusieurs sources:
@@ -75,20 +95,38 @@ Combiner plusieurs sources:
 
 Placer tous les négatifs dans `negative_samples/`.
 
-### 5. Entraîner le modèle
+### 5. Calculer les traits (melspectrogrammes et plongements)
+
+C'est l'étape que beaucoup oublient. OpenWakeWord travaille sur des traits extraits, pas sur 
+l'audio brut. Calculer les melspectrogrammes et plongements avant l'entraînement:
+
+```bash
+cd openWakeWord
+
+python -m openwakeword.compute_features \
+  --positive_dir ../positive_samples \
+  --negative_dir ../negative_samples \
+  --output_dir ./features
+```
+
+Cela génère des fichiers `.npy` contenant les spectrogrammes et embeddings pour chaque WAV.
+
+### 6. Entraîner le modèle
 
 ```bash
 cd openWakeWord
 
 python -m openwakeword.train \
-  --positive_dir ../positive_samples \
-  --negative_dir ../negative_samples \
+  --features_dir ./features \
   --output_model ./hey_helios \
   --epochs 50 \
   --batch_size 32
 ```
 
-### 6. Exporter en ONNX
+Le réseau entraîne pendant plusieurs heures sur le GPU. Surveiller la métrique de validation — 
+si elle diverge (augmente au lieu de diminuer), l'apprentissage est instable.
+
+### 7. Exporter en ONNX
 
 ```bash
 python -m openwakeword.export \
@@ -97,7 +135,7 @@ python -m openwakeword.export \
   --format onnx
 ```
 
-### 7. Rapatrier le modèle
+### 8. Rapatrier le modèle
 
 Copier le fichier vers le dépôt Helios:
 
