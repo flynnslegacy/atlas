@@ -1,4 +1,4 @@
-"""Client du service helios-tts, en flux."""
+"""Client du service atlas-tts, en flux."""
 
 from __future__ import annotations
 

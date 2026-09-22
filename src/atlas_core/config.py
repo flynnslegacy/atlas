@@ -16,8 +16,8 @@ class Config:
     @staticmethod
     def depuis_environnement() -> Config:
         return Config(
-            stt_url=os.environ.get("HELIOS_STT_URL", "http://unraid.local:9010"),
-            tts_url=os.environ.get("HELIOS_TTS_URL", "http://unraid.local:9011"),
-            tts_voix=os.environ.get("HELIOS_TTS_VOIX", "fr_FR-siwis-medium"),
-            port_core=int(os.environ.get("HELIOS_CORE_PORT", "8080")),
+            stt_url=os.environ.get("ATLAS_STT_URL", "http://unraid.local:9010"),
+            tts_url=os.environ.get("ATLAS_TTS_URL", "http://unraid.local:9011"),
+            tts_voix=os.environ.get("ATLAS_TTS_VOIX", "fr_FR-siwis-medium"),
+            port_core=int(os.environ.get("ATLAS_CORE_PORT", "8080")),
         )

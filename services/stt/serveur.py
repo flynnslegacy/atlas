@@ -18,8 +18,8 @@ from typing import Protocol
 
 from fastapi import Body, Depends, FastAPI, HTTPException
 
-MODELE = os.environ.get("HELIOS_STT_MODELE", "large-v3")
-DECHARGEMENT_S = int(os.environ.get("HELIOS_STT_DECHARGEMENT_S", "300"))
+MODELE = os.environ.get("ATLAS_STT_MODELE", "large-v3")
+DECHARGEMENT_S = int(os.environ.get("ATLAS_STT_DECHARGEMENT_S", "300"))
 INTERVALLE_DECHARGEMENT_S = 30
 
 
@@ -101,7 +101,7 @@ async def _boucle_dechargement() -> None:
         await asyncio.to_thread(_moteur.decharger_si_inactif)
 
 
-app = FastAPI(title="helios-stt", lifespan=lifespan)
+app = FastAPI(title="atlas-stt", lifespan=lifespan)
 
 
 def _verifier_wav(corps: bytes) -> None:

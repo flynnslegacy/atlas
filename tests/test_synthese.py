@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from helios_core.synthese import ClientSynthese
+from atlas_core.synthese import ClientSynthese
 
 _ENTETE = b"RIFF" + b"\xff" * 4 + b"WAVE" + b"fmt " + b"\x00" * 20 + b"data" + b"\xff" * 4
 

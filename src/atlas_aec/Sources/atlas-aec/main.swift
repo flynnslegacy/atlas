@@ -13,7 +13,7 @@ let tailleBloc = 640
 
 let moteur = AVAudioEngine()
 let lecteur = AVAudioPlayerNode()
-let fileLecture = DispatchQueue(label: "helios.lecture")
+let fileLecture = DispatchQueue(label: "atlas.lecture")
 
 let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                            sampleRate: frequence, channels: 1, interleaved: false)!
@@ -96,7 +96,7 @@ let filEcriture = Thread {
         }
     }
 }
-filEcriture.name = "helios.ecriture-stdout"
+filEcriture.name = "atlas.ecriture-stdout"
 filEcriture.start()
 
 // --- capture : rééchantillonnée vers 16 kHz mono, publiée par blocs -----

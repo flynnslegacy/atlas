@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
-from helios_core.protocole import (
+from atlas_core.protocole import (
     Dire,
     Erreur,
     Etat,
@@ -12,7 +12,7 @@ from helios_core.protocole import (
     Transcription,
     decoder_audio_sortant,
 )
-from helios_core.session import Session
+from atlas_core.session import Session
 
 
 class Collecteur:
@@ -210,7 +210,7 @@ async def test_une_interruption_au_repos_repasse_en_ecoute():
     c = Collecteur()
     s = _session(c)
     # Aucun tour en cours : la session est déjà au repos quand l'interruption arrive
-    # (le cas de quelqu'un qui coupe Helios juste à la fin de sa phrase).
+    # (le cas de quelqu'un qui coupe Atlas juste à la fin de sa phrase).
     await s.sur_message(Interruption(horodatage=1.0))
 
     assert [m for m in c.json if isinstance(m, Etat)][-1].valeur == "ecoute"

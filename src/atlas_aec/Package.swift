@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "helios-aec",
+    name: "atlas-aec",
     platforms: [.macOS(.v14)],
-    targets: [.executableTarget(name: "helios-aec")]
+    targets: [.executableTarget(name: "atlas-aec")]
 )

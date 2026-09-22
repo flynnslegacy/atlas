@@ -1,6 +1,6 @@
 import pytest
 
-from helios_audio.vad import Endpointeur, verifier_bloc
+from atlas_audio.vad import Endpointeur, verifier_bloc
 
 BLOC_MS = 20
 

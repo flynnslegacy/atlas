@@ -2,8 +2,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-from helios_core import hub
-from helios_core.protocole import TAILLE_BLOC_OCTETS, Bonjour, encoder_audio_entrant
+from atlas_core import hub
+from atlas_core.protocole import TAILLE_BLOC_OCTETS, Bonjour, encoder_audio_entrant
 
 
 class SessionEspionne:

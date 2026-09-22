@@ -11,9 +11,9 @@ from collections.abc import AsyncIterator
 
 from pydantic import TypeAdapter
 
-from helios_audio.client import ClientAudio
-from helios_audio.vad import Endpointeur
-from helios_core.protocole import (
+from atlas_audio.client import ClientAudio
+from atlas_audio.vad import Endpointeur
+from atlas_core.protocole import (
     DUREE_BLOC_MS,
     Etat,
     Interruption,
@@ -21,7 +21,7 @@ from helios_core.protocole import (
     decoder_audio_entrant,
     decoder_message,
 )
-from helios_core.session import Session
+from atlas_core.session import Session
 
 SILENCE = b"\x00" * 640
 PAROLE = b"\x01" * 640
@@ -175,12 +175,12 @@ async def test_le_bargein_reste_arme_tant_que_la_reponse_est_jouee():
     # ... alors que trois secondes d'audio restent à jouer. Une demi-seconde passe.
     horloge.avancer(0.5)
 
-    # L'utilisateur coupe la parole à Helios pendant 400 ms.
+    # L'utilisateur coupe la parole à Atlas pendant 400 ms.
     peripherique.ajouter([PAROLE] * 20)
     await client.boucle_capture()
 
     assert any(isinstance(m, Interruption) for m in vers_core.envoyes), (
-        "la parole de l'utilisateur pendant la lecture n'a pas interrompu Helios"
+        "la parole de l'utilisateur pendant la lecture n'a pas interrompu Atlas"
     )
     assert peripherique.vidages >= 1
     assert _etats(recus)[-1] == "ecoute"

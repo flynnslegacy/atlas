@@ -1,6 +1,6 @@
 import pytest
 
-from helios_audio.reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle
+from atlas_audio.reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle
 
 BLOC = b"\x00" * 640
 
@@ -40,7 +40,7 @@ def test_apres_la_periode_refractaire_il_reveille_de_nouveau():
 
 
 def test_un_modele_de_reveil_absent_est_nomme_et_renvoie_a_la_procedure(tmp_path):
-    absent = tmp_path / "hey_helios.onnx"
+    absent = tmp_path / "hey_atlas.onnx"
     with pytest.raises(FileNotFoundError) as erreur:
         PredicteurOpenWakeWord(chemin=str(absent))
     assert str(absent) in str(erreur.value)
@@ -55,7 +55,7 @@ def test_des_modeles_de_traits_absents_disent_comment_les_telecharger(tmp_path, 
         raise NoSuchFile("Load model from .../resources/models/melspectrogram.onnx failed")
 
     monkeypatch.setattr(openwakeword, "Model", modele_sans_traits)
-    present = tmp_path / "hey_helios.onnx"
+    present = tmp_path / "hey_atlas.onnx"
     present.write_bytes(b"")
 
     with pytest.raises(FileNotFoundError) as erreur:

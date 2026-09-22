@@ -1,6 +1,6 @@
 # Le banc de mesure
 
-Ce banc produit les quatre chiffres qui décident des réglages d'Helios : le
+Ce banc produit les quatre chiffres qui décident des réglages d'Atlas : le
 taux de détection du mot de réveil, le nombre de faux réveils par heure, le
 taux d'erreur de transcription et la latence. Sans lui, ces réglages se font
 à l'oreille, et chaque correction en casse une autre sans qu'on s'en aperçoive.
@@ -26,7 +26,7 @@ mais dans un mauvais format.)
 Trois dossiers, à créer sous `bench/enregistrements/` — **ils ne doivent
 jamais être commités** (voir plus bas) :
 
-### 1. `bench/enregistrements/positifs/` — 30 prises de « Hey Helios »
+### 1. `bench/enregistrements/positifs/` — 30 prises de « Hey Atlas »
 
 Le mot de réveil prononcé, et rien d'autre par fichier. Varie les conditions
 pour que la mesure reflète l'usage réel, par exemple une répartition possible
@@ -45,7 +45,7 @@ Un fichier WAV par prise, nommé comme tu veux (`positif01.wav`, `positif02.wav`
 ### 2. `bench/enregistrements/negatifs/` — une heure de parole normale
 
 Aucun fichier ne doit contenir le mot de réveil. L'idée est de mesurer les
-faux réveils sur de la parole française ordinaire, dans la pièce où Helios
+faux réveils sur de la parole française ordinaire, dans la pièce où Atlas
 vivra : une réunion enregistrée, un appel, une vidéo qui tourne en fond,
 toi qui parles tout seul... Ce qui compte, c'est que ce soit du français,
 dans les mêmes conditions acoustiques que l'usage réel, et qu'au total ça
@@ -53,14 +53,14 @@ fasse environ une heure (répartis sur autant de fichiers que tu veux).
 
 ### 3. `bench/enregistrements/phrases/` — 20 énoncés représentatifs
 
-Vingt phrases qui ressemblent à ce que tu diras vraiment à Helios une fois
+Vingt phrases qui ressemblent à ce que tu diras vraiment à Atlas une fois
 en service (des questions, des commandes, des notes). Un fichier WAV par
 phrase, et sa transcription exacte — mot pour mot, telle que tu l'as
 prononcée — dans `bench/attendus.json`.
 
 Exemple d'idées de phrases (à remplacer par les tiennes, adaptées à ton
 usage réel) : « quelle heure est-il », « lance la veille concurrence »,
-« note ça dans le projet Helios », « rappelle-moi d'appeler le plombier »,
+« note ça dans le projet Atlas », « rappelle-moi d'appeler le plombier »,
 « quel temps fait-il demain », etc.
 
 ## Format de `bench/attendus.json`
@@ -72,7 +72,7 @@ exacte attendue. Exemple :
 {
   "phrase01.wav": "quelle heure est-il",
   "phrase02.wav": "lance la veille concurrence",
-  "phrase03.wav": "note ça dans le projet Helios"
+  "phrase03.wav": "note ça dans le projet Atlas"
 }
 ```
 
@@ -121,7 +121,7 @@ l'endpointeur réglé sur la durée de silence testée.
 
 - `retard_median_ms` — le temps entre le **dernier bloc de parole** et la
   **première fin de phrase décidée** : l'attente réelle entre le moment où tu
-  te tais et celui où Helios le sait. La durée de la phrase elle-même n'y
+  te tais et celui où Atlas le sait. La durée de la phrase elle-même n'y
   entre pas.
 - `coupures_prematurees` — le nombre de fichiers où l'endpointeur a décidé
   **plus d'une fin**. Puisqu'il n'y a qu'une phrase par fichier, une deuxième
@@ -161,28 +161,28 @@ Critères d'acceptation (à appliquer sur les résultats une fois obtenus) :
   **`coupures_prematurees` à 0** et dont le **retard médian reste sous
   400 ms** sur `phrases/`.
 
-Le client audio (`src/helios_audio/client.py`) lit ces trois réglages dans
+Le client audio (`src/atlas_audio/client.py`) lit ces trois réglages dans
 l'environnement au démarrage (`lire_reglages()`), avec pour défauts les
 valeurs actuelles — rien ne change tant que tu ne touches à rien. Une fois
 les valeurs choisies grâce au banc, édite `.env.example` (et ton `.env`) :
 
 **Les réglages de `.env` ne prennent effet qu'à travers les cibles `make`**
 (`make run-audio`, `make run-core`, `make bench`…) : c'est le `Makefile` qui
-charge `.env` et le passe aux commandes. Lancer `python -m helios_audio.client`
+charge `.env` et le passe aux commandes. Lancer `python -m atlas_audio.client`
 à la main ne lit pas `.env`. Crée ton `.env` en copiant `.env.example`, et sur
-le MacBook vérifie en particulier `HELIOS_CORE_URL` : elle doit pointer vers
+le MacBook vérifie en particulier `ATLAS_CORE_URL` : elle doit pointer vers
 la machine où tourne le Core, pas vers `127.0.0.1` (le défaut du code).
 
-- `HELIOS_REVEIL_SEUIL` (défaut `0.5`) — le seuil du mot de réveil. Prends la
+- `ATLAS_REVEIL_SEUIL` (défaut `0.5`) — le seuil du mot de réveil. Prends la
   plus petite valeur testée par `make bench` qui donne, dans `reveil`, une
   `detection` > 0.95 avec un `faux_par_heure` < 1.
-- `HELIOS_SILENCE_MS` (défaut `400`) — la durée de silence qui marque la fin
-  d'une phrase dite à Helios. Prends la valeur testée par `make bench` dont
+- `ATLAS_SILENCE_MS` (défaut `400`) — la durée de silence qui marque la fin
+  d'une phrase dite à Atlas. Prends la valeur testée par `make bench` dont
   les `coupures_prematurees` d'`endpointage` valent 0 et dont le
   `retard_median_ms` reste sous 400 ms (une fois vérifié que
   `fichiers_mesures == fichiers_total`, voir plus haut).
-- `HELIOS_BARGEIN_MS` (défaut `300`) — la durée de parole minimale pour
-  couper Helios quand il parle (barge-in). Le banc ne le mesure pas
+- `ATLAS_BARGEIN_MS` (défaut `300`) — la durée de parole minimale pour
+  couper Atlas quand il parle (barge-in). Le banc ne le mesure pas
   directement ; laisse la valeur par défaut sauf si l'usage réel montre
   qu'elle coupe trop vite ou trop lentement.
 

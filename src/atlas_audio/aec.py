@@ -13,13 +13,13 @@ import threading
 from collections import deque
 from typing import Protocol
 
-from helios_core.protocole import FREQUENCE_HZ as FREQUENCE
-from helios_core.protocole import TAILLE_BLOC_OCTETS as TAILLE_BLOC
+from atlas_core.protocole import FREQUENCE_HZ as FREQUENCE
+from atlas_core.protocole import TAILLE_BLOC_OCTETS as TAILLE_BLOC
 
 _TYPE_LECTURE = 0x01
 _TYPE_VIDAGE = 0x02
 
-CHEMIN_BINAIRE = os.environ.get("HELIOS_AEC_BINAIRE", "src/helios_aec/.build/release/helios-aec")
+CHEMIN_BINAIRE = os.environ.get("ATLAS_AEC_BINAIRE", "src/atlas_aec/.build/release/atlas-aec")
 
 
 def trame_lecture(pcm: bytes) -> bytes:
@@ -220,7 +220,7 @@ class PeripheriqueSounddevice:
 
 
 async def ouvrir_peripherique() -> PeripheriqueAudio:
-    if os.environ.get("HELIOS_AUDIO_PERIPHERIQUE", "aec") == "sounddevice":
+    if os.environ.get("ATLAS_AUDIO_PERIPHERIQUE", "aec") == "sounddevice":
         return PeripheriqueSounddevice()
     peripherique = PeripheriqueAec()
     await peripherique.demarrer()

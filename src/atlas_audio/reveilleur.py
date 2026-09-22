@@ -1,4 +1,4 @@
-"""Ce qui décide qu'on veut parler à Helios.
+"""Ce qui décide qu'on veut parler à Atlas.
 
 En phase 1 c'est la touche Entrée : zéro faux déclenchement pendant qu'on met au
 point le reste. Le wake word arrive en tâche 13, derrière le même protocole.
@@ -29,7 +29,7 @@ class Predicteur(_Protocol):
 
 class PredicteurOpenWakeWord:
     def __init__(self, chemin: str | None = None) -> None:
-        chemin = chemin or os.environ.get("HELIOS_MOT_REVEIL", "models/hey_helios.onnx")
+        chemin = chemin or os.environ.get("ATLAS_MOT_REVEIL", "models/hey_atlas.onnx")
         if not os.path.isfile(chemin):
             raise FileNotFoundError(
                 f"Modèle du mot de réveil introuvable : {chemin}. "
@@ -92,7 +92,7 @@ class ReveilleurTouche:
         self._verrou = threading.Lock()
         fil = threading.Thread(target=self._ecouter, daemon=True)
         fil.start()
-        print("Appuie sur Entrée pour parler à Helios.", file=sys.stderr)
+        print("Appuie sur Entrée pour parler à Atlas.", file=sys.stderr)
 
     def _ecouter(self) -> None:
         for _ in sys.stdin:

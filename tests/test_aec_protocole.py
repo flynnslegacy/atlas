@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from helios_audio.aec import TAILLE_BLOC, trame_lecture, trame_vidage
+from atlas_audio.aec import TAILLE_BLOC, trame_lecture, trame_vidage
 
 
 def test_une_trame_de_lecture_porte_son_bloc():

@@ -1,6 +1,6 @@
 """Tests pour le découpage en phrases françaises."""
 
-from helios_core.phrases import DecoupeurPhrases
+from atlas_core.phrases import DecoupeurPhrases
 
 
 def test_une_phrase_complete_sort_immediatement():

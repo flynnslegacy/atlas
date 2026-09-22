@@ -9,5 +9,5 @@ dist/
 .DS_Store
 models/
 bench/audio/
-src/helios_aec/.build/
+src/atlas_aec/.build/
 bench/enregistrements/

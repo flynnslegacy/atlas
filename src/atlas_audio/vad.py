@@ -11,12 +11,12 @@ from typing import Literal
 
 import numpy as np
 
-from helios_core.protocole import TAILLE_BLOC_OCTETS
+from atlas_core.protocole import TAILLE_BLOC_OCTETS
 
 DUREE_BLOC_MS = 20
 _FENETRE_SILERO = 512  # échantillons attendus par le modèle v5 à 16 kHz
 
-CHEMIN_MODELE = os.environ.get("HELIOS_VAD_MODELE", "models/silero_vad.onnx")
+CHEMIN_MODELE = os.environ.get("ATLAS_VAD_MODELE", "models/silero_vad.onnx")
 
 
 def verifier_bloc(bloc: bytes) -> None:

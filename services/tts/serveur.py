@@ -18,8 +18,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-MOTEUR = os.environ.get("HELIOS_TTS_MOTEUR", "piper")
-VOIX_DEFAUT = os.environ.get("HELIOS_TTS_VOIX", "fr_FR-siwis-medium")
+MOTEUR = os.environ.get("ATLAS_TTS_MOTEUR", "piper")
+VOIX_DEFAUT = os.environ.get("ATLAS_TTS_VOIX", "fr_FR-siwis-medium")
 FREQUENCE_SORTIE = 16000
 TAILLE_MORCEAU = 640  # 20 ms
 
@@ -113,7 +113,7 @@ class MoteurPiper:
         finally:
             # Si le générateur est abandonné en cours de route (déconnexion HTTP,
             # GeneratorExit), le sous-processus piper ne doit pas rester orphelin :
-            # Helios coupe des phrases en plein milieu en fonctionnement normal.
+            # Atlas coupe des phrases en plein milieu en fonctionnement normal.
             if proc.stdout:
                 proc.stdout.close()
             if proc.poll() is None:
@@ -152,7 +152,7 @@ class DemandeSynthese(BaseModel):
     voice: str = ""
 
 
-app = FastAPI(title="helios-tts")
+app = FastAPI(title="atlas-tts")
 
 
 @app.post("/synthesize")
@@ -164,7 +164,7 @@ def synthetiser(
         raise HTTPException(status_code=400, detail="texte vide")
     voix = demande.voice or VOIX_DEFAUT
     # Vérifié AVANT le flux : une fois le 200 et l'en-tête WAV partis, le code de
-    # statut ne peut plus changer, et une voix absente rendrait un Helios muet.
+    # statut ne peut plus changer, et une voix absente rendrait un Atlas muet.
     try:
         moteur.verifier(voix)
     except FileNotFoundError as e:

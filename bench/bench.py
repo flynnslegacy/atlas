@@ -17,12 +17,12 @@ from pathlib import Path
 
 import httpx
 
-from helios_audio.vad import CHEMIN_MODELE, DetecteurVoix, Endpointeur
-from helios_core.protocole import DUREE_BLOC_MS
-from helios_core.transcription import ClientTranscription
+from atlas_audio.vad import CHEMIN_MODELE, DetecteurVoix, Endpointeur
+from atlas_core.protocole import DUREE_BLOC_MS
+from atlas_core.transcription import ClientTranscription
 
 RACINE = Path(__file__).parent
-POSITIFS = RACINE / "enregistrements" / "positifs"  # « Hey Helios » prononcé
+POSITIFS = RACINE / "enregistrements" / "positifs"  # « Hey Atlas » prononcé
 NEGATIFS = RACINE / "enregistrements" / "negatifs"  # parole normale, sans le mot
 PHRASES = RACINE / "enregistrements" / "phrases"  # énoncés à transcrire
 
@@ -62,7 +62,7 @@ def _blocs(chemin: Path) -> list[bytes]:
 
 
 def mesurer_reveil(seuil: float) -> dict:
-    from helios_audio.reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle
+    from atlas_audio.reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle
 
     detectes = 0
     fichiers = sorted(POSITIFS.glob("*.wav"))
@@ -89,7 +89,7 @@ def retard_fin_enonce(parole: list[bool], silence_ms: int) -> tuple[int | None, 
     """Rend (retard en ms, nombre de fins) pour une suite de verdicts de voix par bloc.
 
     Le retard sépare le dernier bloc de parole de la PREMIÈRE fin décidée : c'est
-    l'attente réelle entre le moment où l'on se tait et celui où Helios le sait.
+    l'attente réelle entre le moment où l'on se tait et celui où Atlas le sait.
     Il vaut None si aucune fin n'est décidée. Chaque enregistrement ne contient
     qu'une phrase : plus d'une fin veut dire que le réglage a coupé la parole.
     """
@@ -146,7 +146,7 @@ async def mesurer_transcription() -> dict:
     taux, latences = [], []
     async with httpx.AsyncClient() as http:
         client = ClientTranscription(
-            os.environ.get("HELIOS_STT_URL", "http://unraid.local:9010"), http
+            os.environ.get("ATLAS_STT_URL", "http://unraid.local:9010"), http
         )
         for nom, attendu in attendus.items():
             pcm = b"".join(_blocs(PHRASES / nom))

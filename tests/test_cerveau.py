@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from helios_core.cerveau import CerveauBouchon
+from atlas_core.cerveau import CerveauBouchon
 
 
 async def _texte(cerveau, demande: str) -> str:
@@ -44,7 +44,7 @@ async def test_l_heure_et_les_minutes_viennent_d_une_seule_lecture(monkeypatch):
 
 
 async def test_il_repond_bonjour():
-    assert "Bonjour" in await _texte(CerveauBouchon(), "bonjour Helios")
+    assert "Bonjour" in await _texte(CerveauBouchon(), "bonjour Atlas")
 
 
 async def test_il_assume_de_ne_pas_savoir():

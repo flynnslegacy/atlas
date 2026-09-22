@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from helios_core.protocole import (
+from atlas_core.protocole import (
     DUREE_BLOC_MS,
     Bonjour,
     Dire,
@@ -37,7 +37,7 @@ from .vad import DetecteurVoix, Endpointeur
 
 _journal = logging.getLogger(__name__)
 
-URL_CORE = os.environ.get("HELIOS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
+URL_CORE = os.environ.get("ATLAS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
 
 DUREE_BLOC_S = DUREE_BLOC_MS / 1000  # 0,020 s joués par trame
 MARGE_SORTIE_S = 0.15  # latence de sortie du haut-parleur, à régler au banc
@@ -64,9 +64,9 @@ class Reglages:
 def lire_reglages() -> Reglages:
     """Lit les réglages dans l'environnement, sinon les valeurs par défaut actuelles."""
     return Reglages(
-        seuil_reveil=float(os.environ.get("HELIOS_REVEIL_SEUIL", "0.5")),
-        silence_ms=int(os.environ.get("HELIOS_SILENCE_MS", "400")),
-        bargein_ms=int(os.environ.get("HELIOS_BARGEIN_MS", "300")),
+        seuil_reveil=float(os.environ.get("ATLAS_REVEIL_SEUIL", "0.5")),
+        silence_ms=int(os.environ.get("ATLAS_SILENCE_MS", "400")),
+        bargein_ms=int(os.environ.get("ATLAS_BARGEIN_MS", "300")),
     )
 
 
@@ -109,7 +109,7 @@ class ClientAudio:
         self._blocs_captures = 0
         self._parole_vue = False
 
-    def _helios_parle_encore(self) -> bool:
+    def _atlas_parle_encore(self) -> bool:
         # Une échéance expire d'elle-même : le micro ne peut jamais rester sourd.
         return self._horloge() < self._fin_lecture + MARGE_SORTIE_S
 
@@ -122,12 +122,12 @@ class ClientAudio:
                 await self._traiter_bloc(bloc)
 
     async def _traiter_bloc(self, bloc: bytes) -> None:
-        if self._helios_parle_encore():
+        if self._atlas_parle_encore():
             await self._surveiller_bargein(bloc)
             return
 
         if not self._capture:
-            # Pas de pré-roulement ici : envoyer « Hey Helios » à Whisper
+            # Pas de pré-roulement ici : envoyer « Hey Atlas » à Whisper
             # polluerait la transcription.
             if self._reveilleur.examiner(bloc):
                 self._ouvrir_capture()
@@ -233,14 +233,14 @@ async def principal() -> None:
     import websockets
     from pydantic import TypeAdapter
 
-    from helios_core.protocole import MessageCore
+    from atlas_core.protocole import MessageCore
 
     adaptateur = TypeAdapter(MessageCore)
     logging.basicConfig(level=logging.INFO)
     # Réglages et réveilleur d'abord : une variable mal formée ou un modèle absent
     # doit échouer avant que le périphérique audio soit ouvert.
     reglages = lire_reglages()
-    if os.environ.get("HELIOS_REVEILLEUR", "touche") == "motcle":
+    if os.environ.get("ATLAS_REVEILLEUR", "touche") == "motcle":
         reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord(), seuil=reglages.seuil_reveil)
     else:
         reveilleur = ReveilleurTouche()

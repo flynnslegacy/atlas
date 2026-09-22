@@ -20,7 +20,7 @@ bench:
 	uv run python bench/bench.py
 
 run-core:
-	uv run uvicorn helios_core.hub:app --host 0.0.0.0 --port 8080
+	uv run uvicorn atlas_core.hub:app --host 0.0.0.0 --port 8080
 
 run-audio:
-	uv run python -m helios_audio.client
+	uv run python -m atlas_audio.client

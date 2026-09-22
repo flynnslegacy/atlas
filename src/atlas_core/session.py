@@ -164,7 +164,7 @@ class Session:
                 n += 1
                 await self._envoyer_binaire(encoder_audio_sortant(identifiant, bloc))
         if n == 0 and phrase.strip():
-            # Sans cela, une synthèse muette (voix absente…) rend Helios silencieux
+            # Sans cela, une synthèse muette (voix absente…) rend Atlas silencieux
             # sans que rien, nulle part, ne dise pourquoi.
             raise RuntimeError(f"la synthèse n'a produit aucun audio pour « {phrase} »")
 

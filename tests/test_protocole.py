@@ -1,6 +1,6 @@
 import pytest
 
-from helios_core.protocole import (
+from atlas_core.protocole import (
     TAILLE_BLOC_OCTETS,
     Etat,
     decoder_audio_entrant,

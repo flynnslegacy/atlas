@@ -31,7 +31,7 @@ async def _cycle_de_vie(app: FastAPI):
         _http = None
 
 
-app = FastAPI(title="helios-core", lifespan=_cycle_de_vie)
+app = FastAPI(title="atlas-core", lifespan=_cycle_de_vie)
 
 
 def creer_session(envoyer_json, envoyer_binaire) -> Session:

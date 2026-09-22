@@ -1,10 +1,10 @@
-# Entraînement du modèle « Hey Helios »
+# Entraînement du modèle « Hey Atlas »
 
 ## Point critique — Français obligatoire
 
-**« Hey Helios » se prononce en FRANÇAIS.** Le générateur d'échantillons d'openWakeWord utilise une
+**« Hey Atlas » se prononce en FRANÇAIS.** Le générateur d'échantillons d'openWakeWord utilise une
 voix anglaise par défaut. Un modèle entraîné sur une prononciation anglaise ne réagira **jamais** 
-à la prononciation française « eille élios ». 
+à la prononciation française « eille atlasse ». 
 
 **Les échantillons positifs doivent être synthétisés avec plusieurs voix Piper FRANÇAISES.**
 
@@ -53,11 +53,11 @@ Placer les fichiers `.onnx` et `.json` dans un répertoire `piper_voices/`.
 Créer un fichier `positive_examples.txt` contenant plusieurs variations du texte:
 
 ```
-Hey Helios
-Hey helios
-hey Helios
-hey helios
-Hey Helios
+Hey Atlas
+Hey atlas
+hey Atlas
+hey atlas
+Hey Atlas
 ```
 
 Générer ~30 000 échantillons positifs avec variation de vitesse et hauteur:
@@ -118,7 +118,7 @@ cd openWakeWord
 
 python -m openwakeword.train \
   --features_dir ./features \
-  --output_model ./hey_helios \
+  --output_model ./hey_atlas \
   --epochs 50 \
   --batch_size 32
 ```
@@ -130,27 +130,27 @@ si elle diverge (augmente au lieu de diminuer), l'apprentissage est instable.
 
 ```bash
 python -m openwakeword.export \
-  --model_path ./hey_helios \
-  --output_path ./hey_helios.onnx \
+  --model_path ./hey_atlas \
+  --output_path ./hey_atlas.onnx \
   --format onnx
 ```
 
 ### 8. Rapatrier le modèle
 
-Copier le fichier vers le dépôt Helios:
+Copier le fichier vers le dépôt Atlas:
 
 ```bash
-scp hey_helios.onnx david@[adresse_locale]:/Users/david/claude-code/Helios/models/hey_helios.onnx
+scp hey_atlas.onnx david@[adresse_locale]:/Users/david/claude-code/Atlas/models/hey_atlas.onnx
 ```
 
 ### 9. Télécharger les modèles de traits d'openWakeWord (sur le MacBook, une seule fois)
 
 openWakeWord 0.6 ne livre pas ses modèles de traits (melspectrogramme et plongements) : sans
-eux, `HELIOS_REVEILLEUR=motcle` échoue au démarrage même avec `hey_helios.onnx` en place. Depuis
-la racine du dépôt Helios, dans son environnement :
+eux, `ATLAS_REVEILLEUR=motcle` échoue au démarrage même avec `hey_atlas.onnx` en place. Depuis
+la racine du dépôt Atlas, dans son environnement :
 
 ```bash
-cd /Users/david/claude-code/Helios
+cd /Users/david/claude-code/Atlas
 uv run python -c "import openwakeword.utils; openwakeword.utils.download_models()"
 ```
 
@@ -161,8 +161,8 @@ uv run python -c "import openwakeword.utils; openwakeword.utils.download_models(
 Une fois le modèle en place, le client audio est prêt à utiliser le wake word:
 
 ```bash
-cd /Users/david/claude-code/Helios
-HELIOS_REVEILLEUR=motcle make run-audio
+cd /Users/david/claude-code/Atlas
+ATLAS_REVEILLEUR=motcle make run-audio
 ```
 
 Le réglage fin du seuil se fait au banc de mesure (tâche 14), pas à l'oreille.

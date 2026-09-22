@@ -1,8 +1,8 @@
 import asyncio
 import logging
 
-from helios_audio.client import ClientAudio, Reglages, lire_reglages
-from helios_core.protocole import (
+from atlas_audio.client import ClientAudio, Reglages, lire_reglages
+from atlas_core.protocole import (
     Dire,
     Erreur,
     Etat,
@@ -90,7 +90,7 @@ class ReveilleurScript:
 
 
 def _client(transport, peripherique, parole: list[bool], reveil_au=0, horloge=None):
-    from helios_audio.vad import Endpointeur
+    from atlas_audio.vad import Endpointeur
 
     return ClientAudio(
         transport=transport,
@@ -304,7 +304,7 @@ async def test_une_erreur_du_core_est_journalisee(caplog):
     t, p = FauxTransport(), FauxPeripherique([])
     c = _client(t, p, parole=[])
 
-    with caplog.at_level(logging.WARNING, logger="helios_audio.client"):
+    with caplog.at_level(logging.WARNING, logger="atlas_audio.client"):
         await c.sur_message(Erreur(code="tour", message="Je n'ai pas pu répondre : voix absente"))
 
     assert "tour" in caplog.text
@@ -312,16 +312,16 @@ async def test_une_erreur_du_core_est_journalisee(caplog):
 
 
 def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):
-    monkeypatch.delenv("HELIOS_REVEIL_SEUIL", raising=False)
-    monkeypatch.delenv("HELIOS_SILENCE_MS", raising=False)
-    monkeypatch.delenv("HELIOS_BARGEIN_MS", raising=False)
+    monkeypatch.delenv("ATLAS_REVEIL_SEUIL", raising=False)
+    monkeypatch.delenv("ATLAS_SILENCE_MS", raising=False)
+    monkeypatch.delenv("ATLAS_BARGEIN_MS", raising=False)
 
     assert lire_reglages() == Reglages(seuil_reveil=0.5, silence_ms=400, bargein_ms=300)
 
 
 def test_lire_reglages_prend_les_variables_d_environnement(monkeypatch):
-    monkeypatch.setenv("HELIOS_REVEIL_SEUIL", "0.7")
-    monkeypatch.setenv("HELIOS_SILENCE_MS", "600")
-    monkeypatch.setenv("HELIOS_BARGEIN_MS", "250")
+    monkeypatch.setenv("ATLAS_REVEIL_SEUIL", "0.7")
+    monkeypatch.setenv("ATLAS_SILENCE_MS", "600")
+    monkeypatch.setenv("ATLAS_BARGEIN_MS", "250")
 
     assert lire_reglages() == Reglages(seuil_reveil=0.7, silence_ms=600, bargein_ms=250)

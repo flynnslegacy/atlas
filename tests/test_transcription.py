@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-from helios_core.protocole import TAILLE_BLOC_OCTETS
-from helios_core.transcription import ClientTranscription, pcm_vers_wav
+from atlas_core.protocole import TAILLE_BLOC_OCTETS
+from atlas_core.transcription import ClientTranscription, pcm_vers_wav
 
 
 def test_pcm_vers_wav_produit_un_entete_lisible():

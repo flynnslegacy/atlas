@@ -1,6 +1,6 @@
 import pytest
 
-from helios_core.etat import MachineEtat, TransitionInterdite
+from atlas_core.etat import MachineEtat, TransitionInterdite
 
 
 def test_l_etat_de_depart_est_le_repos():
