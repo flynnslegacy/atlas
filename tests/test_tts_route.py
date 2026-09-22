@@ -23,10 +23,10 @@ class MoteurEspion:
         return iter([b"\x00" * TAILLE_MORCEAU])
 
 
-def poster(moteur, voix: str):
+def poster(moteur, voix: str, texte: str = "Bonjour."):
     app.dependency_overrides[obtenir_moteur] = lambda: moteur
     try:
-        return TestClient(app).post("/synthesize", json={"text": "Bonjour.", "voice": voix})
+        return TestClient(app).post("/synthesize", json={"text": texte, "voice": voix})
     finally:
         app.dependency_overrides.clear()
 
@@ -56,6 +56,28 @@ def test_les_noms_de_voix_legitimes_sont_acceptes(monkeypatch, voix):
 
     assert r.status_code == 200
     assert espion.appels[0] == ("verifier", voix or "voix_du_moteur")
+
+
+# Le texte fait grossir le plafond de durée, max_new_tokens et le temps passé sous le
+# verrou : sa longueur est bornée à la frontière (1 000 caractères, environ une minute).
+
+
+def test_un_texte_de_plus_de_1000_caracteres_est_refuse_en_422():
+    espion = MoteurEspion()
+
+    r = poster(espion, "atlas_reference", texte="a" * 1001)
+
+    assert r.status_code == 422
+    assert espion.appels == []
+
+
+def test_un_texte_de_1000_caracteres_passe_la_validation():
+    espion = MoteurEspion()
+
+    r = poster(espion, "atlas_reference", texte="a" * 1000)
+
+    assert r.status_code == 200
+    assert espion.appels == [("verifier", "atlas_reference"), ("synthetiser", "atlas_reference")]
 
 
 # Un moteur qui échoue doit le dire par un code d'erreur, pas par un 200 sans son.

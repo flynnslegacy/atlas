@@ -348,7 +348,10 @@ def entete_wav_streaming() -> bytes:
 
 
 class DemandeSynthese(BaseModel):
-    text: str
+    # Le plafond de durée, max_new_tokens et le temps passé sous le verrou grossissent
+    # avec le texte : 1 000 caractères, environ une minute de parole, bien au-delà d'une
+    # phrase envoyée par le Core. Le texte vide ou blanc reste refusé par la route (400).
+    text: str = Field(max_length=1000)
     # Le nom de voix devient un chemin de fichier : ni « / », ni « . », ni « \ », pour
     # qu'il ne sorte jamais du dossier des voix. Vide : la voix par défaut du moteur.
     voice: str = Field("", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
