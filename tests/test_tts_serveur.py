@@ -1,3 +1,4 @@
+import json
 import sys
 
 import pytest
@@ -91,6 +92,9 @@ class MoteurSansFin(MoteurPiper):
             " sys.stdout.flush()",
         ]
 
+    def _frequence(self, modele: str) -> int:
+        return 22050
+
 
 def test_abandonner_le_generateur_termine_le_sous_processus():
     moteur = MoteurSansFin()
@@ -109,3 +113,47 @@ def test_abandonner_le_generateur_termine_le_sous_processus():
             proc.kill()
             proc.wait(timeout=5)
     assert proc.poll() is not None
+
+
+class MoteurUneSeconde(MoteurPiper):
+    """Piper de test : rend exactement une seconde de silence à la fréquence de sa voix."""
+
+    def __init__(self, dossier, frequence: int) -> None:
+        super().__init__(dossier_modeles=str(dossier))
+        self._octets = frequence * 2
+
+    def _commande(self, modele: str) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            f"import sys\nsys.stdin.read()\nsys.stdout.buffer.write(b'\\x00' * {self._octets})",
+        ]
+
+
+def _creer_voix(dossier, nom: str, frequence: int) -> None:
+    (dossier / f"{nom}.onnx").write_bytes(b"")
+    (dossier / f"{nom}.onnx.json").write_text(json.dumps({"audio": {"sample_rate": frequence}}))
+
+
+@pytest.mark.parametrize("frequence", [22050, 44100, 16000])
+def test_une_seconde_de_voix_donne_une_seconde_a_16_khz(tmp_path, frequence):
+    # Chaque voix Piper a sa propre fréquence (Siwis 22 050 Hz, Tom 44 100 Hz) :
+    # la supposer fixe ralentit ou accélère la parole.
+    _creer_voix(tmp_path, "voix", frequence)
+    moteur = MoteurUneSeconde(tmp_path, frequence)
+
+    total = sum(len(bloc) for bloc in moteur.synthetiser("peu importe", "voix"))
+
+    assert abs(total - 16000 * 2) <= 2 * TAILLE_MORCEAU
+
+
+def test_une_configuration_de_voix_absente_est_une_erreur_500(tmp_path):
+    (tmp_path / "voix.onnx").write_bytes(b"")
+    app.dependency_overrides[obtenir_moteur] = lambda: MoteurPiper(dossier_modeles=str(tmp_path))
+    try:
+        r = TestClient(app).post("/synthesize", json={"text": "Bonjour.", "voice": "voix"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 500
+    assert "voix.onnx.json" in r.json()["detail"]

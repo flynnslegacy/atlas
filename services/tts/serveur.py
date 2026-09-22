@@ -6,6 +6,7 @@ de fréquence appartient au service, jamais au reste du pipeline.
 
 from __future__ import annotations
 
+import json
 import os
 import struct
 import subprocess
@@ -65,13 +66,37 @@ class MoteurPiper:
     def _modele(self, voix: str) -> str:
         return f"{self._dossier}/{voix or VOIX_DEFAUT}.onnx"
 
+    def _configuration(self, modele: str) -> str:
+        return f"{modele}.json"
+
+    def _frequence(self, modele: str) -> int:
+        """Fréquence native de la voix, lue dans sa configuration.
+
+        Chaque voix Piper a la sienne (Siwis 22 050 Hz, Tom 44 100 Hz, les voix
+        « low » 16 000 Hz). La supposer fixe ralentit ou accélère la parole.
+        """
+        with open(self._configuration(modele), encoding="utf-8") as fichier:
+            return int(json.load(fichier)["audio"]["sample_rate"])
+
     def verifier(self, voix: str) -> None:
         modele = self._modele(voix)
         if not os.path.isfile(modele):
             raise FileNotFoundError(f"voix Piper introuvable : le fichier {modele} n'existe pas")
+        configuration = self._configuration(modele)
+        if not os.path.isfile(configuration):
+            raise FileNotFoundError(
+                f"configuration de voix Piper introuvable : le fichier {configuration} n'existe pas"
+            )
+        try:
+            self._frequence(modele)
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError(
+                f"configuration de voix Piper illisible : {configuration} ({e})"
+            ) from e
 
     def synthetiser(self, texte: str, voix: str) -> Iterator[bytes]:
         modele = self._modele(voix)
+        frequence = self._frequence(modele)  # lue avant de lancer piper
         proc = subprocess.Popen(
             self._commande(modele),
             stdin=subprocess.PIPE,
@@ -86,7 +111,7 @@ class MoteurPiper:
             # Rééchantillonneur à état : garde son filtre d'une lecture à l'autre pour
             # éviter les discontinuités aux frontières de bloc (soxr.resample le
             # réinitialiserait à chaque appel).
-            rechantillonneur = soxr.ResampleStream(22050, FREQUENCE_SORTIE, 1, dtype="float32")
+            rechantillonneur = soxr.ResampleStream(frequence, FREQUENCE_SORTIE, 1, dtype="float32")
 
             orphelin = b""  # octet isolé d'un échantillon coupé par une lecture
             tampon = b""  # PCM rééchantillonné pas encore découpé en blocs
@@ -167,7 +192,7 @@ def synthetiser(
     # statut ne peut plus changer, et une voix absente rendrait un Atlas muet.
     try:
         moteur.verifier(voix)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     def flux() -> Iterator[bytes]:
