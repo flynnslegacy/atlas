@@ -11,10 +11,18 @@ from typing import Literal
 
 import numpy as np
 
+from helios_core.protocole import TAILLE_BLOC_OCTETS
+
 DUREE_BLOC_MS = 20
 _FENETRE_SILERO = 512  # échantillons attendus par le modèle v5 à 16 kHz
 
 CHEMIN_MODELE = os.environ.get("HELIOS_VAD_MODELE", "models/silero_vad.onnx")
+
+
+def verifier_bloc(bloc: bytes) -> None:
+    """Refuse tout bloc qui n'est pas un bloc de 20 ms, pour échouer franchement."""
+    if len(bloc) != TAILLE_BLOC_OCTETS:
+        raise ValueError(f"Bloc invalide : {len(bloc)} octets reçus, {TAILLE_BLOC_OCTETS} attendus")
 
 
 class DetecteurVoix:
@@ -30,6 +38,7 @@ class DetecteurVoix:
         self._derniere = 0.0
 
     def probabilite(self, bloc: bytes) -> float:
+        verifier_bloc(bloc)
         echantillons = np.frombuffer(bloc, dtype="<i2").astype(np.float32) / 32768.0
         self._reste = np.concatenate([self._reste, echantillons])
         while self._reste.size >= _FENETRE_SILERO:

@@ -1,4 +1,6 @@
-from helios_audio.vad import Endpointeur
+import pytest
+
+from helios_audio.vad import Endpointeur, verifier_bloc
 
 BLOC_MS = 20
 
@@ -45,3 +47,14 @@ def test_reinitialiser_oublie_l_etat():
     _jouer(e, [(True, 300)])
     e.reinitialiser()
     assert _jouer(e, [(False, 1000)]) == []
+
+
+def test_verifier_bloc_accepte_640_octets():
+    bloc_correct = b"\x00" * 640
+    verifier_bloc(bloc_correct)  # Ne doit pas lever
+
+
+def test_verifier_bloc_refuse_100_octets():
+    bloc_mauvais = b"\x00" * 100
+    with pytest.raises(ValueError):
+        verifier_bloc(bloc_mauvais)
