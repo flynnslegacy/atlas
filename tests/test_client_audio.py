@@ -1,8 +1,10 @@
 import asyncio
+import logging
 
 from helios_audio.client import ClientAudio, Reglages, lire_reglages
 from helios_core.protocole import (
     Dire,
+    Erreur,
     Etat,
     FinEnonce,
     Interruption,
@@ -296,6 +298,17 @@ async def test_une_capture_continue_se_clot_au_bout_de_trente_secondes():
 
     assert t.types() == ["reveil", "fin_enonce"]
     assert len(t.binaire) == 1500, "trente secondes de blocs, puis le micro se ferme"
+
+
+async def test_une_erreur_du_core_est_journalisee(caplog):
+    t, p = FauxTransport(), FauxPeripherique([])
+    c = _client(t, p, parole=[])
+
+    with caplog.at_level(logging.WARNING, logger="helios_audio.client"):
+        await c.sur_message(Erreur(code="tour", message="Je n'ai pas pu répondre : voix absente"))
+
+    assert "tour" in caplog.text
+    assert "voix absente" in caplog.text
 
 
 def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):

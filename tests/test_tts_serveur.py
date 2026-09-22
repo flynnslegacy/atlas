@@ -21,6 +21,9 @@ class FauxMoteur:
         for _ in range(3):
             yield b"\x00\x01" * 320
 
+    def verifier(self, voix: str) -> None:
+        pass
+
 
 @pytest.fixture
 def client():
@@ -44,6 +47,17 @@ def test_un_texte_vide_est_refuse(client):
 
 def test_un_texte_uniquement_blanc_est_refuse(client):
     assert client.post("/synthesize", json={"text": "   ", "voice": "fr"}).status_code == 400
+
+
+def test_une_voix_absente_est_une_erreur_500_qui_nomme_le_fichier(tmp_path):
+    app.dependency_overrides[obtenir_moteur] = lambda: MoteurPiper(dossier_modeles=str(tmp_path))
+    try:
+        r = TestClient(app).post("/synthesize", json={"text": "Bonjour.", "voice": "inexistante"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 500
+    assert str(tmp_path / "inexistante.onnx") in r.json()["detail"]
 
 
 def test_la_route_de_sante_repond(client):

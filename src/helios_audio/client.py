@@ -22,6 +22,7 @@ from helios_core.protocole import (
     DUREE_BLOC_MS,
     Bonjour,
     Dire,
+    Erreur,
     FinEnonce,
     Interruption,
     Reveil,
@@ -202,6 +203,8 @@ class ClientAudio:
         elif isinstance(msg, StopAudio):
             self._couper()
             await self._peripherique.vider()
+        elif isinstance(msg, Erreur):
+            _journal.warning("erreur signalée par le Core [%s] : %s", msg.code, msg.message)
         # Etat n'arme ni ne désarme rien : « repos » dit que le Core a fini
         # d'ENVOYER, pas que le son est joué. Seule l'horloge de lecture tranche.
 

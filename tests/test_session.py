@@ -238,3 +238,14 @@ async def test_un_echec_de_transcription_produit_une_erreur_et_revient_au_repos(
     assert any(isinstance(m, Erreur) for m in c.json)
     assert [m for m in c.json if isinstance(m, Etat)][-1].valeur == "repos"
     assert not [m for m in c.json if isinstance(m, Dire)]
+
+
+async def test_une_synthese_muette_produit_une_erreur_et_revient_au_repos():
+    c = Collecteur()
+    s = _session(c, synthese=FausseSynthese(blocs=0))
+    await _tour(s, c)
+    await s.fermer()
+
+    erreur = c.premier(Erreur)
+    assert "aucun audio" in erreur.message
+    assert [m for m in c.json if isinstance(m, Etat)][-1].valeur == "repos"

@@ -31,6 +31,10 @@ class MoteurTTS(Protocol):
         """Rend des morceaux de PCM 16 kHz mono s16le."""
         ...
 
+    def verifier(self, voix: str) -> None:
+        """Lève FileNotFoundError si la voix demandée n'est pas installée."""
+        ...
+
 
 def aligner_sur_echantillons(donnees: bytes) -> tuple[bytes, bytes]:
     """Sépare les octets alignés sur des échantillons de 16 bits du dernier octet orphelin."""
@@ -58,8 +62,16 @@ class MoteurPiper:
     def _commande(self, modele: str) -> list[str]:
         return ["piper", "--model", modele, "--output_raw"]
 
+    def _modele(self, voix: str) -> str:
+        return f"{self._dossier}/{voix or VOIX_DEFAUT}.onnx"
+
+    def verifier(self, voix: str) -> None:
+        modele = self._modele(voix)
+        if not os.path.isfile(modele):
+            raise FileNotFoundError(f"voix Piper introuvable : le fichier {modele} n'existe pas")
+
     def synthetiser(self, texte: str, voix: str) -> Iterator[bytes]:
-        modele = f"{self._dossier}/{voix or VOIX_DEFAUT}.onnx"
+        modele = self._modele(voix)
         proc = subprocess.Popen(
             self._commande(modele),
             stdin=subprocess.PIPE,
@@ -150,10 +162,17 @@ def synthetiser(
 ) -> StreamingResponse:
     if not demande.text.strip():
         raise HTTPException(status_code=400, detail="texte vide")
+    voix = demande.voice or VOIX_DEFAUT
+    # Vérifié AVANT le flux : une fois le 200 et l'en-tête WAV partis, le code de
+    # statut ne peut plus changer, et une voix absente rendrait un Helios muet.
+    try:
+        moteur.verifier(voix)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     def flux() -> Iterator[bytes]:
         yield entete_wav_streaming()
-        yield from moteur.synthetiser(demande.text, demande.voice or VOIX_DEFAUT)
+        yield from moteur.synthetiser(demande.text, voix)
 
     return StreamingResponse(flux(), media_type="audio/wav")
 

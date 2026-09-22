@@ -158,9 +158,15 @@ class Session:
 
     async def _dire(self, identifiant: int, rang: int, phrase: str) -> None:
         await self._envoyer_json(Dire(id_enonce=identifiant, rang=rang, texte=phrase))
+        n = 0
         async with contextlib.aclosing(self._synthese.synthetiser(phrase)) as blocs:
             async for bloc in blocs:
+                n += 1
                 await self._envoyer_binaire(encoder_audio_sortant(identifiant, bloc))
+        if n == 0 and phrase.strip():
+            # Sans cela, une synthèse muette (voix absente…) rend Helios silencieux
+            # sans que rien, nulle part, ne dise pourquoi.
+            raise RuntimeError(f"la synthèse n'a produit aucun audio pour « {phrase} »")
 
     async def _etat(self, valeur) -> None:
         await self._envoyer_json(Etat(valeur=valeur))
