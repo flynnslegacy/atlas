@@ -21,7 +21,7 @@ import soundfile as sf
 import soxr
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 _journal = logging.getLogger(__name__)
 
@@ -334,7 +334,9 @@ def entete_wav_streaming() -> bytes:
 
 class DemandeSynthese(BaseModel):
     text: str
-    voice: str = ""
+    # Le nom de voix devient un chemin de fichier : ni « / », ni « . », ni « \ », pour
+    # qu'il ne sorte jamais du dossier des voix. Vide : la voix par défaut du moteur.
+    voice: str = Field("", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
 
 
 def demarrer_prechauffage(moteur: MoteurTTS | None) -> threading.Thread | None:
