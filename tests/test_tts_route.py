@@ -47,7 +47,9 @@ def test_un_nom_de_voix_qui_pourrait_sortir_du_dossier_est_refuse_en_422(voix):
 @pytest.mark.parametrize(
     "voix", ["", "atlas_reference", "fr_FR-siwis-medium", "fr_FR-tom-medium", "a" * 64]
 )
-def test_les_noms_de_voix_legitimes_sont_acceptes(voix):
+def test_les_noms_de_voix_legitimes_sont_acceptes(monkeypatch, voix):
+    # make test exporte .env : une ATLAS_TTS_VOIX réglée là changerait la voix du cas vide.
+    monkeypatch.delenv("ATLAS_TTS_VOIX", raising=False)
     espion = MoteurEspion()
 
     r = poster(espion, voix)
