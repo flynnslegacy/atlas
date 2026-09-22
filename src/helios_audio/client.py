@@ -28,7 +28,7 @@ from helios_core.protocole import (
 )
 
 from .aec import ouvrir_peripherique
-from .reveilleur import ReveilleurTouche
+from .reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle, ReveilleurTouche
 from .vad import DetecteurVoix, Endpointeur
 
 _journal = logging.getLogger(__name__)
@@ -139,6 +139,11 @@ async def principal() -> None:
     logging.basicConfig(level=logging.INFO)
     peripherique = await ouvrir_peripherique()
 
+    if os.environ.get("HELIOS_REVEILLEUR", "touche") == "motcle":
+        reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord())
+    else:
+        reveilleur = ReveilleurTouche()
+
     async with websockets.connect(URL_CORE) as ws:
         transport = TransportWebSocket(ws)
         client = ClientAudio(
@@ -146,7 +151,7 @@ async def principal() -> None:
             peripherique=peripherique,
             detecteur=DetecteurVoix(),
             endpointeur=Endpointeur(),
-            reveilleur=ReveilleurTouche(),
+            reveilleur=reveilleur,
         )
         await transport.envoyer_json(Bonjour(client="m5", capacites=["aec", "vad"]))
         capture = asyncio.create_task(client.boucle_capture())
