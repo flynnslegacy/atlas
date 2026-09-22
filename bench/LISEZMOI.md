@@ -77,9 +77,19 @@ exacte attendue. Exemple :
 ```
 
 Le fichier livré dans le dépôt est `{}` (vide) : tant qu'il n'y a pas de
-`phrases/*.wav`, il n'y a rien à transcrire, et le banc tourne quand même en
-rapportant des zéros. Ajoute une entrée par phrase au fur et à mesure que tu
-enregistres.
+`phrases/*.wav`, il n'y a rien à transcrire. Ajoute une entrée par phrase au
+fur et à mesure que tu enregistres.
+
+## Prérequis : le modèle Silero
+
+Le banc a besoin du modèle de détection de voix Silero, qui n'est pas dans le
+dépôt (`models/` est ignoré par Git). Sans lui, `make bench` s'arrête tout de
+suite avec un message qui donne cette même commande. Depuis la racine du
+dépôt :
+
+```bash
+mkdir -p models && curl -L -o models/silero_vad.onnx https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx
+```
 
 ## Lancer le banc
 
@@ -92,14 +102,33 @@ make bench
 - `reveil` — pour trois seuils (0.3, 0.5, 0.7), le taux de détection sur
   `positifs/` et le nombre de faux réveils par heure sur `negatifs/`.
 - `endpointage` — pour trois durées de silence (300, 400, 600 ms), le retard
-  médian (en ms) avant que la fin de phrase soit détectée sur `phrases/`.
+  médian (en ms) de la détection de fin de phrase et le nombre de coupures
+  prématurées sur `phrases/` (voir plus bas).
 - `transcription` — le taux d'erreur de mots moyen et la latence médiane (en
   ms) du service de transcription, mesurés sur `phrases/` + `attendus.json`.
 
-Tant que `enregistrements/` est vide (ou absent) et que `attendus.json` vaut
-`{}`, tout tourne sans planter et affiche des zéros partout — c'est l'état
-actuel du dépôt. Aucune connexion réseau n'est ouverte vers le service de
-transcription tant que `attendus.json` ne contient aucune entrée.
+Une fois le modèle Silero en place, tant que `enregistrements/` est vide (ou
+absent) et que `attendus.json` vaut `{}`, tout tourne sans planter et affiche
+des zéros partout — c'est l'état actuel du dépôt. Aucune connexion réseau
+n'est ouverte vers le service de transcription tant que `attendus.json` ne
+contient aucune entrée.
+
+### Ce que mesure `endpointage`
+
+Chaque fichier de `phrases/` contient **une seule phrase**. Pour chacun, le
+banc fait passer l'enregistrement dans un détecteur de voix neuf, puis dans
+l'endpointeur réglé sur la durée de silence testée.
+
+- `retard_median_ms` — le temps entre le **dernier bloc de parole** et la
+  **première fin de phrase décidée** : l'attente réelle entre le moment où tu
+  te tais et celui où Helios le sait. La durée de la phrase elle-même n'y
+  entre pas.
+- `coupures_prematurees` — le nombre de fichiers où l'endpointeur a décidé
+  **plus d'une fin**. Puisqu'il n'y a qu'une phrase par fichier, une deuxième
+  fin veut dire que le réglage t'a coupé la parole au milieu, sur une simple
+  pause. **Toute valeur non nulle disqualifie le réglage**, quel que soit son
+  retard : un réglage court a un petit retard justement parce qu'il coupe
+  trop tôt.
 
 **Ne crois jamais `retard_median_ms` sans regarder à côté (ruling R29).**
 Chaque entrée d'`endpointage` porte aussi `fichiers_mesures` et
@@ -128,8 +157,9 @@ Critères d'acceptation (à appliquer sur les résultats une fois obtenus) :
 - **Seuil de réveil** : retenir la plus petite valeur parmi celles testées
   qui donne **plus de 95 % de détection** sur `positifs/` avec **moins d'un
   faux réveil par heure** sur `negatifs/`.
-- **Durée de silence de fin de phrase** : retenir une valeur dont le
-  **retard médian reste sous 400 ms** sur `phrases/`.
+- **Durée de silence de fin de phrase** : retenir une valeur avec
+  **`coupures_prematurees` à 0** et dont le **retard médian reste sous
+  400 ms** sur `phrases/`.
 
 Le client audio (`src/helios_audio/client.py`) lit ces trois réglages dans
 l'environnement au démarrage (`lire_reglages()`), avec pour défauts les
@@ -141,8 +171,9 @@ les valeurs choisies grâce au banc, édite `.env.example` (et ton `.env`) :
   `detection` > 0.95 avec un `faux_par_heure` < 1.
 - `HELIOS_SILENCE_MS` (défaut `400`) — la durée de silence qui marque la fin
   d'une phrase dite à Helios. Prends la valeur testée par `make bench` dont
-  le `retard_median_ms` d'`endpointage` reste sous 400 ms (une fois vérifié
-  que `fichiers_mesures == fichiers_total`, voir plus haut).
+  les `coupures_prematurees` d'`endpointage` valent 0 et dont le
+  `retard_median_ms` reste sous 400 ms (une fois vérifié que
+  `fichiers_mesures == fichiers_total`, voir plus haut).
 - `HELIOS_BARGEIN_MS` (défaut `300`) — la durée de parole minimale pour
   couper Helios quand il parle (barge-in). Le banc ne le mesure pas
   directement ; laisse la valeur par défaut sauf si l'usage réel montre
