@@ -316,10 +316,13 @@ def test_un_long_silence_au_milieu_de_la_phrase_ne_coupe_rien(dossier_voix):
 
 
 def test_une_phrase_chargee_en_chiffres_n_est_pas_coupee(dossier_voix, caplog):
-    # 28 caractères, mais environ 6 s à dire : 0,2 s par caractère, le double de la
-    # phrase la plus lente du spike (0,10 s). Le plafond ne doit jamais la toucher.
-    texte = "Ton code est 4829 1736 5540."
+    # 0,2 s par caractère : le double de la phrase la plus lente du spike (0,10 s). Le
+    # plafond ne doit jamais la toucher. La phrase est assez longue pour dépasser le
+    # plancher de 8 s : c'est la marge × 4 qui la protège, et une marge de 2,5 la
+    # couperait (75 caractères : 15 s de parole, 11,25 s permises, 18 s avec × 4).
+    texte = "Ton code est 4829 1736 5540, et ton colis 7731 0042 arrive le 14/10 à 9h45."
     duree_s = len(texte) * 0.2
+    assert max(8.0, len(texte) * 0.06 * 2.5) < duree_s < plafond_attendu(texte)
     moteur, _ = moteur_avec(dossier_voix, FauxModele(parole(duree_s)))
 
     with caplog.at_level(logging.WARNING, logger=serveur._journal.name):
