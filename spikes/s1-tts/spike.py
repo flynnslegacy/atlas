@@ -114,6 +114,27 @@ def generer(nom: str, modele, texte: str) -> tuple[np.ndarray, int]:
     return np.asarray(wavs[0], dtype=np.float32), int(sr)
 
 
+def essai_mode_streaming(nom: str, modele) -> dict:
+    """Le paquet expose non_streaming_mode=True par défaut : on mesure l'autre mode."""
+    parametres = {"text": PHRASES[0], "language": "French", "non_streaming_mode": False}
+    try:
+        debut = time.monotonic()
+        if nom == "qwen_preset_uncle_fu":
+            wavs, sr = modele.generate_custom_voice(
+                speaker="Uncle_Fu", instruct=CONSIGNE_PRESET, **parametres
+            )
+        else:
+            wavs, sr = modele.generate_voice_design(instruct=VOIX_DECRITE, **parametres)
+        calcul = time.monotonic() - debut
+        return {
+            "calcul_s": round(calcul, 2),
+            "audio_s": round(len(wavs[0]) / sr, 2),
+            "type_retour": type(wavs).__name__,
+        }
+    except Exception as e:
+        return {"erreur": f"{type(e).__name__}: {e}"}
+
+
 def essayer(candidat: dict, extraits: list, mesures: dict) -> None:
     nom = candidat["nom"]
     rapport: dict = {"phrases": []}
@@ -128,6 +149,8 @@ def essayer(candidat: dict, extraits: list, mesures: dict) -> None:
             modele = charger_qwen(candidat["modele"])
             rapport["chargement_s"] = round(time.monotonic() - debut, 1)
             rapport["streaming"] = api_streaming(modele)
+        if candidat["modele"]:
+            rapport["essai_non_streaming_mode_false"] = essai_mode_streaming(nom, modele)
         for rang, texte in enumerate(PHRASES, start=1):
             debut = time.monotonic()
             audio, sr = generer(nom, modele, texte)
