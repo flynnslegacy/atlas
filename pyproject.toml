@@ -13,7 +13,7 @@ environments = ["sys_platform == 'darwin'"]
 core  = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "websockets>=13"]
 audio = ["sounddevice>=0.5", "numpy>=2.1", "onnxruntime>=1.20", "openwakeword>=0.6"]
 # Avertissement anyio 4.15.1 sur BlockingPortal (v max publiée); httpx2 élimine StarletteDeprecationWarning.
-dev   = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "numpy>=2.1", "soxr>=0.5", "httpx2", "starlette>=1.6", "anyio>=4.15"]
+dev   = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "numpy>=2.1", "soxr>=0.5", "soundfile>=0.12", "httpx2", "starlette>=1.6", "anyio>=4.15"]
 
 [build-system]
 requires = ["hatchling"]
