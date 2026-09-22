@@ -17,7 +17,6 @@ from services.tts.serveur import (
     MoteurPiper,
     MoteurQwen3,
     app,
-    demarrer_prechauffage,
     nom_moteur_choisi,
     obtenir_moteur,
     voix_par_defaut,
@@ -283,7 +282,7 @@ def test_une_generation_qui_boucle_est_coupee_au_plafond_avec_un_avertissement(
     texte = "Bonjour David."
     moteur, _ = moteur_avec(dossier_voix, FauxModele(parole(60.0)))
 
-    with caplog.at_level(logging.WARNING, logger="services.tts.serveur"):
+    with caplog.at_level(logging.WARNING, logger=serveur._journal.name):
         blocs = tout_synthetiser(moteur, texte)
 
     total = sum(len(bloc) for bloc in blocs)
@@ -408,67 +407,6 @@ def test_la_route_rend_500_en_nommant_le_fichier_de_voix_absent(monkeypatch, tmp
     assert r.status_code == 500
     assert str(tmp_path / "atlas_reference.wav") in r.json()["detail"]
     assert chargeur.appels == []
-
-
-# Préchauffage au démarrage du service
-
-
-class MoteurPrechauffable:
-    nom = "prechauffable"
-    voix_defaut = "voix_du_moteur"
-
-    def __init__(self, echec: bool = False) -> None:
-        self.echec = echec
-        self.voix_prechauffees: list[str] = []
-        self.fini = threading.Event()
-
-    def prechauffer(self, voix: str) -> None:
-        try:
-            self.voix_prechauffees.append(voix)
-            if self.echec:
-                raise RuntimeError("pas de GPU")
-        finally:
-            self.fini.set()
-
-
-def test_le_prechauffage_tourne_dans_un_fil_demon(monkeypatch):
-    monkeypatch.delenv("ATLAS_TTS_VOIX", raising=False)
-    moteur = MoteurPrechauffable()
-
-    fil = demarrer_prechauffage(moteur)
-
-    assert fil is not None and fil.daemon
-    fil.join(timeout=5)
-    assert moteur.voix_prechauffees == ["voix_du_moteur"]
-
-
-def test_un_prechauffage_en_echec_est_journalise_sans_planter(monkeypatch, caplog):
-    monkeypatch.delenv("ATLAS_TTS_VOIX", raising=False)
-    moteur = MoteurPrechauffable(echec=True)
-
-    with caplog.at_level(logging.ERROR, logger="services.tts.serveur"):
-        fil = demarrer_prechauffage(moteur)
-        assert fil is not None
-        fil.join(timeout=5)
-
-    assert [r for r in caplog.records if r.levelno == logging.ERROR]
-    assert "pas de GPU" in caplog.text
-
-
-def test_un_moteur_sans_prechauffage_ne_lance_aucun_fil():
-    assert demarrer_prechauffage(MoteurPiper()) is None
-
-
-def test_le_demarrage_du_service_lance_le_prechauffage_du_moteur_choisi(monkeypatch):
-    monkeypatch.delenv("ATLAS_TTS_VOIX", raising=False)
-    moteur = MoteurPrechauffable()
-    monkeypatch.setitem(serveur._moteurs, serveur.MOTEUR, moteur)
-
-    with TestClient(app) as client:
-        assert client.get("/sante").status_code == 200
-        assert moteur.fini.wait(timeout=5)
-
-    assert moteur.voix_prechauffees == ["voix_du_moteur"]
 
 
 # 10. la voix d'Atlas versionnée

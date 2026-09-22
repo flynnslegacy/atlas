@@ -23,7 +23,10 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-_journal = logging.getLogger(__name__)
+# Sous « uvicorn.error » : uvicorn ne configure que ses propres journaux, et un message
+# hors de cette branche serait perdu. C'est le seul moyen pour le propriétaire de voir
+# que le modèle s'est chargé ou qu'une génération a été coupée au plafond.
+_journal = logging.getLogger("uvicorn.error").getChild("atlas_tts")
 
 FREQUENCE_SORTIE = 16000
 TAILLE_MORCEAU = 640  # 20 ms
