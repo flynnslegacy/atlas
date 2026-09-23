@@ -28,7 +28,8 @@ Le lieu d'usage est un bureau calme : clavier, souris, chaise, ventilation, et d
 
 ## 3. Décisions
 
-- **Orthographe pour les synthétiseurs : « Eille Atlasse ».** Le phonétiseur français de Piper (espeak-ng) lit « Hey Atlas » /ɛ atla/, sans le « y » et sans le « s » final. « Eille Atlasse » donne /ɛj atlas/.
+- **Orthographe pour Piper : « Eille Atlasse ».** Le phonétiseur français de Piper (espeak-ng) lit « Hey Atlas » /ɛ atla/, sans le « y » et sans le « s » final. « Eille Atlasse » donne /ɛj atlas/.
+- **Orthographe pour Qwen3 : « Hey Atlas ».** Qwen ne passe pas par espeak, et « Eille Atlasse » le fait trébucher : sur la voix d'Atlas, Whisper y entend « Un atlas » 3 fois sur 3, contre « Hey Atlas » 4 fois sur 6 pour l'orthographe usuelle (24 septembre 2026). Qwen reçoit donc les mêmes phrases, écrites normalement.
 - **« Atlas » seul ne réveille pas.** David parlera souvent de son projet Atlas en visio. Le mot seul, et « Atlas » dans une phrase, sont des exemples négatifs.
 - **Pas de génération de phrases par openWakeWord.** Son générateur et ses phrases proches ne connaissent que l'anglais. Nous fournissons nous-mêmes tous les extraits, positifs comme négatifs, et nous sautons `--generate_clips`.
 - **Voix variées, celle de David en priorité** : hommes, femmes, enfants, âges et timbres variés, plus des enregistrements réels de David.
@@ -43,7 +44,7 @@ Le lieu d'usage est un bureau calme : clavier, souris, chaise, ventilation, et d
 | Voix Qwen3 conçues | environ 8 000 | Une quinzaine de voix de référence créées une fois par description avec le modèle VoiceDesign (hommes, femmes, enfants, âges, accents), puis clonées par le modèle Base, avec plusieurs tirages par voix. |
 | Enregistrements de David | environ 100 | Voir 4.3. Les deux tiers vont à l'entraînement, **dupliqués 20 à 50 fois** : l'option `augmentation_rounds` de `train.py` n'a pas d'effet, et la duplication est le seul moyen de leur donner du poids. Le dernier tiers est réservé au test. |
 
-**Contrôle qualité par Whisper :** chaque extrait synthétisé est transcrit par le service `atlas-stt`. On ne garde que ceux où Whisper entend « atlas » précédé d'une interjection (« hey », « eh », « eille »…).
+**Contrôle qualité par Whisper :** chaque extrait synthétisé est transcrit par le service `atlas-stt`. On ne garde que ceux où Whisper entend « atlas » précédé d'une interjection (« hey », « eh », « eille »…), ou de « et » : « Hé » et « Et » se prononcent pareil, et Whisper écrit « Et Atlas » pour un « Hé, Atlas ! » parfaitement dit (3 fois sur 3 sur la voix d'Atlas).
 
 ### 4.2 Négatifs
 
@@ -163,7 +164,7 @@ Les extraits de `veiller.py` deviennent des négatifs, puis on relance `preparer
 |---|---|
 | Aucun résultat français publié pour openWakeWord ; d'autres langues plafonnent à 45-60 % sur de la parole réelle avec de la synthèse seule | Les enregistrements de David, les faux réveils réinjectés, et le repli microWakeWord |
 | La voix `fr_FR-mls-medium` peut mal dire une phrase courte | On écoute d'abord, et Whisper filtre ensuite |
-| La prononciation de « Eille Atlasse » par Qwen3 n'est pas vérifiée | On écoute la première voix conçue, et Whisper filtre |
+| La prononciation de « Hey Atlas » par Qwen3 varie d'une voix à l'autre | On écoute la première voix conçue, et Whisper filtre. « Eille Atlasse », essayé sur la voix d'Atlas, était mal prononcé : Qwen lit l'orthographe usuelle |
 | `torch 1.13` sur une carte Ada | L'essai à blanc le révèle ; une réussite est rapportée sur une RTX 4090 |
 | Le modèle colle trop à la voix de David au détriment des proches | Voix de synthèse variées, et proches au jeu de test si possible |
 | Les faux positifs par heure affichés par `train.py` ne représentent pas un foyer français | On ne décide que sur les mesures de la §7 |

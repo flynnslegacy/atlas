@@ -153,6 +153,9 @@ manquants s'ajoutent.)
 Le service `atlas-tts` tourne sur le même GPU : on l'arrête le temps de cette
 étape, pour lui laisser la mémoire vidéo.
 
+Qwen lit les phrases en orthographe usuelle (« Hey Atlas ») : « Eille Atlasse »,
+écrit pour le phonétiseur de Piper, le ferait trébucher.
+
 ```bash
 GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
 TRAVAIL="-v <dossier-travail-unraid>:/travail"
@@ -182,6 +185,9 @@ docker start atlas-tts
 Garde uniquement les extraits où Whisper entend ce qu'il faut. `--network
 host` est nécessaire : le conteneur appelle le service `atlas-stt` sur
 `localhost`.
+
+« Et Atlas » compte comme « Hey Atlas » : les deux se prononcent pareil, et
+Whisper, sans contexte, écrit souvent le premier pour le second.
 
 ```bash
 GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"

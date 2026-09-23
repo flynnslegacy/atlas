@@ -2,6 +2,7 @@ from collections import Counter
 
 import numpy as np
 
+from scripts.mot_reveil import generer_qwen
 from scripts.mot_reveil.audio import lire_wav
 from scripts.mot_reveil.generer_qwen import (
     DESCRIPTIONS,
@@ -10,6 +11,7 @@ from scripts.mot_reveil.generer_qwen import (
     concevoir,
     planifier_qwen,
 )
+from scripts.mot_reveil.phrases import NEGATIVES_QWEN, POSITIVES_QWEN
 
 
 def test_planifier_qwen_repartit_a_parts_egales():
@@ -22,6 +24,7 @@ def test_planifier_qwen_repartit_a_parts_egales():
 class FauxModele:
     def __init__(self):
         self.invites = 0
+        self.textes = []
 
     def generate_voice_design(self, text, language, instruct):
         assert language == "French"
@@ -33,6 +36,7 @@ class FauxModele:
         return object()
 
     def generate_voice_clone(self, text, language, voice_clone_prompt, max_new_tokens):
+        self.textes.append(text)
         return [np.full(24000, 0.3, dtype=np.float32)], 24000
 
 
@@ -52,3 +56,12 @@ def test_cloner_calcule_une_invite_par_voix_et_ecrit_du_16k(tmp_path):
     assert modele.invites == 2
     audio, frequence = lire_wav(tmp_path / "sortie" / "qwen_pos_000000.wav")
     assert frequence == 16000 and audio.size > 15000
+
+
+def test_cloner_fait_lire_a_qwen_l_orthographe_usuelle(tmp_path, monkeypatch):
+    # « Eille Atlasse » est écrit pour espeak (Piper) : Qwen le prononce de travers.
+    concevoir(FauxModele(), tmp_path / "references", DESCRIPTIONS[:1])
+    modele = FauxModele()
+    monkeypatch.setattr(generer_qwen, "charger", lambda nom: modele)
+    generer_qwen.main(["cloner", "--sortie", str(tmp_path), "--essai"])
+    assert set(modele.textes) == set(POSITIVES_QWEN) | set(NEGATIVES_QWEN)
