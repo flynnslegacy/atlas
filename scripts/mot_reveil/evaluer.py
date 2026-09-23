@@ -42,21 +42,43 @@ def scores_flux(modele: str, audio: np.ndarray) -> list[float]:
     return [predicteur.score(bloc) for bloc in en_blocs(audio)]
 
 
+def _exiger_non_vide(extraits: dict[str, np.ndarray], dossier: Path) -> None:
+    """Arrête tout avant de charger un modèle si le dossier de test est absent ou vide."""
+    if not extraits:
+        raise SystemExit(
+            f"Aucun enregistrement de test trouvé dans {dossier} : "
+            "evaluer.py attend les enregistrements de David produits par enregistrer.py, "
+            "sous le dossier passé à --donnees."
+        )
+
+
 def mesurer(modele: str, donnees: Path) -> list[dict]:
     positifs = charger(donnees / "positifs", UNE_SUR_DAVID, couper=True)
+    atlas = charger(donnees / "atlas_seul", UNE_SUR_DAVID, couper=True)
+    negatifs = {
+        **charger(donnees / "parole", UNE_SUR_DAVID, couper=False),
+        **charger(donnees / "bureau", UNE_SUR_DAVID, couper=False),
+    }
+    # Avant tout chargement du modèle : un dossier absent ou vide donnerait sinon un
+    # rapport complet et plausible (0 % de détection, 0 faux réveil) indiscernable
+    # d'un modèle parfait.
+    _exiger_non_vide(positifs, donnees / "positifs")
+    _exiger_non_vide(atlas, donnees / "atlas_seul")
+    if not negatifs:
+        raise SystemExit(
+            f"Aucun enregistrement de test trouvé dans {donnees / 'parole'} "
+            f"ni {donnees / 'bureau'} : evaluer.py attend les enregistrements de David "
+            "produits par enregistrer.py, sous le dossier passé à --donnees."
+        )
+
     flux_positifs = {}
     for distance in DISTANCES:
         extraits = {n: a for n, a in positifs.items() if n.startswith(f"{distance}_")}
         if extraits:
             audio, segments = assembler(extraits)
             flux_positifs[distance] = (scores_flux(modele, audio), segments)
-    atlas = charger(donnees / "atlas_seul", UNE_SUR_DAVID, couper=True)
-    scores_atlas = scores_flux(modele, assembler(atlas)[0]) if atlas else []
-    negatifs = {
-        **charger(donnees / "parole", UNE_SUR_DAVID, couper=False),
-        **charger(donnees / "bureau", UNE_SUR_DAVID, couper=False),
-    }
-    scores_negatifs = scores_flux(modele, assembler(negatifs)[0]) if negatifs else []
+    scores_atlas = scores_flux(modele, assembler(atlas)[0])
+    scores_negatifs = scores_flux(modele, assembler(negatifs)[0])
 
     lignes = []
     for seuil in SEUILS:

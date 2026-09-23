@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 
 from scripts.mot_reveil.audio import ecrire_wav
-from scripts.mot_reveil.evaluer import charger
+from scripts.mot_reveil.evaluer import charger, mesurer
 from scripts.mot_reveil.metriques import (
     assembler,
     detectes,
@@ -60,3 +61,21 @@ def test_charger_ne_rend_que_la_part_reservee_au_test(tmp_path):
         ecrire_wav(tmp_path / n, np.full(8000, 0.2, dtype=np.float32))
     extraits = charger(tmp_path, 3, couper=True)
     assert set(extraits) == {n for n in noms if est_test(n, 3)}
+
+
+def _ecrire_extraits_de_test(dossier, prefixe="bureau", n=30):
+    for i in range(n):
+        ecrire_wav(dossier / f"{prefixe}_{i:03d}.wav", np.full(8000, 0.2, dtype=np.float32))
+
+
+def test_mesurer_refuse_sans_charger_de_modele_si_aucun_positif_de_test(tmp_path):
+    # Dossier vide : ni positifs/ ni le reste n'existent. Aucun modèle n'est nécessaire
+    # pour que l'erreur soit levée : la vérification précède tout chargement du modèle.
+    with pytest.raises(SystemExit, match="positifs"):
+        mesurer("modele-inutile.onnx", tmp_path)
+
+
+def test_mesurer_refuse_si_aucun_extrait_atlas_seul_de_test(tmp_path):
+    _ecrire_extraits_de_test(tmp_path / "positifs")
+    with pytest.raises(SystemExit, match="atlas_seul"):
+        mesurer("modele-inutile.onnx", tmp_path)
