@@ -17,7 +17,8 @@ RUN git clone https://github.com/dscripka/openWakeWord /opt/openWakeWord \
 RUN pip install --no-cache-dir torch==1.13.1+cu117 torchaudio==0.13.1+cu117 \
         --extra-index-url https://download.pytorch.org/whl/cu117 \
     && pip install --no-cache-dir -e "/opt/openWakeWord[full]" \
-        "tensorflow-cpu==2.8.1" "pyarrow<15" "fsspec<2024.1.0" soundfile soxr httpx \
+        "numpy<2" "tensorflow-cpu==2.8.1" "pyarrow<15" "fsspec<2024.1.0" soundfile soxr httpx \
+    && python -c "import numpy, torch; torch.from_numpy(numpy.zeros(1)); assert numpy.__version__.startswith('1.')" \
     && python -c "import openwakeword.utils as u; u.download_models()"
 
 # 2. train.py importe generate_samples même sans génération : un bouchon suffit.

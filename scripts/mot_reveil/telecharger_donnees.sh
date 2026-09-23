@@ -9,7 +9,9 @@ HF=https://huggingface.co
 mkdir -p "$D/rir" "$D/fonds/esc50" "$V"
 
 recuperer() {  # recuperer <url> <fichier>
-    [ -s "$2" ] || curl -L --fail -C - -o "$2" "$1"
+    [ -s "$2" ] && return 0
+    curl -L --fail -C - -o "$2.partiel" "$1"
+    mv "$2.partiel" "$2"
 }
 
 # Traits négatifs précalculés (17,3 Go, CC-BY-NC-SA-4.0) et jeu de validation (185 Mo).
