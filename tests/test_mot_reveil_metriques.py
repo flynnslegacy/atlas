@@ -79,3 +79,14 @@ def test_mesurer_refuse_si_aucun_extrait_atlas_seul_de_test(tmp_path):
     _ecrire_extraits_de_test(tmp_path / "positifs")
     with pytest.raises(SystemExit, match="atlas_seul"):
         mesurer("modele-inutile.onnx", tmp_path)
+
+
+def test_mesurer_refuse_si_aucun_negatif_de_test(tmp_path):
+    # positifs/ et atlas_seul/ sont peuplés ; ni parole/ ni bureau/ n'existent : c'est le
+    # troisième ensemble (les négatifs) qui doit être détecté comme vide, avant tout
+    # chargement du modèle.
+    _ecrire_extraits_de_test(tmp_path / "positifs")
+    _ecrire_extraits_de_test(tmp_path / "atlas_seul")
+    with pytest.raises(SystemExit, match="parole") as erreur:
+        mesurer("modele-inutile.onnx", tmp_path)
+    assert "bureau" in str(erreur.value)
