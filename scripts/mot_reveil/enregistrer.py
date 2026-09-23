@@ -40,6 +40,29 @@ async def enregistrer_prise(peripherique, duree_s: float) -> np.ndarray:
     return np.frombuffer(b"".join(blocs), dtype="<i2").astype(np.float32) / 32768.0
 
 
+async def compte_a_rebours(peripherique, delai_s: float) -> None:
+    """Lit et jette `delai_s` de blocs, en affichant un compte à rebours à la seconde.
+
+    Laisse le temps de rejoindre la distance (1,5 m, 3 m) avant que l'enregistrement
+    ne commence réellement ; ces blocs ne sont jamais écrits dans le WAV.
+    """
+    total = round(delai_s / DUREE_BLOC_S)
+    par_seconde = round(1.0 / DUREE_BLOC_S)
+    for i in range(total):
+        if i % par_seconde == 0:
+            print(f"{-(-(total - i) // par_seconde)}…", end=" ", flush=True)
+        await peripherique.lire_bloc()
+    if total:
+        print()
+
+
+async def enregistrer_avec_delai(peripherique, prise: Prise) -> np.ndarray:
+    """Laisse `prise.delai_s` s'écouler, puis enregistre `prise.duree_s` après le signal."""
+    await compte_a_rebours(peripherique, prise.delai_s)
+    print("\a Parle !")
+    return await enregistrer_prise(peripherique, prise.duree_s)
+
+
 async def seance(
     peripherique, prises: list[Prise], dossier: Path, demander: Callable[[str], str] = input
 ) -> int:
@@ -53,7 +76,7 @@ async def seance(
             f"Entrée, puis vas-y ({prise.duree_s:.0f} s)."
         )
         await attendre_entree(peripherique, message, demander)
-        ecrire_wav(chemin, await enregistrer_prise(peripherique, prise.duree_s))
+        ecrire_wav(chemin, await enregistrer_avec_delai(peripherique, prise))
         faites += 1
     return faites
 

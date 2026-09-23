@@ -13,9 +13,9 @@ TONS = (
     "en souriant",
 )
 DISTANCES = (
-    ("bureau", "assis à ton bureau, face au Mac"),
-    ("m150", "debout à 1,5 m du Mac"),
-    ("m300", "à 3 m du Mac"),
+    ("bureau", "assis à ton bureau, face au Mac", 0.0),
+    ("m150", "debout à 1,5 m du Mac", 3.0),
+    ("m300", "à 3 m du Mac", 5.0),
 )
 PHRASES_ATLAS_SEUL = (
     "Atlas.",
@@ -49,15 +49,16 @@ class Prise:
     nom: str  # nom du fichier, sans extension
     consigne: str
     duree_s: float
+    delai_s: float = 0.0  # temps à laisser avant d'enregistrer, pour rejoindre la distance
 
 
 def plan_seance(par_ton: int = 6) -> list[Prise]:
     prises = []
-    for prefixe, lieu in DISTANCES:
+    for prefixe, lieu, delai in DISTANCES:
         for i in range(par_ton * len(TONS)):
             ton = TONS[i % len(TONS)]
             consigne = f"{lieu} : dis « Hey Atlas » {ton}."
-            prises.append(Prise("positifs", f"{prefixe}_{i + 1:03d}", consigne, 3.0))
+            prises.append(Prise("positifs", f"{prefixe}_{i + 1:03d}", consigne, 3.0, delai))
     for i, phrase in enumerate(PHRASES_ATLAS_SEUL, 1):
         prises.append(Prise("atlas_seul", f"atlas_{i:02d}", f"Dis simplement : « {phrase} »", 4.0))
     for i, sujet in enumerate(SUJETS_PAROLE, 1):
