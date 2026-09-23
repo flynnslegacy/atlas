@@ -139,6 +139,11 @@ plus de 300 ms alors qu'Atlas parle, le client coupe la lecture net, vide sa fil
 envoie `barge_in` au Core, qui interrompt la génération en cours et jette les phrases non
 encore prononcées. C'est la raison d'être de D4.
 
+Pendant qu'Atlas parle, cette voix doit aussi dépasser un seuil d'énergie :
+`ATLAS_BARGEIN_DBFS`, −40 dBFS sur 300 ms par défaut. Le spike S2 a montré que l'écho
+résiduel de sa propre voix déclenchait de fausses coupures tant que l'annuleur d'écho
+d'Apple apprenait la pièce, et que ce seuil les écarte (amendé le 23/09/2026).
+
 ### Budget de latence
 
 Du silence de David au premier son de la réponse :
@@ -149,12 +154,19 @@ Du silence de David au premier son de la réponse :
 | Transcription (faster-whisper, GPU) | 300–600 ms |
 | Premier jeton — étage réflexe (Ollama) | ~150 ms |
 | Premier jeton — Claude | 800–1500 ms |
-| Premier morceau audio (TTS) | ~300 ms |
-| **Total, commande mécanique** | **~1,0 s** |
-| **Total, réponse de Claude** | **1,8 – 2,8 s** |
+| Premier morceau audio (TTS Qwen3, morceau rendu en entier) | 1,2 – 1,7 s |
+| **Total, commande mécanique** | **~2 – 3 s** |
+| **Total, réponse de Claude** | **2,7 – 4,2 s** |
 
 Ces chiffres sont des objectifs mesurés par `make bench` (§13), pas des estimations à
 vérifier une fois pour toutes.
+
+**Amendé le 23/09/2026, après le spike S1.** Le budget initial prévoyait ~300 ms pour le
+premier morceau audio, avec un TTS qui streame. La voix retenue, un clone Qwen3-TTS, ne
+rend l'audio qu'une fois le morceau entier généré, en environ la moitié de sa durée : une
+phrase courte de 2 à 3 s met 1,2 à 1,7 s. C'est l'exception approuvée par David (§6.4).
+Avec Piper en repli, le premier morceau revient à ~300 ms, et chaque total baisse
+d'environ une seconde.
 
 ---
 
@@ -228,9 +240,13 @@ commencer à parler avant que la phrase entière soit synthétisée.
 
 **Exception approuvée par David le 22/09/2026 (spike S1).** Qwen3-TTS ne rend l'audio
 qu'une fois le morceau entier généré. Atlas l'accepte : environ une seconde de plus avant
-le premier mot, en échange d'une voix nettement plus naturelle. Le Core découpe les
-réponses en morceaux courts pour tenir ce délai, et le banc de mesure le suit. Piper, en
-repli, streame.
+le premier mot, en échange d'une voix nettement plus naturelle. Piper, en repli, streame.
+
+**À faire en phase 2 (amendé le 23/09/2026).** Pour tenir ce délai, le Core devra découper
+les réponses de Claude en morceaux courts, de longueur bornée, et le banc de mesure devra
+suivre le délai du premier morceau. Rien de cela n'existe encore : en phase 1, les réponses
+du cerveau bouchon sont déjà courtes. `/synthesize` refuse tout texte de plus de 1 000
+caractères, donc aucun morceau ne doit dépasser cette longueur.
 
 ### 6.5 `atlas-web` (servi par le Core)
 
@@ -418,7 +434,7 @@ avant toute ligne de code structurant, et chacune a un repli déjà identifié.
 
 | # | Question | Repli si la réponse est non |
 |---|---|---|
-| S1 | Qwen3-TTS tient-il en français sur le 4070 Ti ? Qualité de voix, latence du premier morceau, VRAM en cohabitation avec ComfyUI. **Tranché le 22/09/2026 : oui, par clonage, avec une exception sur le streaming. Voir le verdict.** | Piper FR ou Kokoro. L'interface `/synthesize` est identique, donc le repli ne coûte qu'un changement de conteneur. |
+| S1 | Qwen3-TTS tient-il en français sur le 4070 Ti ? Qualité de voix, latence du premier morceau, VRAM en cohabitation avec ComfyUI. **Tranché le 22/09/2026 : oui, par clonage, avec une exception sur le streaming. Voir le verdict.** | Piper FR, déjà intégré comme repli configurable (`ATLAS_TTS_MOTEUR=piper`). L'interface `/synthesize` est identique, donc le repli ne coûte qu'un réglage. |
 | S2 | L'AEC d'Apple (Voice Processing, via un binaire Swift) supprime-t-il assez d'écho pour que le barge-in soit utilisable sur enceintes ? **Tranché le 23/09/2026 : oui, avec un seuil d'énergie pendant qu'Atlas parle. Voir le verdict.** | Casque : l'AEC devient inutile, le barge-in reste fonctionnel, le confort baisse. |
 | S3 | Un skill Hermes peut-il appeler un endpoint HTTP externe et rendre la réponse dans Telegram ? | Application web installée sur l'écran d'accueil de l'iPhone, comme envisagé initialement. |
 
