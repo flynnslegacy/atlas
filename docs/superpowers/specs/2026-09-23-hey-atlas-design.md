@@ -39,7 +39,7 @@ Le lieu d'usage est un bureau calme : clavier, souris, chaise, ventilation, et d
 
 | Source | Volume visé | Détail |
 |---|---|---|
-| Voix Piper françaises | environ 30 000 | `fr_FR-mls-medium` (125 locuteurs), `siwis`, `upmc` (2), `gilles`, `tom`, `mls_1840`, soit environ 131 locuteurs. Débits variés (`length_scale` de 0,8 à 1,3). Générées avec piper-sample-generator ≥ 3.0 (`generate_samples_onnx`), puis ramenées de leur fréquence native à 16 kHz. **On écoute un échantillon de `mls` avant de le garder** : sa qualité sur une phrase courte n'est pas garantie. |
+| Voix Piper françaises | environ 30 000 | `fr_FR-mls-medium` (125 locuteurs), `siwis`, `upmc` (2), `gilles`, `tom`, `mls_1840`, soit environ 131 locuteurs. Débits variés (`length_scale` de 0,8 à 1,3). Générées directement avec piper-tts 1.3.0 (`PiperVoice.synthesize` avec `speaker_id` et `length_scale`, API vérifiée), dans un environnement Python séparé de celui de l'entraînement, puis ramenées de leur fréquence native à 16 kHz. **On écoute un échantillon de `mls` avant de le garder** : sa qualité sur une phrase courte n'est pas garantie. |
 | Voix Qwen3 conçues | environ 8 000 | Une quinzaine de voix de référence créées une fois par description avec le modèle VoiceDesign (hommes, femmes, enfants, âges, accents), puis clonées par le modèle Base, avec plusieurs tirages par voix. |
 | Enregistrements de David | environ 100 | Voir 4.3. Les deux tiers vont à l'entraînement, **dupliqués 20 à 50 fois** : l'option `augmentation_rounds` de `train.py` n'a pas d'effet, et la duplication est le seul moyen de leur donner du poids. Le dernier tiers est réservé au test. |
 
@@ -55,7 +55,7 @@ Le lieu d'usage est un bureau calme : clavier, souris, chaise, ventilation, et d
 | Traits ACAV100M | Environ 2 000 heures multilingues, précalculées par openWakeWord (17,3 Go). |
 | Faux réveils réels | À partir de la deuxième itération : les extraits capturés par `veiller.py` (§7). |
 
-### 4.3 Enregistrements de David : environ 15 minutes guidées
+### 4.3 Enregistrements de David : environ 30 minutes, dont une douzaine où il suffit de laisser tourner le micro
 
 Ils sont captés par le vrai chemin du micro, le binaire Swift avec annulation d'écho, à 16 kHz mono, exactement ce qu'Atlas entendra :
 - environ 100 « Hey Atlas » : ton normal, pressé, fatigué, fort, bas ; à trois distances (bureau, 1,5 m, 3 m) ;
@@ -93,7 +93,7 @@ veiller.py ──► donnees/mot_reveil/veille (faux réveils) ──► itérat
 | `filtrer.py` | Unraid, conteneur d'entraînement | Contrôle qualité par le service `atlas-stt`. |
 | `preparer.py` | Unraid, conteneur d'entraînement | Rééchantillonnage à 16 kHz mono int16 ; coupe des silences en gardant environ 100 ms ; séparation entraînement et test ; duplication des extraits de David ; traits des négatifs français ; écriture de `hey_atlas.yml`. |
 | `hey_atlas.yml` (généré) | — | Configuration de `train.py`. |
-| `Dockerfile` et `entrainer.sh` | Unraid | L'environnement d'entraînement figé, et le lancement de `--augment_clips` puis `--train_model`. |
+| `Dockerfile`, `telecharger_donnees.sh` et `entrainer.sh` | Unraid | L'environnement d'entraînement figé, le téléchargement des données, et le lancement de `--augment_clips` puis `--train_model`. |
 | `evaluer.py` | Mac | Mesures de la §7.1, par le chemin exact du client. |
 | `veiller.py` | Mac | Écoute d'une journée ; garde 3 s autour de chaque faux réveil (§7.2). |
 
@@ -117,9 +117,9 @@ Ces faits ont été vérifiés dans le code d'openWakeWord le 23 septembre 2026.
   - openWakeWord au commit `368c037` ;
   - pas de TensorFlow, puisque nous n'avons pas besoin de `.tflite`.
   - Le conteneur se lance avec `--shm-size=32g`.
-- **`piper_sample_generator_path`** doit pointer vers un dossier contenant un `generate_samples.py` importable, même quand on ne génère rien. Un checkout de piper-sample-generator v2.0.0, ou un fichier bouchon d'une ligne, suffit. La génération Piper, elle, utilise piper-sample-generator ≥ 3.0, installé à part.
+- **`piper_sample_generator_path`** doit pointer vers un dossier contenant un `generate_samples.py` importable, même quand on ne génère rien. Un checkout de piper-sample-generator v2.0.0, ou un fichier bouchon d'une ligne, suffit. La génération Piper, elle, utilise piper-tts 1.3.0, installé dans un environnement Python séparé du même conteneur.
 - **Arborescence attendue :** `<output_dir>/hey_atlas/{positive,negative}_{train,test}/*.wav`, en 16 000 Hz exactement, mono int16. `positive_test/` ne doit pas être vide : la fenêtre se calcule sur la médiane de ses extraits, plus 750 ms.
-- **`rir_paths` et `background_paths`** doivent exister. On utilise les réponses impulsionnelles MIT (270 fichiers, 8,4 Mo) et les bruits de bureau de David, plus un fond générique : un fragment d'AudioSet (environ 690 Mo par fragment parquet, l'ancien lien du notebook ne répondant plus) ou FMA.
+- **`rir_paths` et `background_paths`** doivent exister. On utilise les réponses impulsionnelles MIT (270 fichiers, 8,4 Mo) et les bruits de bureau de David, plus un fond générique : ESC-50, 2 000 sons d'environnement de 5 s, sous licence non commerciale comme ACAV100M. L'ancien lien AudioSet du notebook ne répond plus.
 - **Faux positifs par heure affichés par `train.py` :** ils sont calculés sur un jeu de validation anglais (185 Mo, environ 11 h), avec une durée codée en dur. Ce chiffre ne sert que d'indication ; seules comptent les mesures de la §7.
 - **Disque :** environ 50 Go. **Mémoire :** 16 Go ou plus. David a confirmé avoir de la marge sur les deux.
 - **Durée :** environ une journée pour le premier passage, puis 1 à 3 heures par itération.
