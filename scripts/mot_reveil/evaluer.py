@@ -108,7 +108,9 @@ def formater(lignes: list[dict]) -> str:
     rangees = [entete]
     for ligne in lignes:
         d = ligne["detection"]
-        cellules = [f"{d.get(x, 0.0):5.0%}" for x in DISTANCES]
+        # Une distance sans extrait de test (dossier vide ou absent) n'est pas un 0 % :
+        # elle n'a simplement pas été mesurée.
+        cellules = [f"{d[x]:5.0%}" if x in d else f"{'—':^5}" for x in DISTANCES]
         rangees.append(
             f"{ligne['seuil']:4.1f}   {'   '.join(cellules)}   {ligne['global']:5.0%}"
             f"  {ligne['atlas_seul']:14d}  {ligne['faux']:3d} ({ligne['faux_par_heure']:.1f}/h)"

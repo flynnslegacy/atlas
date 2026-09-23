@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from scripts.mot_reveil.audio import ecrire_wav
-from scripts.mot_reveil.evaluer import charger, mesurer
+from scripts.mot_reveil.evaluer import charger, formater, mesurer
 from scripts.mot_reveil.metriques import (
     assembler,
     detectes,
@@ -79,6 +79,23 @@ def test_mesurer_refuse_si_aucun_extrait_atlas_seul_de_test(tmp_path):
     _ecrire_extraits_de_test(tmp_path / "positifs")
     with pytest.raises(SystemExit, match="atlas_seul"):
         mesurer("modele-inutile.onnx", tmp_path)
+
+
+def test_formater_affiche_un_tiret_pour_une_distance_sans_extrait_de_test():
+    """m150 absent du relevé (aucun extrait de test) : 0 % ressemblerait à un échec."""
+    ligne = {
+        "seuil": 0.5,
+        "detection": {"bureau": 0.9, "m300": 1.0},
+        "global": 0.95,
+        "atlas_seul": 0,
+        "faux": 0,
+        "faux_par_heure": 0.0,
+    }
+    ligne_affichee = formater([ligne]).splitlines()[1]
+    cellules = ligne_affichee.split()
+    assert cellules[1] == "90%"  # bureau
+    assert cellules[2] == "—"  # m150 : pas d'extrait de test, jamais un 0 %
+    assert cellules[3] == "100%"  # m300
 
 
 def test_mesurer_refuse_si_aucun_negatif_de_test(tmp_path):

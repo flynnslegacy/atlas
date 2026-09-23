@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 from types import SimpleNamespace
 
@@ -42,3 +43,25 @@ def test_produire_ecrit_du_16k_et_saute_l_existant(tmp_path):
     audio, frequence = lire_wav(tmp_path / "p1.wav")
     assert frequence == 16000 and 15000 < audio.size <= 16000
     assert produire(taches, voix, tmp_path, fabrique_config=config) == 0
+
+
+def test_produire_ecrit_un_manifeste_et_le_complete_a_la_reprise(tmp_path):
+    """Sans lui, David ne peut pas retrouver quels fichiers viennent de la voix mls."""
+    voix = {"v": FausseVoix()}
+    config = lambda **k: k  # noqa: E731
+    taches = [_tache("p1"), _tache("p2")]
+    assert produire(taches, voix, tmp_path, fabrique_config=config) == 2
+    manifeste = json.loads((tmp_path / "manifeste.json").read_text())
+    assert manifeste["p1"] == {
+        "voix": "v",
+        "locuteur": None,
+        "texte": "Eille Atlasse",
+        "vitesse": 1.0,
+    }
+    assert set(manifeste) == {"p1", "p2"}
+
+    # Reprise avec une tâche de plus : le manifeste se complète sans perdre les anciennes.
+    taches_reprise = taches + [_tache("p3")]
+    assert produire(taches_reprise, voix, tmp_path, fabrique_config=config) == 1
+    manifeste_reprise = json.loads((tmp_path / "manifeste.json").read_text())
+    assert set(manifeste_reprise) == {"p1", "p2", "p3"}
