@@ -35,7 +35,7 @@ Qwen.
 7. Filtrer les extraits par Whisper
 8. Essai à blanc (préparation + entraînement)
 9. Vrai entraînement
-10. Rapatrier le modèle sur le Mac et l'évaluer
+10. Rapatrier le modèle et l'évaluer
 11. Une journée de veille
 12. Boucler jusqu'aux critères d'arrêt
 
@@ -70,8 +70,12 @@ gardant l'arborescence (`positifs/`, `atlas_seul/`, `parole/`, `bureau/`).
 
 ## 3. Construire l'image (Unraid)
 
-Depuis `<clone-du-depot>`, sur l'Unraid. Ces deux variables sont réutilisées
-par toutes les commandes du conteneur ci-dessous :
+Depuis `<clone-du-depot>`, sur l'Unraid. `GPU` et `TRAVAIL` sont de simples
+variables shell, pas des variables d'environnement : elles ne survivent pas
+d'un terminal à l'autre. **Chaque nouvelle session de terminal doit donc les
+redéfinir** — c'est pourquoi les deux lignes ci-dessous réapparaissent dans
+chaque bloc de commande qui les utilise, jusqu'à la fin de ce document ;
+copie-colle le bloc en entier plutôt que la seule ligne `docker run`.
 
 ```bash
 GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
@@ -86,6 +90,9 @@ Environ 20 Go (traits ACAV100M, jeu de validation, réponses impulsionnelles,
 ESC-50, voix Piper). Reprend là où le téléchargement s'était arrêté :
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker run --rm -it $TRAVAIL atlas-mot-reveil bash scripts/mot_reveil/telecharger_donnees.sh
 ```
 
@@ -94,6 +101,9 @@ docker run --rm -it $TRAVAIL atlas-mot-reveil bash scripts/mot_reveil/telecharge
 D'abord un essai (50 positifs, 50 négatifs) :
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker run --rm -it $TRAVAIL atlas-mot-reveil \
     /opt/piper/bin/python -m scripts.mot_reveil.generer_piper \
     --voix /travail/voix_piper --sortie /travail/clips/piper --essai
@@ -104,6 +114,9 @@ docker run --rm -it $TRAVAIL atlas-mot-reveil \
 Si elle déçoit, la vraie génération l'exclut :
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 # Voix mls convaincante :
 docker run --rm -it $TRAVAIL atlas-mot-reveil \
     /opt/piper/bin/python -m scripts.mot_reveil.generer_piper \
@@ -125,6 +138,9 @@ Le service `atlas-tts` tourne sur le même GPU : on l'arrête le temps de cette
 étape, pour lui laisser la mémoire vidéo.
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker stop atlas-tts
 docker run --rm -it $GPU $TRAVAIL -v <cache-huggingface-hote>:/root/.cache/huggingface \
     -v <clone-du-depot>/scripts:/app/scripts atlas-tts \
@@ -136,6 +152,9 @@ docker run --rm -it $GPU $TRAVAIL -v <cache-huggingface-hote>:/root/.cache/huggi
 Puis clone les phrases sur ces voix, et relance `atlas-tts` :
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker run --rm -it $GPU $TRAVAIL -v <cache-huggingface-hote>:/root/.cache/huggingface \
     -v <clone-du-depot>/scripts:/app/scripts atlas-tts \
     python -m scripts.mot_reveil.generer_qwen cloner --sortie /travail/clips/qwen
@@ -149,6 +168,9 @@ host` est nécessaire : le conteneur appelle le service `atlas-stt` sur
 `localhost`.
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker run --rm -it --network host $TRAVAIL atlas-mot-reveil \
     /opt/piper/bin/python -m scripts.mot_reveil.filtrer \
     --clips /travail/clips --retenus /travail/retenus --stt http://localhost:9010
@@ -160,6 +182,9 @@ Vérifie que toute la chaîne tourne avant de lancer plusieurs heures
 d'entraînement pour de vrai (300 extraits, 500 pas) :
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker run --rm -it $TRAVAIL atlas-mot-reveil python -m scripts.mot_reveil.preparer --travail /travail --essai
 docker run --rm -it $GPU --shm-size=32g $TRAVAIL atlas-mot-reveil bash scripts/mot_reveil/entrainer.sh
 ```
@@ -176,26 +201,35 @@ pas) : seule l'absence d'erreur compte ici.
 
 ## 9. Vrai entraînement
 
-Mêmes commandes, sans `--essai` (toutes les données retenues, 50 000 pas) :
+Mêmes commandes, sans `--essai` (toutes les données retenues, 50 000 pas).
+**C'est aussi le point où tu reviens à chaque tour de la boucle (étape 12),**
+parfois plusieurs jours après et dans un terminal tout neuf : les deux lignes
+`GPU`/`TRAVAIL` ci-dessous sont à redéfinir à chaque fois, faute de quoi elles
+sont vides et `docker run` perd silencieusement le GPU et/ou le montage
+`/travail`.
 
 ```bash
+GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+TRAVAIL="-v <dossier-travail-unraid>:/travail"
+
 docker run --rm -it $TRAVAIL atlas-mot-reveil python -m scripts.mot_reveil.preparer --travail /travail
 docker run --rm -it $GPU --shm-size=32g $TRAVAIL atlas-mot-reveil bash scripts/mot_reveil/entrainer.sh
 ```
 
 Ça prend plusieurs heures sur le GPU.
 
-## 10. Rapatrier le modèle et l'évaluer (Mac)
+## 10. Rapatrier le modèle et l'évaluer
 
-Depuis là où `<dossier-travail-unraid>` est accessible (l'Unraid lui-même, ou
-tout autre moyen de copie) :
+### Sur l'Unraid (ou depuis où `<dossier-travail-unraid>` est visible)
 
 ```bash
 scp <dossier-travail-unraid>/modele/hey_atlas.onnx <ton-mac>:models/hey_atlas.onnx  # ou tout autre moyen de copie
 ```
 
-Puis, depuis la racine du dépôt sur ton Mac (les modèles de traits
-d'openWakeWord ne se téléchargent qu'une fois) :
+### Sur le Mac
+
+Depuis la racine du dépôt (les modèles de traits d'openWakeWord ne se
+téléchargent qu'une fois) :
 
 ```bash
 uv run python -c "import openwakeword.utils as u; u.download_models()"
