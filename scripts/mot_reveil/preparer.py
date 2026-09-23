@@ -80,6 +80,7 @@ def preparer(
     # 4. Parole et bureau de David (hors test) : traits négatifs, et bruits de fond.
     morceaux = []
     fonds = travail / "donnees" / "fonds" / "bureau_david"
+    shutil.rmtree(fonds, ignore_errors=True)  # sinon un fond retiré de la source y resterait
     for sous in ("parole", "bureau"):
         for chemin in sorted((david / sous).glob("*.wav")):
             if est_test(chemin.name, UNE_SUR_DAVID):
@@ -93,11 +94,13 @@ def preparer(
             travail / "donnees" / "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
         )
     }
+    chemin_traits = travail / "donnees" / "traits_david.npy"
     if morceaux:
-        chemin_traits = travail / "donnees" / "traits_david.npy"
         chemin_traits.parent.mkdir(parents=True, exist_ok=True)
         np.save(chemin_traits, extraire(np.concatenate(morceaux)).astype(np.float32))
         traits["negatifs_david"] = str(chemin_traits)
+    else:
+        chemin_traits.unlink(missing_ok=True)  # sinon un traits_david.npy d'avant reste orphelin
 
     ecrire(
         configuration(travail, traits, PAS_ESSAI if essai else PAS),

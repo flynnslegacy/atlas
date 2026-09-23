@@ -103,3 +103,32 @@ def test_preparer_refuse_un_test_positif_vide(tmp_path):
     (tmp_path / "retenus" / "positifs").mkdir(parents=True)
     with pytest.raises(SystemExit, match="positive_test"):
         preparer(tmp_path, _extraire)
+
+
+def test_preparer_purge_les_bureau_supprimes_a_la_source(tmp_path):
+    """Un fond de bureau retiré de la source ne doit pas survivre à la prochaine préparation."""
+    _travail(tmp_path)
+    preparer(tmp_path, _extraire)
+    fonds = tmp_path / "donnees" / "fonds" / "bureau_david"
+    noms_bureau = [f"bureau_{i:02d}.wav" for i in range(6)]
+    garde = next(n for n in noms_bureau if not est_test(n, 3))
+    assert (fonds / garde).exists()
+    (tmp_path / "david" / "bureau" / garde).unlink()
+    preparer(tmp_path, _extraire)
+    assert not (fonds / garde).exists()
+
+
+def test_preparer_purge_les_traits_orphelins(tmp_path):
+    """Sans parole ni bureau à traiter, un traits_david.npy d'avant reste orphelin sans purge."""
+    _travail(tmp_path)
+    preparer(tmp_path, _extraire)
+    chemin_traits = tmp_path / "donnees" / "traits_david.npy"
+    assert chemin_traits.exists()
+    for chemin in (tmp_path / "david" / "parole").glob("*.wav"):
+        chemin.unlink()
+    for chemin in (tmp_path / "david" / "bureau").glob("*.wav"):
+        chemin.unlink()
+    preparer(tmp_path, _extraire)
+    assert not chemin_traits.exists()
+    config = json.loads((tmp_path / "entrainement" / "hey_atlas.yml").read_text())
+    assert "negatifs_david" not in config["feature_data_files"]
