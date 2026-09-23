@@ -1,11 +1,15 @@
 import json
+import re
+import sys
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
+from scripts.mot_reveil import generer_piper
 from scripts.mot_reveil.audio import lire_wav
-from scripts.mot_reveil.generer_piper import Tache, planifier, produire
+from scripts.mot_reveil.generer_piper import VOIX, Tache, planifier, produire
 
 
 def test_planifier_est_reproductible_et_couvre_les_locuteurs():
@@ -65,3 +69,60 @@ def test_produire_ecrit_un_manifeste_et_le_complete_a_la_reprise(tmp_path):
     assert produire(taches_reprise, voix, tmp_path, fabrique_config=config) == 1
     manifeste_reprise = json.loads((tmp_path / "manifeste.json").read_text())
     assert set(manifeste_reprise) == {"p1", "p2", "p3"}
+
+
+def test_seules_les_voix_validees_a_l_oreille_sont_telechargees_et_generees():
+    # Écoute du 24 septembre 2026 : mls, upmc et mls_1840 disent n'importe quoi.
+    assert VOIX == ("fr_FR-siwis-medium", "fr_FR-tom-medium", "fr_FR-gilles-low")
+    script = (Path(generer_piper.__file__).parent / "telecharger_donnees.sh").read_text()
+    liste = re.search(r"for voix in (.*?); do", script, re.DOTALL).group(1)
+    assert tuple(liste.replace("\\", " ").split()) == VOIX
+
+
+def test_l_essai_s_ecrit_a_part_pour_ne_jamais_entrer_dans_l_entrainement(tmp_path, monkeypatch):
+    chargees = []
+
+    def charger(chemin):
+        chargees.append(Path(chemin).stem)
+        return FausseVoix()
+
+    faux_piper = SimpleNamespace(
+        PiperVoice=SimpleNamespace(load=charger), SynthesisConfig=lambda **k: k
+    )
+    monkeypatch.setitem(sys.modules, "piper", faux_piper)
+    voix = tmp_path / "voix"
+    voix.mkdir()
+    for nom in VOIX + ("fr_FR-mls-medium", "fr_FR-upmc-medium"):
+        (voix / f"{nom}.onnx").touch()
+    sortie = tmp_path / "piper"
+    generer_piper.main(["--voix", str(voix), "--sortie", str(sortie), "--essai"])
+    assert sorted(chargees) == sorted(VOIX)
+    assert len(list((sortie / "essai" / "positifs").glob("*.wav"))) == 50
+    assert len(list((sortie / "essai" / "negatifs").glob("*.wav"))) == 50
+    assert not (sortie / "positifs").exists()
+
+
+class VoixQuiTombe(FausseVoix):
+    """Tombe (docker stop, crash…) au deuxième extrait."""
+
+    def __init__(self):
+        super().__init__()
+        self.appels = 0
+
+    def synthesize(self, texte, syn_config=None):
+        self.appels += 1
+        if self.appels > 1:
+            raise RuntimeError("arrêt brutal")
+        yield from super().synthesize(texte, syn_config)
+
+
+def test_produire_complete_le_manifeste_apres_un_arret_brutal(tmp_path):
+    """Sinon l'extrait écrit avant l'arrêt, sauté à la reprise, ne serait jamais écouté."""
+    config = lambda **k: k  # noqa: E731
+    taches = [_tache("p1"), _tache("p2")]
+    try:
+        produire(taches, {"v": VoixQuiTombe()}, tmp_path, fabrique_config=config)
+    except RuntimeError:
+        pass
+    assert produire(taches, {"v": FausseVoix()}, tmp_path, fabrique_config=config) == 1
+    assert set(json.loads((tmp_path / "manifeste.json").read_text())) == {"p1", "p2"}

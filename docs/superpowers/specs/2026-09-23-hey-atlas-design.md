@@ -36,21 +36,21 @@ Le lieu d'usage est un bureau calme : clavier, souris, chaise, ventilation, et d
 
 ## 4. Les données
 
-### 4.1 Positifs : environ 40 000 extraits d'une à deux secondes
+### 4.1 Positifs : environ 18 000 extraits d'une à deux secondes
 
 | Source | Volume visé | Détail |
 |---|---|---|
-| Voix Piper françaises | environ 30 000 | `fr_FR-mls-medium` (125 locuteurs), `siwis`, `upmc` (2), `gilles`, `tom`, `mls_1840`, soit environ 131 locuteurs. Débits variés (`length_scale` de 0,8 à 1,3). Générées directement avec piper-tts 1.3.0 (`PiperVoice.synthesize` avec `speaker_id` et `length_scale`, API vérifiée), dans un environnement Python séparé de celui de l'entraînement, puis ramenées de leur fréquence native à 16 kHz. **On écoute un échantillon de `mls` avant de le garder** : sa qualité sur une phrase courte n'est pas garantie. |
-| Voix Qwen3 conçues | environ 8 000 | Une quinzaine de voix de référence créées une fois par description avec le modèle VoiceDesign (hommes, femmes, enfants, âges, accents), puis clonées par le modèle Base, avec plusieurs tirages par voix. |
+| Voix Piper françaises | environ 6 000 | `siwis`, `tom` et `gilles`, les seules qui disent « Hey Atlas » juste à l'écoute (essais du 24 septembre 2026). Écartées : `mls` (125 locuteurs) et `mls_1840`, qui produisent 2 à 9 s de charabia pour deux mots (4,5 s en médiane pour `mls`), et `upmc`, qui prononce faux. Débits variés (`length_scale` de 0,8 à 1,3). Générées directement avec piper-tts 1.3.0 (`PiperVoice.synthesize` avec `speaker_id` et `length_scale`, API vérifiée), dans un environnement Python séparé de celui de l'entraînement, puis ramenées de leur fréquence native à 16 kHz. |
+| Voix Qwen3 conçues | environ 12 000 | La source principale, qui remplace la diversité perdue avec `mls` : une quarantaine de voix de référence créées une fois par description avec le modèle VoiceDesign (hommes, femmes, enfants, âges, accents régionaux et francophones, timbres), puis clonées par le modèle Base, avec plusieurs tirages par voix. Chaque voix dit une fois « Hey Atlas » dans un essai que David écoute ; une voix ratée est écartée en retirant sa référence. |
 | Enregistrements de David | environ 100 | Voir 4.3. Les deux tiers vont à l'entraînement, **dupliqués 20 à 50 fois** : l'option `augmentation_rounds` de `train.py` n'a pas d'effet, et la duplication est le seul moyen de leur donner du poids. Le dernier tiers est réservé au test. |
 
-**Contrôle qualité par Whisper :** chaque extrait synthétisé est transcrit par le service `atlas-stt`. On ne garde que ceux où Whisper entend « atlas » précédé d'une interjection (« hey », « eh », « eille »…), ou de « et » : « Hé » et « Et » se prononcent pareil, et Whisper écrit « Et Atlas » pour un « Hé, Atlas ! » parfaitement dit (3 fois sur 3 sur la voix d'Atlas).
+**Contrôle qualité :** les positifs synthétisés sont jugés à l'oreille, voix par voix, sur les essais, puis à leur durée (0,4 à 2 s), qui écarte le charabia. Whisper ne les juge pas : sur deux mots isolés, il ne reconnaît « Hey Atlas » que dans 29 % des prises de David, et transcrit « Un atlas » ou « Et à tout à l'heure » des extraits Piper justes à l'oreille (24 septembre 2026). Il garde son rôle pour les négatifs (4.2) : on écarte ceux où il entend « atlas » précédé d'une interjection (« hey », « eh », « eille »…) ou de « et », car « Hé » et « Et » se prononcent pareil.
 
 ### 4.2 Négatifs
 
 | Source | Détail |
 |---|---|
-| Phrases proches | « Atlas » et « Atlasse » seuls ; « le projet Atlas », « Atlas, c'est prêt ? » ; « hélas », « et là », « c'est là », « est-ce là », « halte-là », « à las », « eh t'as vu » ; « eille Nicolas », « eille Thomas », « eille Lucas », « eille Alex » ; « au Texas », « Dallasse », « palace », « l'atlas routier », « atlantique ». Dites par les mêmes voix Piper et Qwen que les positifs, et passées au même crible Whisper. |
+| Phrases proches | « Atlas » et « Atlasse » seuls ; « le projet Atlas », « Atlas, c'est prêt ? » ; « hélas », « et là », « c'est là », « est-ce là », « halte-là », « à las », « eh t'as vu » ; « eille Nicolas », « eille Thomas », « eille Lucas », « eille Alex » ; « au Texas », « Dallasse », « palace », « l'atlas routier », « atlantique ». Dites par les mêmes voix Piper et Qwen que les positifs, puis passées à Whisper, qui écarte celles qui sonnent comme « Hey Atlas ». |
 | Parole normale de David | Environ 10 minutes où il parle sans dire le mot, découpées en fenêtres de 2 s, puis converties en traits openWakeWord : un fichier `.npy` supplémentaire, ajouté à `feature_data_files` et `batch_n_per_class`. |
 | Bruits du bureau de David | 10 à 15 minutes : clavier, souris, chaise, ventilation. Ils servent de négatifs, et de fond sonore pour l'enrichissement des extraits (`background_paths`). |
 | Traits ACAV100M | Environ 2 000 heures multilingues, précalculées par openWakeWord (17,3 Go). |
@@ -91,7 +91,8 @@ veiller.py ──► donnees/mot_reveil/veille (faux réveils) ──► itérat
 | `enregistrer.py` | Mac | Guide David, phrase par phrase, et enregistre chaque extrait par le binaire Swift. |
 | `generer_piper.py` | Unraid, conteneur d'entraînement | Positifs et négatifs Piper. |
 | `generer_qwen.py` | Unraid, conteneur ponctuel lancé depuis l'image `atlas-tts` | Conçoit les voix de référence (VoiceDesign), puis clone les phrases (Base). Le service `atlas-tts` est arrêté pendant ce temps, pour libérer la mémoire vidéo : les deux modèles occupent environ 9 Go. |
-| `filtrer.py` | Unraid, conteneur d'entraînement | Contrôle qualité par le service `atlas-stt`. |
+| `ecouter.py` | Mac | Fait écouter à David les essais Piper et Qwen rapatriés, voix par voix, avec la description de chaque voix Qwen. |
+| `filtrer.py` | Unraid, conteneur d'entraînement | Contrôle qualité : durée des positifs ; Whisper (`atlas-stt`) pour les négatifs. Ignore les dossiers `essai/`. |
 | `preparer.py` | Unraid, conteneur d'entraînement | Rééchantillonnage à 16 kHz mono int16 ; coupe des silences en gardant environ 100 ms ; séparation entraînement et test ; duplication des extraits de David ; traits des négatifs français ; écriture de `hey_atlas.yml`. |
 | `hey_atlas.yml` (généré) | — | Configuration de `train.py`. |
 | `Dockerfile`, `telecharger_donnees.sh` et `entrainer.sh` | Unraid | L'environnement d'entraînement figé, le téléchargement des données, et le lancement de `--augment_clips` puis `--train_model`. |
@@ -105,7 +106,7 @@ Les fonctions logiques sont séparées des entrées-sorties, et testées : déco
 1. **Piper :** processeur seulement.
 2. **Qwen :** conteneur ponctuel, service `atlas-tts` arrêté.
 3. **Whisper :** le service `atlas-tts` peut être relancé ; ensemble, Whisper et la voix d'Atlas tiennent dans les 12 Go.
-4. **Préparation et entraînement :** moins de 2 Go de mémoire vidéo, services relancés au besoin, ComfyUI au repos.
+4. **Préparation et entraînement :** moins de 2 Go de mémoire vidéo, services relancés au besoin. ComfyUI reste arrêté pendant toutes ces étapes : même inactif, il garde ses modèles en mémoire vidéo, et `atlas-stt` échoue alors (erreur 500, 0,1 Go libre sur 11,6, constaté le 24 septembre 2026).
 
 ## 6. L'environnement d'entraînement
 
@@ -163,8 +164,8 @@ Les extraits de `veiller.py` deviennent des négatifs, puis on relance `preparer
 | Risque | Parade |
 |---|---|
 | Aucun résultat français publié pour openWakeWord ; d'autres langues plafonnent à 45-60 % sur de la parole réelle avec de la synthèse seule | Les enregistrements de David, les faux réveils réinjectés, et le repli microWakeWord |
-| La voix `fr_FR-mls-medium` peut mal dire une phrase courte | On écoute d'abord, et Whisper filtre ensuite |
-| La prononciation de « Hey Atlas » par Qwen3 varie d'une voix à l'autre | On écoute la première voix conçue, et Whisper filtre. « Eille Atlasse », essayé sur la voix d'Atlas, était mal prononcé : Qwen lit l'orthographe usuelle |
+| La voix `fr_FR-mls-medium` peut mal dire une phrase courte | Confirmé par l'essai du 24 septembre 2026, et pire que prévu : `mls`, `mls_1840` et `upmc` sont écartées, et les voix gardées sont écrites en dur. Qwen compense la perte de locuteurs |
+| La prononciation de « Hey Atlas » par Qwen3 varie d'une voix à l'autre | Un « Hey Atlas » par voix, écouté avant le clonage complet ; les voix ratées sont écartées. « Eille Atlasse », essayé sur la voix d'Atlas, était mal prononcé : Qwen lit l'orthographe usuelle |
 | `torch 1.13` sur une carte Ada | L'essai à blanc le révèle ; une réussite est rapportée sur une RTX 4090 |
 | Le modèle colle trop à la voix de David au détriment des proches | Voix de synthèse variées, et proches au jeu de test si possible |
 | Les faux positifs par heure affichés par `train.py` ne représentent pas un foyer français | On ne décide que sur les mesures de la §7 |

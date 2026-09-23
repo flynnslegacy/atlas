@@ -7,8 +7,9 @@ from scripts.mot_reveil.phrases import (
     NEGATIVES_QWEN,
     POSITIVES,
     POSITIVES_QWEN,
-    a_garder,
     entend_hey_atlas,
+    garder_negatif,
+    garder_positif,
 )
 from scripts.mot_reveil.repartition import est_test, noms_copies, repartir
 
@@ -50,16 +51,19 @@ def test_qwen_recoit_les_memes_phrases_en_orthographe_usuelle():
     assert not any(re.search(r"Eille|asse\b", t) for t in POSITIVES_QWEN + NEGATIVES_QWEN)
 
 
-def test_a_garder_un_positif_exige_hey_atlas_et_une_duree_courte():
-    assert a_garder("Hey Atlas.", positif=True, duree_s=1.2)
-    assert not a_garder("Atlas.", positif=True, duree_s=1.2)
-    assert not a_garder("Hey Atlas.", positif=True, duree_s=2.5)
+def test_un_positif_se_juge_a_sa_duree_seulement():
+    # Whisper ne reconnaît pas deux mots isolés (29 % des prises de David) ; les voix
+    # qui déraillent, elles, produisent 3 à 9 s de charabia.
+    assert garder_positif(0.9) and garder_positif(0.4) and garder_positif(2.0)
+    assert not garder_positif(0.3)  # un claquement, pas deux mots
+    assert not garder_positif(2.9)  # le charabia de gilles commence à 2,9 s
 
 
-def test_a_garder_un_negatif_refuse_ce_qui_sonne_comme_le_mot():
-    assert a_garder("Atlas.", positif=False, duree_s=0.8)
-    assert not a_garder("Hey Atlas", positif=False, duree_s=1.0)
-    assert not a_garder("Hélas", positif=False, duree_s=4.0)
+def test_un_negatif_refuse_ce_qui_sonne_comme_le_mot():
+    assert garder_negatif("Atlas.", duree_s=0.8)
+    assert not garder_negatif("Hey Atlas", duree_s=1.0)
+    assert not garder_negatif("Et Atlas.", duree_s=1.0)
+    assert not garder_negatif("Hélas", duree_s=4.0)
 
 
 def test_est_test_est_stable_et_proche_de_la_proportion():
