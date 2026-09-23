@@ -1,19 +1,38 @@
+import re
+
 import pytest
 
-from scripts.mot_reveil.phrases import NEGATIVES, POSITIVES, a_garder, entend_hey_atlas
+from scripts.mot_reveil.phrases import (
+    NEGATIVES,
+    NEGATIVES_QWEN,
+    POSITIVES,
+    POSITIVES_QWEN,
+    a_garder,
+    entend_hey_atlas,
+)
 from scripts.mot_reveil.repartition import est_test, noms_copies, repartir
 
 
 @pytest.mark.parametrize(
     "texte",
-    ["Hey Atlas.", "Eh, Atlas !", "Hé Atlas", "hey atlasse", "Alors, hey Atlas, tu m'entends ?"],
+    [
+        "Hey Atlas.",
+        "Eh, Atlas !",
+        "Hé Atlas",
+        "hey atlasse",
+        "Alors, hey Atlas, tu m'entends ?",
+        # « Hé » et « Et » se prononcent pareil : Whisper écrit souvent « Et Atlas ».
+        "Et Atlas.",
+        "et atlas",
+    ],
 )
 def test_entend_hey_atlas(texte):
     assert entend_hey_atlas(texte)
 
 
 @pytest.mark.parametrize(
-    "texte", ["Atlas.", "Le projet Atlas avance.", "Hélas", "Hey Nicolas", "J'ai l'atlas", ""]
+    "texte",
+    ["Atlas.", "Le projet Atlas avance.", "Hélas", "Hey Nicolas", "J'ai l'atlas", "Et là", ""],
 )
 def test_n_entend_pas_hey_atlas(texte):
     assert not entend_hey_atlas(texte)
@@ -22,6 +41,13 @@ def test_n_entend_pas_hey_atlas(texte):
 def test_les_textes_synthetises_suivent_l_orthographe_phonetique():
     assert all("Atlasse" in p and p.startswith("Eille") for p in POSITIVES)
     assert "Atlasse" in NEGATIVES  # « Atlas » seul est un négatif
+
+
+def test_qwen_recoit_les_memes_phrases_en_orthographe_usuelle():
+    assert POSITIVES_QWEN == ["Hey Atlas", "Hey Atlas !", "Hey, Atlas.", "Hey Atlas ?"]
+    assert len(NEGATIVES_QWEN) == len(NEGATIVES)
+    assert {"Atlas", "Le projet Atlas avance bien.", "Hey Nicolas", "Dallas"} <= set(NEGATIVES_QWEN)
+    assert not any(re.search(r"Eille|asse\b", t) for t in POSITIVES_QWEN + NEGATIVES_QWEN)
 
 
 def test_a_garder_un_positif_exige_hey_atlas_et_une_duree_courte():

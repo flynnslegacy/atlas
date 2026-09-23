@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .audio import couper_silences, ecrire_wav, lire_wav, ramener_16k
-from .phrases import NEGATIVES, POSITIVES
+from .phrases import NEGATIVES_QWEN, POSITIVES_QWEN
 
 DESCRIPTIONS = (
     "Voix d'homme d'une trentaine d'années, grave et posée, accent français standard.",
@@ -39,7 +39,9 @@ DESCRIPTIONS = (
 TEXTE_REFERENCE = (
     "Bonjour, je te lis la suite. Tout est prêt de mon côté, on peut commencer quand tu veux."
 )
-MAX_JETONS = 400  # 8 s d'audio au plus : largement assez pour « Eille Atlasse »
+MAX_JETONS = 400  # 8 s d'audio au plus : largement assez pour « Hey Atlas »
+# Qwen lit l'orthographe usuelle ; « Eille Atlasse » est réservé à Piper (espeak).
+TEXTES = {"positifs": POSITIVES_QWEN, "negatifs": NEGATIVES_QWEN}
 
 
 @dataclass(frozen=True)
@@ -132,8 +134,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Aucune voix de référence : lance d'abord l'étape « concevoir ».")
     modele = charger("Qwen/Qwen3-TTS-12Hz-1.7B-Base")
     n_pos, n_neg = (30, 30) if args.essai else (args.positifs, args.negatifs)
-    for sorte, textes, n in (("positifs", POSITIVES, n_pos), ("negatifs", NEGATIVES, n_neg)):
-        taches = planifier_qwen(nb_voix, textes, n, f"qwen_{sorte[:3]}")
+    for sorte, n in (("positifs", n_pos), ("negatifs", n_neg)):
+        taches = planifier_qwen(nb_voix, TEXTES[sorte], n, f"qwen_{sorte[:3]}")
         ecrits = cloner(modele, references, taches, args.sortie / sorte)
         print(f"{sorte} : {ecrits} extraits écrits dans {args.sortie / sorte}.")
 

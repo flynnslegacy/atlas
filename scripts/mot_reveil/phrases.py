@@ -34,7 +34,25 @@ NEGATIVES = [
     "L'océan Atlantique",
 ]
 
-_INTERJECTIONS = ("hey", "hei", "hay", "he", "eh", "ey", "eille", "heille")
+# Qwen3 ne passe pas par espeak : il lit l'orthographe usuelle, et « Eille Atlasse » le
+# fait trébucher (Whisper y entend « Un atlas »). Mêmes phrases, écrites normalement.
+_ORTHOGRAPHE_USUELLE = {"Eille": "Hey", "Atlasse": "Atlas", "Dallasse": "Dallas"}
+
+
+def orthographe_usuelle(texte: str) -> str:
+    return re.sub(
+        r"\b(?:" + "|".join(_ORTHOGRAPHE_USUELLE) + r")\b",
+        lambda m: _ORTHOGRAPHE_USUELLE[m.group(0)],
+        texte,
+    )
+
+
+POSITIVES_QWEN = [orthographe_usuelle(p) for p in POSITIVES]
+NEGATIVES_QWEN = [orthographe_usuelle(n) for n in NEGATIVES]
+
+# « et » : « Hé » et « Et » se prononcent pareil, et Whisper, sans contexte, écrit souvent
+# « Et Atlas » pour un « Hé Atlas » parfaitement dit (vérifié sur la voix d'Atlas).
+_INTERJECTIONS = ("hey", "hei", "hay", "he", "eh", "ey", "eille", "heille", "et")
 _REVEIL = re.compile(r"\b(?:" + "|".join(_INTERJECTIONS) + r")\s+atlas(?:se)?\b")
 
 DUREE_MAX_POSITIF_S = 2.0
