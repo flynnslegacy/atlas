@@ -68,6 +68,40 @@ def test_verifier_bloc_refuse_100_octets():
         verifier_bloc(bloc_mauvais)
 
 
+def test_detecteur_voix_donne_a_silero_576_echantillons_avec_contexte(monkeypatch):
+    """Contrat sans modèle (aucun besoin de models/silero_vad.onnx) : chaque entrée
+    du modèle doit être les 64 échantillons de contexte (zéro au départ, sinon le
+    dernier morceau de la fenêtre précédente) suivis des 512 nouveaux échantillons —
+    jamais une fenêtre nue de 512, comme au commit bcaffcd (voir le commentaire de
+    _CONTEXTE_SILERO dans vad.py)."""
+    import onnxruntime
+
+    appels: list[np.ndarray] = []
+
+    class FausseSession:
+        def __init__(self, chemin, providers=None):
+            pass
+
+        def run(self, sorties, entrees):
+            appels.append(entrees["input"].copy())
+            etat = np.zeros((2, 1, 128), dtype=np.float32)
+            sortie = np.zeros((1, 1), dtype=np.float32)
+            return sortie, etat
+
+    monkeypatch.setattr(onnxruntime, "InferenceSession", FausseSession)
+
+    detecteur = DetecteurVoix()
+    for i in range(4):  # 4 blocs de 320 échantillons -> 2 fenêtres de 512 consommées
+        bloc = np.arange(i * 320, i * 320 + 320, dtype="<i2").tobytes()
+        detecteur.probabilite(bloc)
+
+    assert len(appels) == 2
+    for entree in appels:
+        assert entree.shape == (1, 576)
+    assert np.array_equal(appels[0][0, :64], np.zeros(64, dtype=np.float32))
+    assert np.array_equal(appels[1][0, :64], appels[0][0, -64:])
+
+
 def _blocs_de_la_voix_atlas() -> list[bytes]:
     """La phrase de référence d'Atlas, en blocs de 20 ms à 16 kHz, comme le micro."""
     import soundfile as sf
