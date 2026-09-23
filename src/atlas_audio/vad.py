@@ -1,7 +1,8 @@
 """Détection de voix (Silero) et décision de fin de phrase.
 
-Le modèle et la décision sont séparés : le premier est une boîte noire qu'on
-ne teste pas, le second est de la logique pure qu'on teste exhaustivement.
+Le modèle et la décision sont séparés : le premier est une boîte noire, qu'on
+vérifie sur de la vraie parole ; le second est de la logique pure, qu'on teste
+exhaustivement.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ from atlas_core.protocole import TAILLE_BLOC_OCTETS
 
 DUREE_BLOC_MS = 20
 _FENETRE_SILERO = 512  # échantillons attendus par le modèle v5 à 16 kHz
+# Silero v5 veut aussi les 64 échantillons qui précèdent chaque fenêtre, comme le
+# fait son enveloppe officielle. Sans eux, il rend des probabilités proches de
+# zéro sur de la vraie parole : ni fin de phrase, ni interruption, jamais.
+_CONTEXTE_SILERO = 64
 
 CHEMIN_MODELE = os.environ.get("ATLAS_VAD_MODELE", "models/silero_vad.onnx")
 
@@ -26,7 +31,8 @@ def verifier_bloc(bloc: bytes) -> None:
 
 
 class DetecteurVoix:
-    """Enveloppe Silero. Accumule jusqu'à la fenêtre attendue par le modèle."""
+    """Enveloppe Silero. Accumule jusqu'à la fenêtre attendue par le modèle,
+    précédée de son contexte."""
 
     def __init__(self, seuil: float = 0.5, chemin: str = CHEMIN_MODELE) -> None:
         import onnxruntime
@@ -34,6 +40,7 @@ class DetecteurVoix:
         self.seuil = seuil
         self._session = onnxruntime.InferenceSession(chemin, providers=["CPUExecutionProvider"])
         self._etat = np.zeros((2, 1, 128), dtype=np.float32)
+        self._contexte = np.zeros(_CONTEXTE_SILERO, dtype=np.float32)
         self._reste = np.zeros(0, dtype=np.float32)
         self._derniere = 0.0
 
@@ -42,16 +49,17 @@ class DetecteurVoix:
         echantillons = np.frombuffer(bloc, dtype="<i2").astype(np.float32) / 32768.0
         self._reste = np.concatenate([self._reste, echantillons])
         while self._reste.size >= _FENETRE_SILERO:
-            fenetre = self._reste[:_FENETRE_SILERO]
+            entree = np.concatenate([self._contexte, self._reste[:_FENETRE_SILERO]])
             self._reste = self._reste[_FENETRE_SILERO:]
             sortie, self._etat = self._session.run(
                 None,
                 {
-                    "input": fenetre.reshape(1, -1),
+                    "input": entree.reshape(1, -1),
                     "state": self._etat,
                     "sr": np.array(16000, dtype=np.int64),
                 },
             )
+            self._contexte = entree[-_CONTEXTE_SILERO:]
             self._derniere = float(sortie[0][0])
         return self._derniere
 
