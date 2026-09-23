@@ -75,6 +75,11 @@ class Endpointeur:
         self._blocs_parole_min = max(1, parole_min_ms // DUREE_BLOC_MS)
         self.reinitialiser()
 
+    @property
+    def blocs_parole_min(self) -> int:
+        """Nombre de blocs de 20 ms de parole continue avant un « debut »."""
+        return self._blocs_parole_min
+
     def reinitialiser(self) -> None:
         self._en_cours = False
         self._parole = 0

@@ -104,7 +104,7 @@ class ClientAudio:
         # Derniers blocs entendus pendant la surveillance du barge-in, avec leur
         # verdict de voix : la parole qui déclenche l'interruption (« Non, attends… »)
         # doit partir vers le Core, sinon Whisper perd le premier mot.
-        seuil_blocs = self._bargein._blocs_parole_min  # seuil de l'endpointeur de barge-in
+        seuil_blocs = self._bargein.blocs_parole_min  # seuil de l'endpointeur de barge-in
         self._pre_roulement: deque[tuple[bytes, bool]] = deque(maxlen=seuil_blocs + 10)
         self._blocs_captures = 0
         self._parole_vue = False
