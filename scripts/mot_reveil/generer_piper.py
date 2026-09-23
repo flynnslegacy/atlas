@@ -1,14 +1,15 @@
 """Génère les extraits Piper : positifs « Eille Atlasse » et négatifs proches.
 
 Tourne dans le conteneur d'entraînement, avec l'environnement /opt/piper :
-    /opt/piper/bin/python -m scripts.mot_reveil.generer_piper \
-        --voix /travail/voix_piper --sortie /travail/clips/piper \
+    /opt/piper/bin/python -m scripts.mot_reveil.generer_piper
+        --voix /travail/voix_piper --sortie /travail/clips/piper
         [--essai] [--exclure fr_FR-mls-medium]
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -86,6 +87,16 @@ def synthetiser(voix_chargee, tache: Tache, fabrique_config: Callable | None = N
 def produire(
     taches: list[Tache], voix_chargees: dict, dossier: Path, fabrique_config: Callable | None = None
 ) -> int:
+    """Synthétise `taches` dans `dossier`, avec un manifeste.json (nom -> voix, texte, vitesse).
+
+    Sans lui, les fichiers `piper_pos_NNNNNN.wav` ne disent pas quelle voix les a produits :
+    impossible de retrouver les extraits d'une voix donnée (par exemple mls) pour les écouter.
+    Le manifeste se complète à chaque reprise, sans perdre les entrées déjà écrites.
+    """
+    chemin_manifeste = dossier / "manifeste.json"
+    manifeste: dict[str, dict] = (
+        json.loads(chemin_manifeste.read_text()) if chemin_manifeste.exists() else {}
+    )
     ecrits = 0
     for tache in taches:
         chemin = dossier / f"{tache.nom}.wav"
@@ -95,7 +106,15 @@ def produire(
         audio = couper_silences(ramener_16k(audio, frequence))
         if audio.size:
             ecrire_wav(chemin, audio)
+            manifeste[tache.nom] = {
+                "voix": tache.voix,
+                "locuteur": tache.locuteur,
+                "texte": tache.texte,
+                "vitesse": tache.vitesse,
+            }
             ecrits += 1
+    if ecrits:
+        chemin_manifeste.write_text(json.dumps(manifeste, indent=1, ensure_ascii=False))
     return ecrits
 
 

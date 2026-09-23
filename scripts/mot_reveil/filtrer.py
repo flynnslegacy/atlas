@@ -39,16 +39,32 @@ def _duree_s(chemin: Path) -> float:
     return sf.info(str(chemin)).duration
 
 
+def _sauvegarder_journal(chemin_journal: Path, journal: dict) -> None:
+    """Écrit le journal atomiquement (fichier temporaire puis renommage) : un `docker stop`
+    ou un crash en cours de route ne peut jamais laisser un journal à moitié écrit."""
+    chemin_journal.parent.mkdir(parents=True, exist_ok=True)
+    tmp = chemin_journal.with_name(chemin_journal.name + ".tmp")
+    tmp.write_text(json.dumps(journal, indent=1, ensure_ascii=False))
+    os.replace(tmp, chemin_journal)
+
+
 async def filtrer(
-    http: httpx.AsyncClient, url: str, clips: Path, retenus: Path, paralleles: int = 4
+    http: httpx.AsyncClient,
+    url: str,
+    clips: Path,
+    retenus: Path,
+    paralleles: int = 4,
+    sauvegarde_tous: int = 200,
 ) -> dict[str, dict[str, int]]:
     chemin_journal = retenus / "filtrage.json"
     journal: dict[str, dict] = (
         json.loads(chemin_journal.read_text()) if chemin_journal.exists() else {}
     )
     limite = asyncio.Semaphore(paralleles)
+    decisions = 0
 
     async def trancher(source: str, sorte: str, fichier: Path) -> None:
+        nonlocal decisions
         cle = f"{source}/{sorte}/{fichier.name}"
         if cle not in journal:
             async with limite:
@@ -57,6 +73,9 @@ async def filtrer(
                 "texte": texte,
                 "garde": a_garder(texte, SORTES[sorte], _duree_s(fichier)),
             }
+            decisions += 1
+            if decisions % sauvegarde_tous == 0:
+                _sauvegarder_journal(chemin_journal, journal)
         if journal[cle]["garde"]:
             cible = retenus / sorte / f"{source}_{fichier.name}"
             cible.parent.mkdir(parents=True, exist_ok=True)
@@ -73,8 +92,7 @@ async def filtrer(
                     journal[f"{source}/{sorte}/{f.name}"]["garde"] for f in fichiers
                 )
     finally:
-        retenus.mkdir(parents=True, exist_ok=True)
-        chemin_journal.write_text(json.dumps(journal, indent=1, ensure_ascii=False))
+        _sauvegarder_journal(chemin_journal, journal)
     return bilan
 
 
