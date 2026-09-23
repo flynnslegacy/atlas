@@ -419,7 +419,7 @@ avant toute ligne de code structurant, et chacune a un repli déjà identifié.
 | # | Question | Repli si la réponse est non |
 |---|---|---|
 | S1 | Qwen3-TTS tient-il en français sur le 4070 Ti ? Qualité de voix, latence du premier morceau, VRAM en cohabitation avec ComfyUI. **Tranché le 22/09/2026 : oui, par clonage, avec une exception sur le streaming. Voir le verdict.** | Piper FR ou Kokoro. L'interface `/synthesize` est identique, donc le repli ne coûte qu'un changement de conteneur. |
-| S2 | L'AEC d'Apple (Voice Processing, via un binaire Swift) supprime-t-il assez d'écho pour que le barge-in soit utilisable sur enceintes ? | Casque : l'AEC devient inutile, le barge-in reste fonctionnel, le confort baisse. |
+| S2 | L'AEC d'Apple (Voice Processing, via un binaire Swift) supprime-t-il assez d'écho pour que le barge-in soit utilisable sur enceintes ? **Tranché le 23/09/2026 : oui, avec un seuil d'énergie pendant qu'Atlas parle. Voir le verdict.** | Casque : l'AEC devient inutile, le barge-in reste fonctionnel, le confort baisse. |
 | S3 | Un skill Hermes peut-il appeler un endpoint HTTP externe et rendre la réponse dans Telegram ? | Application web installée sur l'écran d'accueil de l'iPhone, comme envisagé initialement. |
 
 Risques résiduels connus et acceptés :
