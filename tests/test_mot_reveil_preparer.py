@@ -52,6 +52,21 @@ def test_la_part_de_test_est_la_meme_que_sur_le_mac():
     assert module_preparer.UNE_SUR_DAVID == evaluer.UNE_SUR_DAVID
 
 
+def test_configuration_garde_esc50_et_bureau_david_par_defaut(tmp_path):
+    config = configuration(tmp_path, {"ACAV100M_sample": "a.npy"}, 1000)
+    assert config["background_paths"] == [
+        str(tmp_path / "donnees" / "fonds" / "esc50"),
+        str(tmp_path / "donnees" / "fonds" / "bureau_david"),
+    ]
+    assert config["background_paths_duplication_rate"] == [1, 3]
+
+
+def test_configuration_aligne_les_taux_sur_les_fonds_fournis(tmp_path):
+    config = configuration(tmp_path, {"ACAV100M_sample": "a.npy"}, 1000, fonds=[("esc50", 1)])
+    assert config["background_paths"] == [str(tmp_path / "donnees" / "fonds" / "esc50")]
+    assert config["background_paths_duplication_rate"] == [1]
+
+
 def _travail(racine):
     un = np.full(12000, 0.2, dtype=np.float32)
     for i in range(100):
@@ -103,6 +118,46 @@ def test_preparer_refuse_un_test_positif_vide(tmp_path):
     (tmp_path / "retenus" / "positifs").mkdir(parents=True)
     with pytest.raises(SystemExit, match="positive_test"):
         preparer(tmp_path, _extraire)
+
+
+def test_preparer_refuse_si_david_positifs_ne_produit_aucun_extrait(tmp_path):
+    """Une copie ratée (par exemple un david/david/ imbriqué) laisse david/positifs vide."""
+    un = np.full(12000, 0.2, dtype=np.float32)
+    for i in range(100):
+        ecrire_wav(tmp_path / "retenus" / "positifs" / f"piper_p{i}.wav", un)
+        ecrire_wav(tmp_path / "retenus" / "negatifs" / f"piper_n{i}.wav", un)
+    (tmp_path / "david" / "positifs").mkdir(parents=True)  # vide : rien à copier
+    with pytest.raises(SystemExit, match="david.*positifs") as erreur:
+        preparer(tmp_path, _extraire)
+    assert "david/david" in str(erreur.value) or "copie" in str(erreur.value)
+
+
+def test_preparer_rapporte_les_comptes_david_dans_le_bilan(tmp_path):
+    noms_david = _travail(tmp_path)
+    bilan = preparer(tmp_path, _extraire)
+    kept_positifs = sum(not est_test(n, 3) for n in noms_david)
+    kept_atlas = sum(not est_test(f"atlas_{i:02d}.wav", 3) for i in range(6))
+    kept_parole = sum(not est_test(f"parole_{i:02d}.wav", 3) for i in range(6))
+    kept_bureau = sum(not est_test(f"bureau_{i:02d}.wav", 3) for i in range(6))
+    assert bilan["david_positifs"] == kept_positifs
+    assert bilan["david_atlas_seul"] == kept_atlas
+    assert bilan["david_fenetres_2s"] == 3 * (kept_parole + kept_bureau)
+
+
+def test_preparer_omet_les_fonds_absents_de_la_configuration(tmp_path):
+    """bureau/ absent chez David : bureau_david n'existe jamais, absent du yml."""
+    un = np.full(12000, 0.2, dtype=np.float32)
+    for i in range(100):
+        ecrire_wav(tmp_path / "retenus" / "positifs" / f"piper_p{i}.wav", un)
+        ecrire_wav(tmp_path / "retenus" / "negatifs" / f"piper_n{i}.wav", un)
+    ecrire_wav(tmp_path / "david" / "positifs" / "bureau_001.wav", un)
+    preparer(tmp_path, _extraire)
+    assert not (tmp_path / "donnees" / "fonds" / "bureau_david").exists()
+    config = json.loads((tmp_path / "entrainement" / "hey_atlas.yml").read_text())
+    assert str(tmp_path / "donnees" / "fonds" / "bureau_david") not in config["background_paths"]
+    assert str(tmp_path / "donnees" / "fonds" / "esc50") not in config["background_paths"]
+    assert config["background_paths"] == []
+    assert config["background_paths_duplication_rate"] == []
 
 
 def test_preparer_purge_les_bureau_supprimes_a_la_source(tmp_path):

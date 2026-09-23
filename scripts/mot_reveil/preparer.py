@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from .audio import couper_silences, ecrire_wav, fenetres, lire_wav, ramener_16k
-from .configuration import configuration, ecrire
+from .configuration import FONDS_PAR_DEFAUT, configuration, ecrire
 from .repartition import est_test, noms_copies, repartir
 
 UNE_SUR_SYNTHESE = 10
@@ -57,6 +57,7 @@ def preparer(
 
     # 2. « Hey Atlas » de David : jamais la part de test, et le reste dupliqué pour peser.
     david = travail / "david"
+    comptes_david = {"positifs": 0, "atlas_seul": 0}
     for sous, prefixe, copies in (
         ("positifs", "positive", COPIES_DAVID),
         ("atlas_seul", "negative", COPIES_NEGATIFS_DAVID),
@@ -66,6 +67,7 @@ def preparer(
                 continue
             audio = couper_silences(_lire_16k(chemin))
             if audio.size:
+                comptes_david[sous] += 1
                 for copie in noms_copies(f"david_{chemin.name}", copies):
                     ecrire_wav(racine / f"{prefixe}_train" / copie, audio)
 
@@ -76,19 +78,27 @@ def preparer(
 
     if not any((racine / "positive_test").glob("*.wav")):
         raise SystemExit("positive_test est vide : train.py ne peut pas calculer sa fenêtre.")
+    if comptes_david["positifs"] == 0:
+        raise SystemExit(
+            f"{david / 'positifs'} n'a produit aucun extrait d'entraînement : vérifie la "
+            "copie depuis le Mac (un dossier imbriqué comme david/david/, par exemple)."
+        )
 
     # 4. Parole et bureau de David (hors test) : traits négatifs, et bruits de fond.
     morceaux = []
-    fonds = travail / "donnees" / "fonds" / "bureau_david"
-    shutil.rmtree(fonds, ignore_errors=True)  # sinon un fond retiré de la source y resterait
+    fenetres_2s = 0
+    fonds_bureau_david = travail / "donnees" / "fonds" / "bureau_david"
+    shutil.rmtree(fonds_bureau_david, ignore_errors=True)  # sinon un fond retiré y resterait
     for sous in ("parole", "bureau"):
         for chemin in sorted((david / sous).glob("*.wav")):
             if est_test(chemin.name, UNE_SUR_DAVID):
                 continue
             audio = _lire_16k(chemin)
-            morceaux.append(fenetres(audio, 2.0))
+            fen = fenetres(audio, 2.0)
+            morceaux.append(fen)
+            fenetres_2s += fen.shape[0]
             if sous == "bureau":
-                ecrire_wav(fonds / chemin.name, audio)
+                ecrire_wav(fonds_bureau_david / chemin.name, audio)
     traits = {
         "ACAV100M_sample": str(
             travail / "donnees" / "openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
@@ -102,11 +112,20 @@ def preparer(
     else:
         chemin_traits.unlink(missing_ok=True)  # sinon un traits_david.npy d'avant reste orphelin
 
+    fonds_dispo = [
+        (nom, taux)
+        for nom, taux in FONDS_PAR_DEFAUT
+        if (travail / "donnees" / "fonds" / nom).is_dir()
+    ]
     ecrire(
-        configuration(travail, traits, PAS_ESSAI if essai else PAS),
+        configuration(travail, traits, PAS_ESSAI if essai else PAS, fonds=fonds_dispo),
         travail / "entrainement" / "hey_atlas.yml",
     )
-    return {sous.name: len(list(sous.glob("*.wav"))) for sous in sorted(racine.iterdir())}
+    bilan = {sous.name: len(list(sous.glob("*.wav"))) for sous in sorted(racine.iterdir())}
+    bilan["david_positifs"] = comptes_david["positifs"]
+    bilan["david_atlas_seul"] = comptes_david["atlas_seul"]
+    bilan["david_fenetres_2s"] = fenetres_2s
+    return bilan
 
 
 def extracteur_openwakeword() -> Callable[[np.ndarray], np.ndarray]:

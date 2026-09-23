@@ -9,10 +9,19 @@ n_samples_val, tts_batch_size et custom_negative_phrases ne servent qu'à
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
+FONDS_PAR_DEFAUT: tuple[tuple[str, int], ...] = (("esc50", 1), ("bureau_david", 3))
 
-def configuration(travail: Path, traits: dict[str, str], pas: int, psg: str = "/opt/psg") -> dict:
+
+def configuration(
+    travail: Path,
+    traits: dict[str, str],
+    pas: int,
+    psg: str = "/opt/psg",
+    fonds: Sequence[tuple[str, int]] = FONDS_PAR_DEFAUT,
+) -> dict:
     donnees = travail / "donnees"
     lots = {"ACAV100M_sample": 1024, "adversarial_negative": 50, "positive": 50}
     lots.update({cle: 64 for cle in traits if cle != "ACAV100M_sample"})
@@ -26,11 +35,8 @@ def configuration(travail: Path, traits: dict[str, str], pas: int, psg: str = "/
         "output_dir": str(travail / "entrainement"),
         "piper_sample_generator_path": psg,
         "rir_paths": [str(donnees / "rir")],
-        "background_paths": [
-            str(donnees / "fonds" / "esc50"),
-            str(donnees / "fonds" / "bureau_david"),
-        ],
-        "background_paths_duplication_rate": [1, 3],
+        "background_paths": [str(donnees / "fonds" / nom) for nom, _ in fonds],
+        "background_paths_duplication_rate": [taux for _, taux in fonds],
         "augmentation_rounds": 1,
         "augmentation_batch_size": 16,
         "feature_data_files": traits,
