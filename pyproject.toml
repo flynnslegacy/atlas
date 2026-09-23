@@ -1,0 +1,38 @@
+[project]
+name = "atlas"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.9", "httpx>=0.27"]
+
+# Le projet Python cible les deux Mac (client audio et Core).
+# Les services Linux (STT/TTS) s'exécutent dans Docker avec leur propre requirements.txt.
+[tool.uv]
+environments = ["sys_platform == 'darwin'"]
+
+[project.optional-dependencies]
+core  = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "websockets>=13"]
+audio = ["sounddevice>=0.5", "numpy>=2.1", "onnxruntime>=1.20", "openwakeword>=0.6"]
+# Avertissement anyio 4.15.1 sur BlockingPortal (v max publiée); httpx2 élimine StarletteDeprecationWarning.
+dev   = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "numpy>=2.1", "soxr>=0.5", "soundfile>=0.12", "httpx2", "starlette>=1.6", "anyio>=4.15"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlas_core", "src/atlas_audio"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# La spec et le plan sont des documents approuvés : leurs blocs de code sont
+# illustratifs, un formateur n'a pas à les réécrire (ruling R31).
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

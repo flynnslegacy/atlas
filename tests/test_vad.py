@@ -1,0 +1,208 @@
+import math
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from atlas_audio.vad import DetecteurVoix, Endpointeur, FenetreEnergie, verifier_bloc
+
+BLOC_MS = 20
+_VOIX_ATLAS = Path("services/tts/voix/atlas_reference.wav")
+_sans_modele = pytest.mark.skipif(
+    not Path("models/silero_vad.onnx").exists(),
+    reason="modèle Silero absent de models/ : voir bench/LISEZMOI.md",
+)
+
+
+def _jouer(e: Endpointeur, motif: list[tuple[bool, int]]) -> list[str]:
+    """Joue une suite de (parle, durée_ms) et rend les événements non vides."""
+    evenements = []
+    for parle, duree in motif:
+        for _ in range(duree // BLOC_MS):
+            ev = e.ajouter(parle)
+            if ev != "rien":
+                evenements.append(ev)
+    return evenements
+
+
+def test_un_silence_continu_ne_produit_rien():
+    assert _jouer(Endpointeur(), [(False, 2000)]) == []
+
+
+def test_une_parole_assez_longue_produit_un_debut():
+    assert _jouer(Endpointeur(), [(True, 300)]) == ["debut"]
+
+
+def test_une_parole_trop_courte_est_ignoree():
+    assert _jouer(Endpointeur(parole_min_ms=200), [(True, 100), (False, 1000)]) == []
+
+
+def test_un_silence_apres_la_parole_produit_une_fin():
+    assert _jouer(Endpointeur(), [(True, 300), (False, 500)]) == ["debut", "fin"]
+
+
+def test_un_silence_trop_court_ne_coupe_pas():
+    motif = [(True, 300), (False, 200), (True, 300), (False, 500)]
+    assert _jouer(Endpointeur(silence_ms=400), motif) == ["debut", "fin"]
+
+
+def test_deux_phrases_separees_produisent_deux_cycles():
+    motif = [(True, 300), (False, 500), (True, 300), (False, 500)]
+    assert _jouer(Endpointeur(), motif) == ["debut", "fin", "debut", "fin"]
+
+
+def test_reinitialiser_oublie_l_etat():
+    e = Endpointeur()
+    _jouer(e, [(True, 300)])
+    e.reinitialiser()
+    assert _jouer(e, [(False, 1000)]) == []
+
+
+def _bloc_constant(valeur: int) -> bytes:
+    """Bloc de 320 échantillons int16, tous à la même valeur."""
+    return np.full(320, valeur, dtype="<i2").tobytes()
+
+
+def test_fenetre_energie_silence_numerique_est_tres_bas():
+    f = FenetreEnergie()
+    assert f.ajouter(b"\x00" * 640) <= -100.0
+
+
+def test_fenetre_energie_bloc_constant_donne_le_niveau_attendu():
+    v = 8000
+    f = FenetreEnergie()
+    assert f.ajouter(_bloc_constant(v)) == pytest.approx(20 * math.log10(v / 32768))
+
+
+def test_fenetre_energie_moyenne_les_energies_pas_les_db():
+    # Une fenêtre qui moyennerait les dB donnerait (-120 + niveau_seul) / 2, très
+    # différent de la moyenne des énergies linéaires que la spec demande.
+    v = 8000
+    f = FenetreEnergie(blocs=2)
+    f.ajouter(b"\x00" * 640)  # énergie nulle
+    niveau = f.ajouter(_bloc_constant(v))
+
+    energie_v = (v / 32768) ** 2
+    attendu = 10 * math.log10(energie_v / 2 + 1e-12)
+    assert niveau == pytest.approx(attendu)
+
+
+def test_fenetre_energie_jusqu_a_ce_qu_elle_soit_pleine_moyenne_ce_qui_est_vu():
+    # Avant que la fenêtre de 15 blocs soit pleine, la moyenne ne porte que sur les
+    # blocs déjà vus, pas sur 15 (ce qui diluerait le niveau avec des zéros fantômes).
+    v = 8000
+    f = FenetreEnergie()
+    niveau = f.ajouter(_bloc_constant(v))
+    assert niveau == pytest.approx(20 * math.log10(v / 32768))
+
+
+def test_fenetre_energie_oublie_les_blocs_plus_vieux_que_la_fenetre():
+    f = FenetreEnergie(blocs=2)
+    f.ajouter(_bloc_constant(20000))  # sortira de la fenêtre de 2
+    f.ajouter(b"\x00" * 640)
+    niveau = f.ajouter(b"\x00" * 640)
+    assert niveau <= -100.0
+
+
+def test_fenetre_energie_reinitialiser_oublie_tout():
+    f = FenetreEnergie()
+    f.ajouter(_bloc_constant(20000))
+    f.reinitialiser()
+    assert f.ajouter(b"\x00" * 640) <= -100.0
+
+
+def test_fenetre_energie_refuse_un_bloc_de_mauvaise_taille():
+    with pytest.raises(ValueError):
+        FenetreEnergie().ajouter(b"\x00" * 100)
+
+
+def test_fenetre_energie_refuse_une_taille_de_fenetre_sous_un():
+    # blocs=0 rendrait une fenêtre qui ne peut jamais rien garder : ajouter() y
+    # diviserait par zéro dès le premier bloc.
+    with pytest.raises(ValueError):
+        FenetreEnergie(blocs=0)
+    with pytest.raises(ValueError):
+        FenetreEnergie(blocs=-1)
+
+
+def test_verifier_bloc_accepte_640_octets():
+    bloc_correct = b"\x00" * 640
+    verifier_bloc(bloc_correct)  # Ne doit pas lever
+
+
+def test_verifier_bloc_refuse_100_octets():
+    bloc_mauvais = b"\x00" * 100
+    with pytest.raises(ValueError):
+        verifier_bloc(bloc_mauvais)
+
+
+def test_detecteur_voix_donne_a_silero_576_echantillons_avec_contexte(monkeypatch):
+    """Contrat sans modèle (aucun besoin de models/silero_vad.onnx) : chaque entrée
+    du modèle doit être les 64 échantillons de contexte (zéro au départ, sinon le
+    dernier morceau de la fenêtre précédente) suivis des 512 nouveaux échantillons —
+    jamais une fenêtre nue de 512, comme au commit bcaffcd (voir le commentaire de
+    _CONTEXTE_SILERO dans vad.py)."""
+    import onnxruntime
+
+    appels: list[np.ndarray] = []
+
+    class FausseSession:
+        def __init__(self, chemin, providers=None):
+            pass
+
+        def run(self, sorties, entrees):
+            appels.append(entrees["input"].copy())
+            etat = np.zeros((2, 1, 128), dtype=np.float32)
+            sortie = np.zeros((1, 1), dtype=np.float32)
+            return sortie, etat
+
+    monkeypatch.setattr(onnxruntime, "InferenceSession", FausseSession)
+
+    detecteur = DetecteurVoix()
+    for i in range(4):  # 4 blocs de 320 échantillons -> 2 fenêtres de 512 consommées
+        bloc = np.arange(i * 320, i * 320 + 320, dtype="<i2").tobytes()
+        detecteur.probabilite(bloc)
+
+    assert len(appels) == 2
+    for entree in appels:
+        assert entree.shape == (1, 576)
+    assert np.array_equal(appels[0][0, :64], np.zeros(64, dtype=np.float32))
+    assert np.array_equal(appels[1][0, :64], appels[0][0, -64:])
+
+
+def _blocs_de_la_voix_atlas() -> list[bytes]:
+    """La phrase de référence d'Atlas, en blocs de 20 ms à 16 kHz, comme le micro."""
+    import soundfile as sf
+    import soxr
+
+    audio, sr = sf.read(_VOIX_ATLAS, dtype="float32")
+    audio = soxr.resample(audio, sr, 16000)
+    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    return [pcm[i : i + 640] for i in range(0, len(pcm) - 639, 640)]
+
+
+@_sans_modele
+def test_le_detecteur_reconnait_de_la_vraie_parole():
+    # Régression : sans les 64 échantillons de contexte qu'attend Silero v5, le
+    # modèle rendait des probabilités proches de zéro, et la parole n'était jamais
+    # reconnue — ni la fin des phrases, ni les interruptions.
+    detecteur = DetecteurVoix()
+    verdicts = [detecteur.parle(bloc) for bloc in _blocs_de_la_voix_atlas()]
+    assert sum(verdicts) / len(verdicts) > 0.5
+
+
+@_sans_modele
+def test_la_parole_tient_assez_longtemps_pour_declencher_une_interruption():
+    # La coupure exige 300 ms de voix continue, soit 15 blocs de 20 ms.
+    detecteur = DetecteurVoix()
+    course = plus_longue = 0
+    for bloc in _blocs_de_la_voix_atlas():
+        course = course + 1 if detecteur.parle(bloc) else 0
+        plus_longue = max(plus_longue, course)
+    assert plus_longue >= 15
+
+
+@_sans_modele
+def test_le_detecteur_reste_muet_sur_le_silence():
+    detecteur = DetecteurVoix()
+    assert not any(detecteur.parle(b"\x00" * 640) for _ in range(100))

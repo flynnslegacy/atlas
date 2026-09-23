@@ -1,14 +1,14 @@
-# Helios — Phases 0 et 1 : la boucle vocale
+# Atlas — Phases 0 et 1 : la boucle vocale
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Obtenir une boucle vocale française complète — « Hey Helios, quelle heure est-il » donne une réponse parlée, et David peut couper Helios en pleine phrase.
+**Goal:** Obtenir une boucle vocale française complète — « Hey Atlas, quelle heure est-il » donne une réponse parlée, et David peut couper Atlas en pleine phrase.
 
-**Architecture:** Trois étages. Le M5 porte `helios-audio` (capture, annulation d'écho, wake word, VAD, lecture) ; le MacBook néo headless porte `helios-core` (hub WebSocket, machine à états, segmentation, cerveau) ; l'Unraid porte `helios-stt` et `helios-tts` en Docker sur GPU. En phase 1 le cerveau est un **bouchon** aux réponses figées : Claude n'arrive qu'en phase 2, pour que la chaîne audio soit validée seule.
+**Architecture:** Trois étages. Le M5 porte `atlas-audio` (capture, annulation d'écho, wake word, VAD, lecture) ; le MacBook néo headless porte `atlas-core` (hub WebSocket, machine à états, segmentation, cerveau) ; l'Unraid porte `atlas-stt` et `atlas-tts` en Docker sur GPU. En phase 1 le cerveau est un **bouchon** aux réponses figées : Claude n'arrive qu'en phase 2, pour que la chaîne audio soit validée seule.
 
 **Tech Stack:** Python 3.12 + `uv` · FastAPI + uvicorn + websockets · pydantic v2 · faster-whisper (CUDA) · Qwen3-TTS ou Piper FR · openWakeWord · Silero VAD (ONNX) · sounddevice · un binaire Swift pour l'AEC macOS · pytest + pytest-asyncio · ruff · Docker.
 
-**Spec:** `docs/superpowers/specs/2026-09-22-helios-design.md`
+**Spec:** `docs/superpowers/specs/2026-09-22-atlas-design.md`
 
 ## Global Constraints
 
@@ -17,11 +17,11 @@ Ces contraintes valent pour **toutes** les tâches du plan. Chaque tâche les h�
 - **Python 3.12 minimum.** Gestionnaire de paquets : `uv`. Jamais `pip install` direct.
 - **Format audio unique dans tout le système : PCM 16 kHz, mono, signé 16 bits, petit-boutiste (`s16le`).** Un bloc = 20 ms = 320 échantillons = 640 octets. Toute conversion se fait aux frontières (carte son, modèle), jamais au milieu du pipeline.
 - **Tout ce que l'utilisateur voit ou entend est en français** : messages vocaux, messages d'erreur remontés au client, libellés du front. Les noms de code, de variables et de fonctions restent en français eux aussi, conformément à la spec et au projet de référence (`@outil`, `niveau`).
-- **Ports fixes :** `helios-core` 8080 · `helios-stt` 9010 · `helios-tts` 9011 · Ollama 11434 · Hermes (port de ton instance).
-- **Les services GPU ne sont jamais exposés hors du LAN.** Seul `helios-core` passe par le reverse proxy.
+- **Ports fixes :** `atlas-core` 8080 · `atlas-stt` 9010 · `atlas-tts` 9011 · Ollama 11434 · Hermes (port de ton instance).
+- **Les services GPU ne sont jamais exposés hors du LAN.** Seul `atlas-core` passe par le reverse proxy.
 - **Aucun secret dans le dépôt.** Les clés vivent en variables d'environnement ; `.env` est dans `.gitignore` ; `.env.example` documente les noms attendus, jamais les valeurs.
 - **Aucun appel à la vraie API Claude dans les tests.** Le cerveau est derrière une interface, toujours mocké.
-- **Helios ne saisit jamais d'identifiant ni de mot de passe, et n'exécute aucune action financière.** Ces interdits ne sont pas configurables et ne doivent apparaître dans aucun outil.
+- **Atlas ne saisit jamais d'identifiant ni de mot de passe, et n'exécute aucune action financière.** Ces interdits ne sont pas configurables et ne doivent apparaître dans aucun outil.
 - **Objectifs de latence** (seuils du banc de mesure, tâche 15) : fin de phrase détectée ≤ 400 ms · transcription ≤ 600 ms · premier morceau audio TTS ≤ 300 ms · bout en bout avec le cerveau bouchon ≤ 1,2 s.
 - **Commit après chaque tâche**, jamais au milieu. Message en français, à l'impératif.
 
@@ -36,27 +36,27 @@ pyproject.toml               dépendances, extras core/audio/dev, config ruff et
 Makefile                     test, lint, bench, run-core, run-audio
 .env.example                 noms des variables d'environnement attendues
 
-src/helios_core/
+src/atlas_core/
   protocole.py               types de messages WebSocket (pydantic) + codec binaire
   etat.py                    machine à états : repos → écoute → réflexion → parole
   hub.py                     serveur FastAPI, route /ws/audio, gestion des connexions
-  transcription.py           client HTTP vers helios-stt, assemblage des trames
-  synthese.py                client HTTP vers helios-tts, streaming par morceaux
+  transcription.py           client HTTP vers atlas-stt, assemblage des trames
+  synthese.py                client HTTP vers atlas-tts, streaming par morceaux
   phrases.py                 découpage d'un flux de texte français en phrases
   cerveau.py                 interface Cerveau + CerveauBouchon (phase 1)
   session.py                 orchestration d'un tour de parole, gestion du barge-in
   config.py                  chargement de la configuration depuis l'environnement
 
-src/helios_audio/
+src/atlas_audio/
   aec.py                     pilote du binaire Swift (pipes stdin/stdout)
   vad.py                     Silero VAD + machine d'endpointing
-  reveil.py                  openWakeWord, chargement du modèle « Hey Helios »
+  reveil.py                  openWakeWord, chargement du modèle « Hey Atlas »
   client.py                  daemon : boucle WebSocket, capture, lecture, barge-in
   raccourci.py               push-to-talk (phase 1 avant le wake word)
 
-src/helios_aec/              paquet Swift
+src/atlas_aec/              paquet Swift
   Package.swift
-  Sources/helios-aec/main.swift   capture + lecture avec Voice Processing d'Apple
+  Sources/atlas-aec/main.swift   capture + lecture avec Voice Processing d'Apple
 
 services/stt/
   Dockerfile
@@ -95,16 +95,16 @@ Elles bloquent la phase 1 parce qu'elles en changent des choix.
 - Consumes: rien.
 - Produces: la décision du moteur TTS, consommée par la tâche 4. Valeurs possibles :
   `qwen3` ou `piper` ou `kokoro`. Le nom retenu devient la valeur par défaut de la
-  variable d'environnement `HELIOS_TTS_MOTEUR`.
+  variable d'environnement `ATLAS_TTS_MOTEUR`.
 
 - [ ] **Étape 1 : Réunir les phrases de test**
 
-Cinq phrases françaises couvrant les pièges réels de l'usage d'Helios :
+Cinq phrases françaises couvrant les pièges réels de l'usage d'Atlas :
 
 ```
 1. Bonjour David, il est quatorze heures trente-deux.
 2. Le workflow « veille concurrence » a échoué à trois heures du matin : erreur d'authentification sur l'API.
-3. J'ai noté ça dans projets/helios.md — tu veux que je te le relise ?
+3. J'ai noté ça dans projets/atlas.md — tu veux que je te le relise ?
 4. Attention : cette action va envoyer un mail à Paul Durand. Je confirme ?
 5. D'accord. Alors reprenons : tu disais que l'offre devait tenir en une page.
 ```
@@ -202,7 +202,7 @@ Le rapport des deux est l'atténuation, en dB.
 - [ ] **Étape 3 : Mesurer ce qui compte vraiment — les faux barge-in**
 
 L'atténuation est un chiffre intermédiaire ; le vrai critère est opérationnel. Faire jouer
-cinq minutes de parole d'Helios, sans parler du tout, en faisant tourner le VAD sur le
+cinq minutes de parole d'Atlas, sans parler du tout, en faisant tourner le VAD sur le
 signal capturé. **Compter les déclenchements.** Le seuil d'acceptation est zéro faux
 barge-in sur cinq minutes.
 
@@ -293,7 +293,7 @@ repli TTS soit un simple changement de conteneur. Tout le reste du code est en f
 
 **Files:**
 - Create: `pyproject.toml`, `Makefile`, `.env.example`
-- Create: `src/helios_core/__init__.py`, `src/helios_audio/__init__.py`
+- Create: `src/atlas_core/__init__.py`, `src/atlas_audio/__init__.py`
 - Test: `tests/test_fumee.py`
 
 **Interfaces:**
@@ -306,20 +306,20 @@ repli TTS soit un simple changement de conteneur. Tout le reste du code est en f
 ```python
 # tests/test_fumee.py
 def test_le_paquet_core_est_importable():
-    import helios_core
-    assert helios_core.__version__ == "0.1.0"
+    import atlas_core
+    assert atlas_core.__version__ == "0.1.0"
 ```
 
 - [ ] **Étape 2 : Lancer le test pour vérifier qu'il échoue**
 
 Run: `uv run pytest tests/test_fumee.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_core'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_core'`
 
 - [ ] **Étape 3 : Écrire `pyproject.toml`**
 
 ```toml
 [project]
-name = "helios"
+name = "atlas"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2.9", "httpx>=0.27"]
@@ -334,7 +334,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/helios_core", "src/helios_audio"]
+packages = ["src/atlas_core", "src/atlas_audio"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -351,12 +351,12 @@ select = ["E", "F", "I", "UP", "B"]
 - [ ] **Étape 4 : Créer les paquets**
 
 ```python
-# src/helios_core/__init__.py
+# src/atlas_core/__init__.py
 __version__ = "0.1.0"
 ```
 
 ```python
-# src/helios_audio/__init__.py
+# src/atlas_audio/__init__.py
 __version__ = "0.1.0"
 ```
 
@@ -381,27 +381,27 @@ bench:
 	uv run python bench/bench.py
 
 run-core:
-	uv run uvicorn helios_core.hub:app --host 0.0.0.0 --port 8080
+	uv run uvicorn atlas_core.hub:app --host 0.0.0.0 --port 8080
 
 run-audio:
-	uv run python -m helios_audio.client
+	uv run python -m atlas_audio.client
 ```
 
 - [ ] **Étape 6 : Écrire `.env.example`**
 
 ```bash
 # Adresses des services — jamais de secret dans ce fichier, seulement des noms
-HELIOS_CORE_URL=ws://neo.local:8080/ws/audio
-HELIOS_STT_URL=http://unraid.local:9010
-HELIOS_TTS_URL=http://unraid.local:9011
+ATLAS_CORE_URL=ws://neo.local:8080/ws/audio
+ATLAS_STT_URL=http://unraid.local:9010
+ATLAS_TTS_URL=http://unraid.local:9011
 
 # Moteur TTS : valeur décidée par le spike S1 (qwen3 | piper | kokoro)
-HELIOS_TTS_MOTEUR=piper
-HELIOS_TTS_VOIX=fr_FR-siwis-medium
+ATLAS_TTS_MOTEUR=piper
+ATLAS_TTS_VOIX=fr_FR-siwis-medium
 
 # Modèle de transcription
-HELIOS_STT_MODELE=large-v3
-HELIOS_STT_DECHARGEMENT_S=300
+ATLAS_STT_MODELE=large-v3
+ATLAS_STT_DECHARGEMENT_S=300
 ```
 
 - [ ] **Étape 7 : Installer et lancer les tests**
@@ -421,7 +421,7 @@ git commit -m "Ajoute le squelette du dépôt et l'outillage"
 ### Tâche 2 : Protocole de messages et codec binaire
 
 **Files:**
-- Create: `src/helios_core/protocole.py`
+- Create: `src/atlas_core/protocole.py`
 - Test: `tests/test_protocole.py`
 
 **Interfaces:**
@@ -443,7 +443,7 @@ git commit -m "Ajoute le squelette du dépôt et l'outillage"
 ```python
 # tests/test_protocole.py
 import pytest
-from helios_core.protocole import (
+from atlas_core.protocole import (
     TAILLE_BLOC_OCTETS, Etat, decoder_message,
     encoder_audio_entrant, decoder_audio_entrant,
     encoder_audio_sortant, decoder_audio_sortant,
@@ -489,12 +489,12 @@ les oreilles de David au lieu d'une erreur.
 - [ ] **Étape 2 : Lancer les tests pour vérifier qu'ils échouent**
 
 Run: `uv run pytest tests/test_protocole.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_core.protocole'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_core.protocole'`
 
 - [ ] **Étape 3 : Écrire le protocole**
 
 ```python
-# src/helios_core/protocole.py
+# src/atlas_core/protocole.py
 """Messages échangés entre le client audio et le Core.
 
 Deux canaux sur la même WebSocket : les messages de contrôle en JSON texte,
@@ -652,7 +652,7 @@ Expected: PASS, 7 tests.
 - [ ] **Étape 5 : Commit**
 
 ```bash
-git add src/helios_core/protocole.py tests/test_protocole.py
+git add src/atlas_core/protocole.py tests/test_protocole.py
 git commit -m "Ajoute le protocole de messages et le codec de trames audio"
 ```
 
@@ -661,7 +661,7 @@ git commit -m "Ajoute le protocole de messages et le codec de trames audio"
 ### Tâche 3 : Découpage d'un flux de texte français en phrases
 
 **Files:**
-- Create: `src/helios_core/phrases.py`
+- Create: `src/atlas_core/phrases.py`
 - Test: `tests/test_phrases.py`
 
 **Interfaces:**
@@ -678,7 +678,7 @@ les plus agaçants à l'usage.
 
 ```python
 # tests/test_phrases.py
-from helios_core.phrases import DecoupeurPhrases
+from atlas_core.phrases import DecoupeurPhrases
 
 def test_une_phrase_complete_sort_immediatement():
     d = DecoupeurPhrases()
@@ -728,12 +728,12 @@ def test_vider_deux_fois_ne_repete_rien():
 - [ ] **Étape 2 : Lancer les tests pour vérifier qu'ils échouent**
 
 Run: `uv run pytest tests/test_phrases.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_core.phrases'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_core.phrases'`
 
 - [ ] **Étape 3 : Écrire le découpeur**
 
 ```python
-# src/helios_core/phrases.py
+# src/atlas_core/phrases.py
 """Découpage d'un flux de texte français en phrases prononçables.
 
 Le cerveau écrit au fil de l'eau ; on veut envoyer chaque phrase au TTS dès
@@ -830,13 +830,13 @@ Expected: PASS, 9 tests.
 - [ ] **Étape 5 : Commit**
 
 ```bash
-git add src/helios_core/phrases.py tests/test_phrases.py
+git add src/atlas_core/phrases.py tests/test_phrases.py
 git commit -m "Ajoute le découpage en phrases françaises au fil du flux"
 ```
 
 ---
 
-### Tâche 4 : Service de transcription `helios-stt`
+### Tâche 4 : Service de transcription `atlas-stt`
 
 **Files:**
 - Create: `services/stt/serveur.py`, `services/stt/Dockerfile`, `services/stt/requirements.txt`
@@ -952,8 +952,8 @@ from typing import Protocol
 
 from fastapi import Body, Depends, FastAPI, HTTPException
 
-MODELE = os.environ.get("HELIOS_STT_MODELE", "large-v3")
-DECHARGEMENT_S = int(os.environ.get("HELIOS_STT_DECHARGEMENT_S", "300"))
+MODELE = os.environ.get("ATLAS_STT_MODELE", "large-v3")
+DECHARGEMENT_S = int(os.environ.get("ATLAS_STT_DECHARGEMENT_S", "300"))
 
 
 class Transcripteur(Protocol):
@@ -1011,7 +1011,7 @@ def obtenir_transcripteur() -> Transcripteur:
     return _moteur
 
 
-app = FastAPI(title="helios-stt")
+app = FastAPI(title="atlas-stt")
 
 
 def _verifier_wav(corps: bytes) -> None:
@@ -1077,9 +1077,9 @@ uvicorn[standard]>=0.32
 - [ ] **Étape 6 : Construire et vérifier sur l'Unraid**
 
 ```bash
-docker build -t helios-stt services/stt/
-docker run -d --name helios-stt --gpus all -p 9010:9010 \
-  -e HELIOS_STT_MODELE=large-v3 -v helios-modeles:/root/.cache helios-stt
+docker build -t atlas-stt services/stt/
+docker run -d --name atlas-stt --gpus all -p 9010:9010 \
+  -e ATLAS_STT_MODELE=large-v3 -v atlas-modeles:/root/.cache atlas-stt
 curl -s http://unraid.local:9010/sante
 ```
 Expected: `{"ok":true,"modele":"large-v3","charge":false}`
@@ -1103,7 +1103,7 @@ git commit -m "Ajoute le service de transcription faster-whisper"
 
 ---
 
-### Tâche 5 : Service de synthèse `helios-tts`
+### Tâche 5 : Service de synthèse `atlas-tts`
 
 **Files:**
 - Create: `services/tts/serveur.py`, `services/tts/Dockerfile`, `services/tts/requirements.txt`
@@ -1122,7 +1122,7 @@ git commit -m "Ajoute le service de transcription faster-whisper"
   qui rend des morceaux de PCM 16 kHz mono s16le.
 
 Le streaming par morceaux est une **exigence**, pas un confort : c'est ce qui permet à
-Helios de commencer à parler avant d'avoir fini de synthétiser. Un moteur qui ne rend que
+Atlas de commencer à parler avant d'avoir fini de synthétiser. Un moteur qui ne rend que
 le fichier complet est disqualifié.
 
 - [ ] **Étape 1 : Écrire les tests qui échouent**
@@ -1206,8 +1206,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-MOTEUR = os.environ.get("HELIOS_TTS_MOTEUR", "piper")
-VOIX_DEFAUT = os.environ.get("HELIOS_TTS_VOIX", "fr_FR-siwis-medium")
+MOTEUR = os.environ.get("ATLAS_TTS_MOTEUR", "piper")
+VOIX_DEFAUT = os.environ.get("ATLAS_TTS_VOIX", "fr_FR-siwis-medium")
 FREQUENCE_SORTIE = 16000
 TAILLE_MORCEAU = 640  # 20 ms
 
@@ -1281,7 +1281,7 @@ class DemandeSynthese(BaseModel):
     voice: str = ""
 
 
-app = FastAPI(title="helios-tts")
+app = FastAPI(title="atlas-tts")
 
 
 @app.post("/synthesize")
@@ -1338,9 +1338,9 @@ uvicorn[standard]>=0.32
 - [ ] **Étape 6 : Déployer et vérifier une vraie synthèse française**
 
 ```bash
-docker build -t helios-tts services/tts/
-docker run -d --name helios-tts --gpus all -p 9011:9011 \
-  -v helios-voix:/modeles helios-tts
+docker build -t atlas-tts services/tts/
+docker run -d --name atlas-tts --gpus all -p 9011:9011 \
+  -v atlas-voix:/modeles atlas-tts
 curl -s -X POST http://unraid.local:9011/synthesize \
   -H 'Content-Type: application/json' \
   -d '{"text":"Bonjour David, il est quatorze heures trente-deux.","voice":""}' \
@@ -1373,8 +1373,8 @@ git commit -m "Ajoute le service de synthèse vocale avec streaming par morceaux
 ### Tâche 6 : Configuration et clients HTTP vers les services GPU
 
 **Files:**
-- Create: `src/helios_core/config.py`, `src/helios_core/transcription.py`,
-  `src/helios_core/synthese.py`
+- Create: `src/atlas_core/config.py`, `src/atlas_core/transcription.py`,
+  `src/atlas_core/synthese.py`
 - Test: `tests/test_transcription.py`, `tests/test_synthese.py`
 
 **Interfaces:**
@@ -1396,8 +1396,8 @@ Les deux clients se testent sans réseau grâce au transport simulé de `httpx`.
 import httpx
 import pytest
 
-from helios_core.protocole import TAILLE_BLOC_OCTETS
-from helios_core.transcription import ClientTranscription, pcm_vers_wav
+from atlas_core.protocole import TAILLE_BLOC_OCTETS
+from atlas_core.transcription import ClientTranscription, pcm_vers_wav
 
 
 def test_pcm_vers_wav_produit_un_entete_lisible():
@@ -1434,7 +1434,7 @@ async def test_une_erreur_du_service_remonte_une_exception():
 import httpx
 import pytest
 
-from helios_core.synthese import ClientSynthese
+from atlas_core.synthese import ClientSynthese
 
 _ENTETE = b"RIFF" + b"\xff" * 4 + b"WAVE" + b"fmt " + b"\x00" * 20 + b"data" + b"\xff" * 4
 
@@ -1486,7 +1486,7 @@ Expected: FAIL avec `ModuleNotFoundError`
 - [ ] **Étape 3 : Écrire la configuration**
 
 ```python
-# src/helios_core/config.py
+# src/atlas_core/config.py
 """Configuration lue dans l'environnement. Aucun secret, seulement des adresses."""
 
 from __future__ import annotations
@@ -1505,18 +1505,18 @@ class Config:
     @staticmethod
     def depuis_environnement() -> Config:
         return Config(
-            stt_url=os.environ.get("HELIOS_STT_URL", "http://unraid.local:9010"),
-            tts_url=os.environ.get("HELIOS_TTS_URL", "http://unraid.local:9011"),
-            tts_voix=os.environ.get("HELIOS_TTS_VOIX", "fr_FR-siwis-medium"),
-            port_core=int(os.environ.get("HELIOS_CORE_PORT", "8080")),
+            stt_url=os.environ.get("ATLAS_STT_URL", "http://unraid.local:9010"),
+            tts_url=os.environ.get("ATLAS_TTS_URL", "http://unraid.local:9011"),
+            tts_voix=os.environ.get("ATLAS_TTS_VOIX", "fr_FR-siwis-medium"),
+            port_core=int(os.environ.get("ATLAS_CORE_PORT", "8080")),
         )
 ```
 
 - [ ] **Étape 4 : Écrire le client de transcription**
 
 ```python
-# src/helios_core/transcription.py
-"""Client du service helios-stt."""
+# src/atlas_core/transcription.py
+"""Client du service atlas-stt."""
 
 from __future__ import annotations
 
@@ -1561,8 +1561,8 @@ class ClientTranscription:
 - [ ] **Étape 5 : Écrire le client de synthèse**
 
 ```python
-# src/helios_core/synthese.py
-"""Client du service helios-tts, en flux."""
+# src/atlas_core/synthese.py
+"""Client du service atlas-tts, en flux."""
 
 from __future__ import annotations
 
@@ -1619,8 +1619,8 @@ Expected: PASS, 6 tests.
 - [ ] **Étape 7 : Commit**
 
 ```bash
-git add src/helios_core/config.py src/helios_core/transcription.py \
-        src/helios_core/synthese.py tests/test_transcription.py tests/test_synthese.py
+git add src/atlas_core/config.py src/atlas_core/transcription.py \
+        src/atlas_core/synthese.py tests/test_transcription.py tests/test_synthese.py
 git commit -m "Ajoute la configuration et les clients des services GPU"
 ```
 
@@ -1629,7 +1629,7 @@ git commit -m "Ajoute la configuration et les clients des services GPU"
 ### Tâche 7 : Machine à états et cerveau bouchon
 
 **Files:**
-- Create: `src/helios_core/etat.py`, `src/helios_core/cerveau.py`
+- Create: `src/atlas_core/etat.py`, `src/atlas_core/cerveau.py`
 - Test: `tests/test_etat.py`, `tests/test_cerveau.py`
 
 **Interfaces:**
@@ -1644,7 +1644,7 @@ git commit -m "Ajoute la configuration et les clients des services GPU"
 
 La machine à états existe pour une raison précise : sans elle, une trame audio qui arrive
 pendant que le cerveau réfléchit se mélange à l'énoncé suivant, et on passe des heures à
-chercher pourquoi Helios répond à la phrase d'avant.
+chercher pourquoi Atlas répond à la phrase d'avant.
 
 - [ ] **Étape 1 : Écrire les tests qui échouent**
 
@@ -1652,7 +1652,7 @@ chercher pourquoi Helios répond à la phrase d'avant.
 # tests/test_etat.py
 import pytest
 
-from helios_core.etat import MachineEtat, TransitionInterdite
+from atlas_core.etat import MachineEtat, TransitionInterdite
 
 
 def test_l_etat_de_depart_est_le_repos():
@@ -1692,7 +1692,7 @@ def test_peut_aller_vers_ne_leve_pas():
 
 ```python
 # tests/test_cerveau.py
-from helios_core.cerveau import CerveauBouchon
+from atlas_core.cerveau import CerveauBouchon
 
 
 async def _texte(cerveau, demande: str) -> str:
@@ -1705,7 +1705,7 @@ async def test_il_donne_l_heure():
 
 
 async def test_il_repond_bonjour():
-    assert "Bonjour" in await _texte(CerveauBouchon(), "bonjour Helios")
+    assert "Bonjour" in await _texte(CerveauBouchon(), "bonjour Atlas")
 
 
 async def test_il_assume_de_ne_pas_savoir():
@@ -1726,7 +1726,7 @@ Expected: FAIL avec `ModuleNotFoundError`
 - [ ] **Étape 3 : Écrire la machine à états**
 
 ```python
-# src/helios_core/etat.py
+# src/atlas_core/etat.py
 """Machine à états d'un tour de parole."""
 
 from __future__ import annotations
@@ -1767,7 +1767,7 @@ class MachineEtat:
 - [ ] **Étape 4 : Écrire le cerveau bouchon**
 
 ```python
-# src/helios_core/cerveau.py
+# src/atlas_core/cerveau.py
 """Le cerveau de la phase 1 : des réponses figées.
 
 Claude arrive en phase 2. Ce bouchon existe pour valider la chaîne audio seule —
@@ -1837,7 +1837,7 @@ Expected: PASS, 15 tests.
 - [ ] **Étape 6 : Commit**
 
 ```bash
-git add src/helios_core/etat.py src/helios_core/cerveau.py \
+git add src/atlas_core/etat.py src/atlas_core/cerveau.py \
         tests/test_etat.py tests/test_cerveau.py
 git commit -m "Ajoute la machine à états et le cerveau bouchon de la phase 1"
 ```
@@ -1847,7 +1847,7 @@ git commit -m "Ajoute la machine à états et le cerveau bouchon de la phase 1"
 ### Tâche 8 : Orchestration d'un tour de parole et interruption
 
 **Files:**
-- Create: `src/helios_core/session.py`
+- Create: `src/atlas_core/session.py`
 - Test: `tests/test_session.py`
 
 **Interfaces:**
@@ -1874,11 +1874,11 @@ doit annuler la génération **et** vider ce qui est déjà en vol, sans laisser
 import asyncio
 from collections.abc import AsyncIterator
 
-from helios_core.protocole import (
+from atlas_core.protocole import (
     Dire, Etat, FinEnonce, Interruption, Reveil, StopAudio,
     Transcription, decoder_audio_sortant,
 )
-from helios_core.session import Session
+from atlas_core.session import Session
 
 
 class Collecteur:
@@ -2035,12 +2035,12 @@ async def test_deux_tours_incrementent_l_identifiant():
 - [ ] **Étape 2 : Lancer les tests pour vérifier qu'ils échouent**
 
 Run: `uv run pytest tests/test_session.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_core.session'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_core.session'`
 
 - [ ] **Étape 3 : Écrire la session**
 
 ```python
-# src/helios_core/session.py
+# src/atlas_core/session.py
 """Orchestration d'un tour de parole, pour une connexion cliente.
 
 Une Session par client audio. Elle ne connaît ni le réseau ni le transport :
@@ -2200,7 +2200,7 @@ Expected: PASS, 7 tests.
 - [ ] **Étape 5 : Commit**
 
 ```bash
-git add src/helios_core/session.py tests/test_session.py
+git add src/atlas_core/session.py tests/test_session.py
 git commit -m "Ajoute l'orchestration d'un tour de parole et l'interruption"
 ```
 
@@ -2209,7 +2209,7 @@ git commit -m "Ajoute l'orchestration d'un tour de parole et l'interruption"
 ### Tâche 9 : Hub WebSocket
 
 **Files:**
-- Create: `src/helios_core/hub.py`
+- Create: `src/atlas_core/hub.py`
 - Test: `tests/test_hub.py`
 
 **Interfaces:**
@@ -2228,8 +2228,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-from helios_core import hub
-from helios_core.protocole import Bonjour, TAILLE_BLOC_OCTETS, encoder_audio_entrant
+from atlas_core import hub
+from atlas_core.protocole import Bonjour, TAILLE_BLOC_OCTETS, encoder_audio_entrant
 
 
 class SessionEspionne:
@@ -2283,17 +2283,17 @@ def test_un_message_invalide_renvoie_une_erreur_sans_couper(monkeypatch):
 ```
 
 Le troisième test compte : un client qui envoie une bêtise ne doit pas faire tomber la
-connexion, sinon la moindre incompatibilité de version rend Helios muet.
+connexion, sinon la moindre incompatibilité de version rend Atlas muet.
 
 - [ ] **Étape 2 : Lancer les tests pour vérifier qu'ils échouent**
 
 Run: `uv run pytest tests/test_hub.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_core.hub'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_core.hub'`
 
 - [ ] **Étape 3 : Écrire le hub**
 
 ```python
-# src/helios_core/hub.py
+# src/atlas_core/hub.py
 """Serveur du Core : route de santé et WebSocket audio."""
 
 from __future__ import annotations
@@ -2327,7 +2327,7 @@ async def _cycle_de_vie(app: FastAPI):
         _http = None
 
 
-app = FastAPI(title="helios-core", lifespan=_cycle_de_vie)
+app = FastAPI(title="atlas-core", lifespan=_cycle_de_vie)
 
 
 def creer_session(envoyer_json, envoyer_binaire) -> Session:
@@ -2396,7 +2396,7 @@ Expected: `{"ok":true,"stt":"http://unraid.local:9010","tts":"http://unraid.loca
 - [ ] **Étape 6 : Commit**
 
 ```bash
-git add src/helios_core/hub.py tests/test_hub.py
+git add src/atlas_core/hub.py tests/test_hub.py
 git commit -m "Ajoute le hub WebSocket du Core"
 ```
 
@@ -2405,8 +2405,8 @@ git commit -m "Ajoute le hub WebSocket du Core"
 ### Tâche 10 : Entrée/sortie audio du M5, avec annulation d'écho
 
 **Files:**
-- Create: `src/helios_aec/Package.swift`, `src/helios_aec/Sources/helios-aec/main.swift`
-- Create: `src/helios_audio/aec.py`
+- Create: `src/atlas_aec/Package.swift`, `src/atlas_aec/Sources/atlas-aec/main.swift`
+- Create: `src/atlas_audio/aec.py`
 - Test: `tests/test_aec_protocole.py`
 
 **Interfaces:**
@@ -2421,7 +2421,7 @@ git commit -m "Ajoute le hub WebSocket du Core"
   ```
   `PeripheriqueAec` (binaire Swift, si S2 a conclu `aec_systeme`) et
   `PeripheriqueSounddevice` (repli casque). Le choix se fait par la variable
-  `HELIOS_AUDIO_PERIPHERIQUE` (`aec` ou `sounddevice`).
+  `ATLAS_AUDIO_PERIPHERIQUE` (`aec` ou `sounddevice`).
   Plus le codec du tube : `trame_lecture(pcm) -> bytes`, `trame_vidage() -> bytes`.
 
 **Pourquoi un binaire séparé.** L'annulation d'écho d'Apple n'agit que si le **même**
@@ -2437,7 +2437,7 @@ import struct
 
 import pytest
 
-from helios_audio.aec import TAILLE_BLOC, trame_lecture, trame_vidage
+from atlas_audio.aec import TAILLE_BLOC, trame_lecture, trame_vidage
 
 
 def test_une_trame_de_lecture_porte_son_bloc():
@@ -2463,24 +2463,24 @@ def test_un_bloc_de_mauvaise_taille_est_refuse():
 - [ ] **Étape 2 : Lancer le test pour vérifier qu'il échoue**
 
 Run: `uv run pytest tests/test_aec_protocole.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_audio.aec'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_audio.aec'`
 
 - [ ] **Étape 3 : Écrire le binaire Swift**
 
 ```swift
-// src/helios_aec/Package.swift
+// src/atlas_aec/Package.swift
 // swift-tools-version:5.9
 import PackageDescription
 
 let package = Package(
-    name: "helios-aec",
+    name: "atlas-aec",
     platforms: [.macOS(.v14)],
-    targets: [.executableTarget(name: "helios-aec")]
+    targets: [.executableTarget(name: "atlas-aec")]
 )
 ```
 
 ```swift
-// src/helios_aec/Sources/helios-aec/main.swift
+// src/atlas_aec/Sources/atlas-aec/main.swift
 //
 // Capture et lecture audio avec le Voice Processing d'Apple.
 // stdin  : [0x01][taille:4 BE][pcm]  joue le bloc
@@ -2495,7 +2495,7 @@ let tailleBloc = 640
 
 let moteur = AVAudioEngine()
 let lecteur = AVAudioPlayerNode()
-let fileLecture = DispatchQueue(label: "helios.lecture")
+let fileLecture = DispatchQueue(label: "atlas.lecture")
 
 let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                            sampleRate: frequence, channels: 1, interleaved: false)!
@@ -2567,14 +2567,14 @@ moteur.stop()
 - [ ] **Étape 4 : Compiler le binaire**
 
 ```bash
-cd src/helios_aec && swift build -c release
+cd src/atlas_aec && swift build -c release
 ```
-Expected: `.build/release/helios-aec` existe.
+Expected: `.build/release/atlas-aec` existe.
 
 - [ ] **Étape 5 : Écrire le pilote Python et le repli**
 
 ```python
-# src/helios_audio/aec.py
+# src/atlas_audio/aec.py
 """Accès au périphérique audio du M5.
 
 Deux implémentations derrière le même protocole : le binaire Swift avec
@@ -2588,14 +2588,14 @@ import os
 import struct
 from typing import Protocol
 
-from helios_core.protocole import FREQUENCE_HZ as FREQUENCE
-from helios_core.protocole import TAILLE_BLOC_OCTETS as TAILLE_BLOC
+from atlas_core.protocole import FREQUENCE_HZ as FREQUENCE
+from atlas_core.protocole import TAILLE_BLOC_OCTETS as TAILLE_BLOC
 
 _TYPE_LECTURE = 0x01
 _TYPE_VIDAGE = 0x02
 
 CHEMIN_BINAIRE = os.environ.get(
-    "HELIOS_AEC_BINAIRE", "src/helios_aec/.build/release/helios-aec"
+    "ATLAS_AEC_BINAIRE", "src/atlas_aec/.build/release/atlas-aec"
 )
 
 
@@ -2699,7 +2699,7 @@ class PeripheriqueSounddevice:
 
 
 async def ouvrir_peripherique() -> PeripheriqueAudio:
-    if os.environ.get("HELIOS_AUDIO_PERIPHERIQUE", "aec") == "sounddevice":
+    if os.environ.get("ATLAS_AUDIO_PERIPHERIQUE", "aec") == "sounddevice":
         return PeripheriqueSounddevice()
     peripherique = PeripheriqueAec()
     await peripherique.demarrer()
@@ -2722,14 +2722,14 @@ import sys, struct
 d = sys.stdin.buffer.read()
 for i in range(0, len(d)-639, 640):
     sys.stdout.buffer.write(bytes([1]) + struct.pack('>I', 640) + d[i:i+640])
-" | src/helios_aec/.build/release/helios-aec > /tmp/capture.raw
+" | src/atlas_aec/.build/release/atlas-aec > /tmp/capture.raw
 ```
 Expected: le son sort par les enceintes, et `/tmp/capture.raw` grossit.
 
 - [ ] **Étape 8 : Commit**
 
 ```bash
-git add src/helios_aec/ src/helios_audio/aec.py tests/test_aec_protocole.py
+git add src/atlas_aec/ src/atlas_audio/aec.py tests/test_aec_protocole.py
 git commit -m "Ajoute l'entrée/sortie audio du M5 avec annulation d'écho"
 ```
 
@@ -2738,7 +2738,7 @@ git commit -m "Ajoute l'entrée/sortie audio du M5 avec annulation d'écho"
 ### Tâche 11 : Détection de voix et fin de phrase
 
 **Files:**
-- Create: `src/helios_audio/vad.py`
+- Create: `src/atlas_audio/vad.py`
 - Test: `tests/test_vad.py`
 
 **Interfaces:**
@@ -2757,7 +2757,7 @@ modèle, et testé exhaustivement.
 
 ```python
 # tests/test_vad.py
-from helios_audio.vad import Endpointeur
+from atlas_audio.vad import Endpointeur
 
 BLOC_MS = 20
 
@@ -2809,12 +2809,12 @@ def test_reinitialiser_oublie_l_etat():
 - [ ] **Étape 2 : Lancer les tests pour vérifier qu'ils échouent**
 
 Run: `uv run pytest tests/test_vad.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_audio.vad'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_audio.vad'`
 
 - [ ] **Étape 3 : Écrire le VAD et l'endpointeur**
 
 ```python
-# src/helios_audio/vad.py
+# src/atlas_audio/vad.py
 """Détection de voix (Silero) et décision de fin de phrase.
 
 Le modèle et la décision sont séparés : le premier est une boîte noire qu'on
@@ -2833,7 +2833,7 @@ from .aec import TAILLE_BLOC
 DUREE_BLOC_MS = 20
 _FENETRE_SILERO = 512  # échantillons attendus par le modèle v5 à 16 kHz
 
-CHEMIN_MODELE = os.environ.get("HELIOS_VAD_MODELE", "models/silero_vad.onnx")
+CHEMIN_MODELE = os.environ.get("ATLAS_VAD_MODELE", "models/silero_vad.onnx")
 
 
 class DetecteurVoix:
@@ -2922,7 +2922,7 @@ curl -L -o models/silero_vad.onnx \
 - [ ] **Étape 6 : Commit**
 
 ```bash
-git add src/helios_audio/vad.py tests/test_vad.py
+git add src/atlas_audio/vad.py tests/test_vad.py
 git commit -m "Ajoute la détection de voix et la décision de fin de phrase"
 ```
 
@@ -2931,7 +2931,7 @@ git commit -m "Ajoute la détection de voix et la décision de fin de phrase"
 ### Tâche 12 : Le client audio, du push-to-talk à l'interruption
 
 **Files:**
-- Create: `src/helios_audio/client.py`, `src/helios_audio/reveilleur.py`
+- Create: `src/atlas_audio/client.py`, `src/atlas_audio/reveilleur.py`
 - Test: `tests/test_client_audio.py`
 
 **Interfaces:**
@@ -2944,7 +2944,7 @@ git commit -m "Ajoute la détection de voix et la décision de fin de phrase"
   - `TransportWebSocket(url)` — l'implémentation réelle
   - `ClientAudio(transport, peripherique, detecteur, endpointeur, reveilleur)` avec
     `executer()` et `sur_message(msg)`
-  - `python -m helios_audio.client` comme point d'entrée
+  - `python -m atlas_audio.client` comme point d'entrée
 
 - [ ] **Étape 1 : Écrire les tests qui échouent**
 
@@ -2952,8 +2952,8 @@ git commit -m "Ajoute la détection de voix et la décision de fin de phrase"
 # tests/test_client_audio.py
 import asyncio
 
-from helios_audio.client import ClientAudio
-from helios_core.protocole import (
+from atlas_audio.client import ClientAudio
+from atlas_core.protocole import (
     Dire, Etat, FinEnonce, Interruption, Reveil, StopAudio,
     decoder_audio_entrant, encoder_audio_sortant,
 )
@@ -3018,7 +3018,7 @@ class ReveilleurScript:
 
 
 def _client(transport, peripherique, parole: list[bool], reveil_au=0):
-    from helios_audio.vad import Endpointeur
+    from atlas_audio.vad import Endpointeur
 
     return ClientAudio(
         transport=transport,
@@ -3089,18 +3089,18 @@ async def test_parler_pendant_la_parole_declenche_l_interruption():
 ```
 
 Le dernier test est le garde-fou de tout l'édifice : sans lui, une régression sur le
-barge-in ne se voit qu'à l'usage, et elle rend Helios pénible sans qu'on sache pourquoi.
+barge-in ne se voit qu'à l'usage, et elle rend Atlas pénible sans qu'on sache pourquoi.
 
 - [ ] **Étape 2 : Lancer les tests pour vérifier qu'ils échouent**
 
 Run: `uv run pytest tests/test_client_audio.py -v`
-Expected: FAIL avec `ModuleNotFoundError: No module named 'helios_audio.client'`
+Expected: FAIL avec `ModuleNotFoundError: No module named 'atlas_audio.client'`
 
 - [ ] **Étape 3 : Écrire le réveilleur au clavier**
 
 ```python
-# src/helios_audio/reveilleur.py
-"""Ce qui décide qu'on veut parler à Helios.
+# src/atlas_audio/reveilleur.py
+"""Ce qui décide qu'on veut parler à Atlas.
 
 En phase 1 c'est la touche Entrée : zéro faux déclenchement pendant qu'on met au
 point le reste. Le wake word arrive en tâche 13, derrière le même protocole.
@@ -3127,7 +3127,7 @@ class ReveilleurTouche:
         self._verrou = threading.Lock()
         fil = threading.Thread(target=self._ecouter, daemon=True)
         fil.start()
-        print("Appuie sur Entrée pour parler à Helios.", file=sys.stderr)
+        print("Appuie sur Entrée pour parler à Atlas.", file=sys.stderr)
 
     def _ecouter(self) -> None:
         for _ in sys.stdin:
@@ -3145,7 +3145,7 @@ class ReveilleurTouche:
 - [ ] **Étape 4 : Écrire le client**
 
 ```python
-# src/helios_audio/client.py
+# src/atlas_audio/client.py
 """Le daemon audio du M5.
 
 Deux boucles concurrentes : l'une lit le micro et parle au Core, l'autre reçoit
@@ -3163,7 +3163,7 @@ import os
 import time
 from typing import Protocol
 
-from helios_core.protocole import (
+from atlas_core.protocole import (
     Bonjour, Dire, Etat, FinEnonce, Interruption, Reveil, StopAudio,
     decoder_audio_sortant, encoder_audio_entrant,
 )
@@ -3174,7 +3174,7 @@ from .vad import DetecteurVoix, Endpointeur
 
 _journal = logging.getLogger(__name__)
 
-URL_CORE = os.environ.get("HELIOS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
+URL_CORE = os.environ.get("ATLAS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
 
 
 class Transport(Protocol):
@@ -3190,7 +3190,7 @@ class ClientAudio:
         self._endpointeur = endpointeur
         self._reveilleur = reveilleur
         self._capture = False
-        self._helios_parle = False
+        self._atlas_parle = False
         self._id_courant = 0
         self._bargein = Endpointeur(silence_ms=400, parole_min_ms=300)
 
@@ -3203,7 +3203,7 @@ class ClientAudio:
                 await self._traiter_bloc(bloc)
 
     async def _traiter_bloc(self, bloc: bytes) -> None:
-        if self._helios_parle:
+        if self._atlas_parle:
             await self._surveiller_bargein(bloc)
             return
 
@@ -3225,7 +3225,7 @@ class ClientAudio:
         if self._bargein.ajouter(self._detecteur.parle(bloc)) != "debut":
             return
         _journal.info("interruption détectée")
-        self._helios_parle = False
+        self._atlas_parle = False
         await self._peripherique.vider()
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
         self._capture = True
@@ -3236,17 +3236,17 @@ class ClientAudio:
     async def sur_message(self, msg) -> None:
         if isinstance(msg, Dire):
             self._id_courant = msg.id_enonce
-            self._helios_parle = True
+            self._atlas_parle = True
             self._bargein.reinitialiser()
         elif isinstance(msg, StopAudio):
-            self._helios_parle = False
+            self._atlas_parle = False
             await self._peripherique.vider()
         elif isinstance(msg, Etat):
             if msg.valeur == "parole":
-                self._helios_parle = True
+                self._atlas_parle = True
                 self._bargein.reinitialiser()
             elif msg.valeur in ("repos", "ecoute"):
-                self._helios_parle = False
+                self._atlas_parle = False
 
     async def sur_trame(self, trame: bytes) -> None:
         identifiant, pcm = decoder_audio_sortant(trame)
@@ -3272,7 +3272,7 @@ async def principal() -> None:
     import websockets
     from pydantic import TypeAdapter
 
-    from helios_core.protocole import MessageCore
+    from atlas_core.protocole import MessageCore
 
     adaptateur = TypeAdapter(MessageCore)
     logging.basicConfig(level=logging.INFO)
@@ -3313,53 +3313,53 @@ Expected: PASS, 7 tests.
 
 - [ ] **Étape 6 : Le premier vrai tour de parole**
 
-C'est le moment qui compte. Les quatre services doivent tourner : `helios-stt` et
-`helios-tts` sur l'Unraid, `make run-core` sur le néo (ou en local pour l'essai),
+C'est le moment qui compte. Les quatre services doivent tourner : `atlas-stt` et
+`atlas-tts` sur l'Unraid, `make run-core` sur le néo (ou en local pour l'essai),
 `make run-audio` sur le M5. Puis : appuyer sur Entrée, dire « quelle heure est-il »,
 se taire.
 
-Expected: Helios répond l'heure à voix haute, en français.
+Expected: Atlas répond l'heure à voix haute, en français.
 
 - [ ] **Étape 7 : Vérifier l'interruption**
 
 Appuyer sur Entrée, poser une question dont la réponse est longue, et **parler par-dessus**
-pendant qu'Helios répond.
+pendant qu'Atlas répond.
 
 Expected: il se tait en moins de 400 ms et se remet à écouter.
 
 - [ ] **Étape 8 : Commit**
 
 ```bash
-git add src/helios_audio/client.py src/helios_audio/reveilleur.py \
+git add src/atlas_audio/client.py src/atlas_audio/reveilleur.py \
         tests/test_client_audio.py
 git commit -m "Ajoute le client audio du M5 avec push-to-talk et interruption"
 ```
 
 ---
 
-### Tâche 13 : Le wake word « Hey Helios »
+### Tâche 13 : Le wake word « Hey Atlas »
 
 **Files:**
-- Modify: `src/helios_audio/reveilleur.py` (ajout de `ReveilleurMotCle`)
-- Modify: `src/helios_audio/client.py:principal` (choix du réveilleur par l'environnement)
+- Modify: `src/atlas_audio/reveilleur.py` (ajout de `ReveilleurMotCle`)
+- Modify: `src/atlas_audio/client.py:principal` (choix du réveilleur par l'environnement)
 - Create: `scripts/entrainer_mot_reveil.md`
 - Test: `tests/test_reveilleur.py`
 
 **Interfaces:**
 - Consumes: le protocole `Reveilleur` (tâche 12).
 - Produces: `ReveilleurMotCle(predicteur, seuil=0.5, refractaire_ms=2000)` et la variable
-  d'environnement `HELIOS_REVEILLEUR` (`touche` ou `motcle`).
+  d'environnement `ATLAS_REVEILLEUR` (`touche` ou `motcle`).
 
-**Le point qui fait rater cet entraînement.** « Hey Helios » se prononce en **français**.
+**Le point qui fait rater cet entraînement.** « Hey Atlas » se prononce en **français**.
 Le générateur d'échantillons d'openWakeWord utilise une voix anglaise par défaut, et un
-modèle entraîné sur « hey hee-lee-ohs » ne réagira jamais à « eille élios ». Les
+modèle entraîné sur « hey at-luhs » ne réagira jamais à « eille atlasse ». Les
 échantillons positifs doivent être synthétisés avec des voix Piper **françaises**.
 
 - [ ] **Étape 1 : Écrire les tests qui échouent**
 
 ```python
 # tests/test_reveilleur.py
-from helios_audio.reveilleur import ReveilleurMotCle
+from atlas_audio.reveilleur import ReveilleurMotCle
 
 BLOC = b"\x00" * 640
 
@@ -3405,7 +3405,7 @@ Expected: FAIL avec `ImportError: cannot import name 'ReveilleurMotCle'`
 
 - [ ] **Étape 3 : Écrire le réveilleur par mot-clé**
 
-Ajouter à `src/helios_audio/reveilleur.py` :
+Ajouter à `src/atlas_audio/reveilleur.py` :
 
 ```python
 import os
@@ -3427,7 +3427,7 @@ class PredicteurOpenWakeWord:
 
         self._np = np
         chemin = chemin or os.environ.get(
-            "HELIOS_MOT_REVEIL", "models/hey_helios.onnx"
+            "ATLAS_MOT_REVEIL", "models/hey_atlas.onnx"
         )
         self._modele = openwakeword.Model(
             wakeword_models=[chemin], inference_framework="onnx"
@@ -3470,7 +3470,7 @@ Et dans `client.py`, remplacer la construction du réveilleur :
 ```python
     from .reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle, ReveilleurTouche
 
-    if os.environ.get("HELIOS_REVEILLEUR", "touche") == "motcle":
+    if os.environ.get("ATLAS_REVEILLEUR", "touche") == "motcle":
         reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord())
     else:
         reveilleur = ReveilleurTouche()
@@ -3494,38 +3494,38 @@ git clone https://github.com/rhasspy/piper-sample-generator
 
 # 2. Voix FRANÇAISES pour la génération — l'étape que tout le monde rate
 #    Récupérer plusieurs voix fr_FR de Piper (siwis, upmc, gilles, mls) et les
-#    passer au générateur, afin que le modèle entende « eille élios » et non
+#    passer au générateur, afin que le modèle entende « eille atlasse » et non
 #    une prononciation anglaise.
 
-# 3. Environ 30 000 positifs « hey helios », avec variation de vitesse,
+# 3. Environ 30 000 positifs « hey atlas », avec variation de vitesse,
 #    de hauteur et de réverbération, plus les négatifs d'usage
 #    (AudioSet, FMA, et surtout des enregistrements de David qui parle
 #    normalement sans dire le mot).
 
-# 4. Entraînement, puis export ONNX vers models/hey_helios.onnx
+# 4. Entraînement, puis export ONNX vers models/hey_atlas.onnx
 ```
 
 - [ ] **Étape 6 : Entraîner et rapatrier le modèle**
 
 ```bash
-scp unraid:/chemin/hey_helios.onnx models/hey_helios.onnx
+scp unraid:/chemin/hey_atlas.onnx models/hey_atlas.onnx
 ```
 
 - [ ] **Étape 7 : Essayer en vrai**
 
 ```bash
-HELIOS_REVEILLEUR=motcle make run-audio
+ATLAS_REVEILLEUR=motcle make run-audio
 ```
-Dire « Hey Helios, quelle heure est-il ». Puis **parler normalement pendant dix minutes
+Dire « Hey Atlas, quelle heure est-il ». Puis **parler normalement pendant dix minutes
 sans jamais dire le mot**, et compter les faux réveils. Le réglage du seuil se fait au banc
 de mesure (tâche 14), pas à l'oreille.
 
 - [ ] **Étape 8 : Commit**
 
 ```bash
-git add src/helios_audio/reveilleur.py src/helios_audio/client.py \
+git add src/atlas_audio/reveilleur.py src/atlas_audio/client.py \
         scripts/entrainer_mot_reveil.md tests/test_reveilleur.py
-git commit -m "Ajoute le wake word « Hey Helios »"
+git commit -m "Ajoute le wake word « Hey Atlas »"
 ```
 
 ---
@@ -3604,11 +3604,11 @@ from pathlib import Path
 
 import httpx
 
-from helios_audio.vad import DetecteurVoix, Endpointeur
-from helios_core.transcription import ClientTranscription
+from atlas_audio.vad import DetecteurVoix, Endpointeur
+from atlas_core.transcription import ClientTranscription
 
 RACINE = Path(__file__).parent
-POSITIFS = RACINE / "enregistrements" / "positifs"      # « Hey Helios » prononcé
+POSITIFS = RACINE / "enregistrements" / "positifs"      # « Hey Atlas » prononcé
 NEGATIFS = RACINE / "enregistrements" / "negatifs"      # parole normale, sans le mot
 PHRASES = RACINE / "enregistrements" / "phrases"        # énoncés à transcrire
 
@@ -3645,7 +3645,7 @@ def _blocs(chemin: Path) -> list[bytes]:
 
 
 def mesurer_reveil(seuil: float) -> dict:
-    from helios_audio.reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle
+    from atlas_audio.reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle
 
     detectes = 0
     fichiers = sorted(POSITIFS.glob("*.wav"))
@@ -3688,7 +3688,7 @@ async def mesurer_transcription() -> dict:
         import os
 
         client = ClientTranscription(
-            os.environ.get("HELIOS_STT_URL", "http://unraid.local:9010"), http
+            os.environ.get("ATLAS_STT_URL", "http://unraid.local:9010"), http
         )
         for nom, attendu in attendus.items():
             pcm = b"".join(_blocs(PHRASES / nom))
@@ -3725,13 +3725,13 @@ Expected: PASS, 6 tests.
 C'est une tâche pour David, et elle ne se délègue pas : le banc ne vaut que si les
 enregistrements sont les siens, dans ses conditions réelles.
 
-- `bench/enregistrements/positifs/` — **30 prises de « Hey Helios »** : au micro, à un
+- `bench/enregistrements/positifs/` — **30 prises de « Hey Atlas »** : au micro, à un
   mètre, à trois mètres, avec de la musique de fond, en parlant vite, en parlant bas.
 - `bench/enregistrements/negatifs/` — **une heure de parole normale** sans jamais
   prononcer le mot. Une réunion, un appel, une vidéo qui tourne : ce qui compte est que
   ce soit du français, dans la même pièce.
 - `bench/enregistrements/phrases/` — **20 énoncés** représentatifs de ce qu'il dira
-  vraiment à Helios, avec leur transcription exacte dans `attendus.json`.
+  vraiment à Atlas, avec leur transcription exacte dans `attendus.json`.
 
 Tout en WAV 16 kHz mono. `bench/audio/` est dans `.gitignore` ; le dossier
 `enregistrements/` doit y être ajouté aussi — ces fichiers ne partent pas dans le dépôt.
@@ -3741,7 +3741,7 @@ Tout en WAV 16 kHz mono. `bench/audio/` est dans `.gitignore` ; le dossier
 {
   "phrase01.wav": "quelle heure est-il",
   "phrase02.wav": "lance la veille concurrence",
-  "phrase03.wav": "note ça dans le projet Helios"
+  "phrase03.wav": "note ça dans le projet Atlas"
 }
 ```
 
@@ -3770,7 +3770,7 @@ git commit -m "Ajoute le banc de mesure de la chaîne audio"
 
 ## Ce que la phase 1 livre, et ce qu'elle ne livre pas
 
-À la fin de la tâche 14, Helios écoute « Hey Helios », comprend le français, répond d'une
+À la fin de la tâche 14, Atlas écoute « Hey Atlas », comprend le français, répond d'une
 vraie voix et se tait quand on lui coupe la parole. Les chiffres du banc sont connus et
 les réglages sont justifiés.
 
@@ -3794,12 +3794,12 @@ Vérification section par section, pour ce que les phases 0 et 1 doivent porter.
 | §5 Flux d'un tour de parole | Tâches 8 et 12 |
 | §5 Interruption en pleine phrase | Tâche 8 (côté Core), tâche 12 (côté client) |
 | §5 Budget de latence | Contraintes globales, mesuré en tâche 14 |
-| §6.1 `helios-audio` | Tâches 10, 11, 12, 13 |
-| §6.2 `helios-core` (hub, états, segmentation) | Tâches 2, 3, 7, 8, 9 |
+| §6.1 `atlas-audio` | Tâches 10, 11, 12, 13 |
+| §6.2 `atlas-core` (hub, états, segmentation) | Tâches 2, 3, 7, 8, 9 |
 | §6.2 Brain `claude -p`, rotation de contexte | **Phase 2** — remplace `CerveauBouchon` derrière le protocole `Cerveau` posé en tâche 7 |
-| §6.3 `helios-stt` | Tâche 4 |
-| §6.4 `helios-tts` | Tâche 5 |
-| §6.5 `helios-web` | **Phase 4** |
+| §6.3 `atlas-stt` | Tâche 4 |
+| §6.4 `atlas-tts` | Tâche 5 |
+| §6.5 `atlas-web` | **Phase 4** |
 | §6.6 Protocole client/Core | Tâche 2 |
 | §13 Secrets et exposition réseau | Contraintes globales, tâches 1 et 4 à 6 |
 | §14 Spikes S1, S2, S3 | Phase 0 |
