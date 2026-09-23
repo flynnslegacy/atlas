@@ -137,7 +137,12 @@ def verifier_modele_vad(chemin: str = CHEMIN_MODELE) -> None:
             f"Modèle Silero introuvable : {chemin}\n"
             "Le banc en a besoin pour l'endpointage. Télécharge-le depuis la racine du dépôt :\n"
             "  mkdir -p models && curl -L -o models/silero_vad.onnx "
-            "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+            "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx\n"
+            "Seul le fichier d'empreinte SHA-256 suivante a été validé, avec le contrat "
+            "d'entrée v5 codé en dur dans vad.py ; un autre fichier peut ne pas le respecter :\n"
+            "  1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3\n"
+            "Vérifie-la avec :\n"
+            "  shasum -a 256 models/silero_vad.onnx"
         )
 
 

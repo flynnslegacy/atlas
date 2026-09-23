@@ -91,6 +91,25 @@ dépôt :
 mkdir -p models && curl -L -o models/silero_vad.onnx https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx
 ```
 
+Le fichier ci-dessus vient de la branche `master` du dépôt Silero, qui peut
+changer sans préavis. Seul le modèle de l'empreinte SHA-256 suivante a été
+validé sur le matériel du propriétaire, avec le contrat d'entrée v5 que
+`vad.py` code en dur (une fenêtre de 512 échantillons précédée de 64 de
+contexte) :
+
+```
+1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
+```
+
+Vérifie-la après le téléchargement :
+
+```bash
+shasum -a 256 models/silero_vad.onnx
+```
+
+Un autre fichier — une révision plus récente de `master`, par exemple — peut
+ne pas respecter ce contrat.
+
 ## Lancer le banc
 
 ```bash

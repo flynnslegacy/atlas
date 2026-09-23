@@ -52,4 +52,9 @@ def test_une_phrase_sans_fin_n_a_pas_de_retard():
 def test_sans_modele_silero_le_banc_s_arrete_en_disant_comment_le_telecharger(tmp_path):
     with pytest.raises(SystemExit) as arret:
         verifier_modele_vad(str(tmp_path / "silero_vad.onnx"))
-    assert "curl -L -o models/silero_vad.onnx" in str(arret.value)
+    message = str(arret.value)
+    assert "curl -L -o models/silero_vad.onnx" in message
+    # Le modèle validé sur le matériel du propriétaire est épinglé par empreinte,
+    # avec la commande qui permet de la vérifier (ruling item 3, R41).
+    assert "shasum -a 256 models/silero_vad.onnx" in message
+    assert "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3" in message
