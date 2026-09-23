@@ -28,7 +28,9 @@ async def attendre_entree(peripherique, message: str, demander: Callable[[str], 
     while not attente.done():
         try:
             await asyncio.wait_for(peripherique.lire_bloc(), timeout=0.1)
-        except TimeoutError:
+        # Avant Python 3.11, asyncio.TimeoutError est distinct du TimeoutError natif ; ce
+        # module doit tourner en 3.10 (contraintes.md), d'où la forme explicite ci-dessous.
+        except asyncio.TimeoutError:  # noqa: UP041
             pass
     await attente
 
