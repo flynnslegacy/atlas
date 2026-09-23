@@ -2,13 +2,16 @@
 -include .env
 export
 
-.PHONY: install test lint format bench run-core run-audio
+.PHONY: install test test-swift lint format bench run-core run-audio
 
 install:
 	uv sync --extra core --extra audio --extra dev
 
 test:
 	uv run pytest -v
+
+test-swift:
+	swiftc -sanitize=thread src/atlas_aec/Sources/atlas-aec/Tampons.swift tests/aec/tampons/main.swift -o "$$TMPDIR/harnais" && "$$TMPDIR/harnais"
 
 lint:
 	uv run ruff check . && uv run ruff format --check .
