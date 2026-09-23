@@ -58,7 +58,7 @@ Le lieu d'usage est un bureau calme : clavier, souris, chaise, ventilation, et d
 ### 4.3 Enregistrements de David : environ 30 minutes, dont une douzaine où il suffit de laisser tourner le micro
 
 Ils sont captés par le vrai chemin du micro, le binaire Swift avec annulation d'écho, à 16 kHz mono, exactement ce qu'Atlas entendra :
-- environ 100 « Hey Atlas » : ton normal, pressé, fatigué, fort, bas ; à trois distances (bureau, 1,5 m, 3 m) ;
+- environ 100 « Hey Atlas » : ton normal, pressé, fatigué, fort, bas ; à trois distances (bureau, 1,5 m, 3 m), avec un délai après Entrée pour se placer (0, 3 et 5 s) ;
 - une dizaine de phrases avec « Atlas » seul ;
 - environ 10 minutes de parole normale sans le mot ;
 - 10 à 15 minutes de bureau sans voix.
@@ -103,7 +103,7 @@ Les fonctions logiques sont séparées des entrées-sorties, et testées : déco
 
 1. **Piper :** processeur seulement.
 2. **Qwen :** conteneur ponctuel, service `atlas-tts` arrêté.
-3. **Whisper :** service `atlas-tts` toujours arrêté.
+3. **Whisper :** le service `atlas-tts` peut être relancé ; ensemble, Whisper et la voix d'Atlas tiennent dans les 12 Go.
 4. **Préparation et entraînement :** moins de 2 Go de mémoire vidéo, services relancés au besoin, ComfyUI au repos.
 
 ## 6. L'environnement d'entraînement
@@ -115,7 +115,8 @@ Ces faits ont été vérifiés dans le code d'openWakeWord le 23 septembre 2026.
   - `torch==1.13.1+cu117`, dont les binaires sm_86 tournent sur Ada (réussite rapportée sur une RTX 4090) ;
   - `pyarrow<15`, `fsspec<2024.1.0` ;
   - openWakeWord au commit `368c037` ;
-  - pas de TensorFlow, puisque nous n'avons pas besoin de `.tflite`.
+  - `tensorflow-cpu==2.8.1`, que `.[full]` installe de toute façon, figé comme dans la pile éprouvée ; nous ne produisons pas de `.tflite` ;
+  - `numpy<2` : torch 1.13 est bâti contre NumPy 1, et `torch.from_numpy` échoue sous NumPy 2 (relevé par la revue finale).
   - Le conteneur se lance avec `--shm-size=32g`.
 - **`piper_sample_generator_path`** doit pointer vers un dossier contenant un `generate_samples.py` importable, même quand on ne génère rien. Un checkout de piper-sample-generator v2.0.0, ou un fichier bouchon d'une ligne, suffit. La génération Piper, elle, utilise piper-tts 1.3.0, installé dans un environnement Python séparé du même conteneur.
 - **Arborescence attendue :** `<output_dir>/hey_atlas/{positive,negative}_{train,test}/*.wav`, en 16 000 Hz exactement, mono int16. `positive_test/` ne doit pas être vide : la fenêtre se calcule sur la médiane de ses extraits, plus 750 ms.
@@ -147,7 +148,7 @@ Les extraits de `veiller.py` deviennent des négatifs, puis on relance `preparer
 
 **Repli :** si la détection reste sous 85 à 90 % après deux ou trois itérations, on passe à microWakeWord (runtime `pymicro-wakeword`, qui a un paquet macOS), avec les mêmes extraits. Il faudra alors un nouveau `Predicteur` dans le client.
 
-**Les proches :** si l'un d'eux enregistre une dizaine de « Hey Atlas », ils rejoignent le jeu de test.
+**Les proches :** ce n'est pas encore outillé. `evaluer.py` ne lit que les prises de David, par distance ; des « Hey Atlas » de proches demanderont un jeu de test dédié.
 
 ## 8. L'intégration
 
