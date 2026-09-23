@@ -43,8 +43,9 @@ Placeholders utilisés partout ci-dessous : `<dossier-travail-unraid>` (le
 dossier monté dans le conteneur en `/travail`), `<clone-du-depot>` (le dépôt
 Atlas cloné sur l'Unraid, celui qui sert déjà à bâtir `atlas-stt` et
 `atlas-tts`), `<cache-huggingface-hote>` (le cache Hugging Face de l'hôte, à
-réutiliser pour ne pas retélécharger Qwen3-TTS) et `<ton-mac>` (l'alias SSH ou
-le nom de ta machine).
+réutiliser pour ne pas retélécharger Qwen3-TTS), `<ton-mac>` (l'alias SSH ou
+le nom de ta machine) et `<depot-sur-le-mac>` (le dépôt Atlas cloné sur ton
+Mac, celui depuis lequel tu lances `enregistrer` et `evaluer`).
 
 ---
 
@@ -84,6 +85,11 @@ TRAVAIL="-v <dossier-travail-unraid>:/travail"
 docker build -f scripts/mot_reveil/Dockerfile -t atlas-mot-reveil .
 ```
 
+**Les scripts sont figés dans l'image au moment du build** (`COPY scripts/`
+dans le `Dockerfile`). Après un `git pull` sur l'Unraid, reconstruis l'image
+avant de relancer quoi que ce soit : sinon les conteneurs continuent de
+tourner avec l'ancien code, sans avertissement.
+
 ## 4. Télécharger les données
 
 Environ 20 Go (traits ACAV100M, jeu de validation, réponses impulsionnelles,
@@ -110,7 +116,17 @@ docker run --rm -it $TRAVAIL atlas-mot-reveil \
 ```
 
 **Écoute** quelques extraits de la voix `mls`, dans
-`<dossier-travail-unraid>/clips/piper/positifs/` (fichiers `piper_pos_*.wav`).
+`<dossier-travail-unraid>/clips/piper/positifs/`. Les fichiers s'appellent
+`piper_pos_*.wav` et ne disent pas eux-mêmes quelle voix les a produits :
+retrouve ceux de `mls` dans `manifeste.json`, au même endroit (il associe
+chaque nom de fichier à sa voix, son locuteur, son texte et sa vitesse), par
+exemple :
+
+```bash
+python -c "import json; m = json.load(open('manifeste.json')); \
+    print([n for n, v in m.items() if v['voix'] == 'fr_FR-mls-medium'][:5])"
+```
+
 Si elle déçoit, la vraie génération l'exclut :
 
 ```bash
@@ -223,7 +239,7 @@ docker run --rm -it $GPU --shm-size=32g $TRAVAIL atlas-mot-reveil bash scripts/m
 ### Sur l'Unraid (ou depuis où `<dossier-travail-unraid>` est visible)
 
 ```bash
-scp <dossier-travail-unraid>/modele/hey_atlas.onnx <ton-mac>:models/hey_atlas.onnx  # ou tout autre moyen de copie
+scp <dossier-travail-unraid>/modele/hey_atlas.onnx <ton-mac>:<depot-sur-le-mac>/models/hey_atlas.onnx  # ou tout autre moyen de copie
 ```
 
 ### Sur le Mac
@@ -238,7 +254,10 @@ uv run python -m scripts.mot_reveil.evaluer --modele models/hey_atlas.onnx
 
 `evaluer` affiche le taux de détection par distance, les réveils sur « Atlas »
 seul, et les faux réveils sur ta parole et ton bureau, pour plusieurs seuils.
-Reporte le seuil conseillé dans ton `.env` :
+**Ce seuil conseillé ne repose que sur quelques minutes d'audio mis de côté
+pour le test : il a tendance à être bas.** C'est la veille (étape 11), sur une
+vraie journée de travail, qui le confirme ou le corrige. Reporte-le d'abord
+dans ton `.env` :
 
 ```
 ATLAS_REVEILLEUR=motcle
@@ -247,8 +266,12 @@ ATLAS_REVEIL_SEUIL=<seuil conseillé par evaluer>
 
 ## 11. Une journée de veille
 
+`uv run` ne charge pas `.env` : sans `--seuil` explicite, la veille mesurerait au
+seuil par défaut plutôt qu'à celui retenu à l'étape précédente. Passe-le donc
+toujours toi-même :
+
 ```bash
-uv run python -m scripts.mot_reveil.veiller --modele models/hey_atlas.onnx
+uv run python -m scripts.mot_reveil.veiller --modele models/hey_atlas.onnx --seuil <seuil retenu à l'étape 10>
 ```
 
 Laisse tourner une journée de travail normale. Deux règles pendant la veille :
@@ -260,9 +283,13 @@ Laisse tourner une journée de travail normale. Deux règles pendant la veille :
 
 À la fin (Ctrl-C), les alertes sont dans
 `donnees/mot_reveil/veille/<horodatage>/`, avec un `journal.json`. Copie
-celles marquées **FAUX RÉVEIL** dans le journal (pas les « presque », en
-dessous du seuil réel) vers `<dossier-travail-unraid>/david/faux_reveils/` :
-`preparer.py` les reprendra comme négatifs précieux au prochain tour.
+**toutes** les alertes vers `<dossier-travail-unraid>/david/faux_reveils/` —
+aussi bien les « FAUX RÉVEIL » que les « presque », en dessous du seuil réel :
+ces quasi-détections sont aussi de bons négatifs pour le prochain tour.
+Écoute-les d'abord et supprime celles qui contiennent vraiment « Hey Atlas ».
+Les noms de fichiers sont préfixés par l'horodatage de la session : plusieurs
+journées copiées dans le même dossier ne s'écrasent pas. `preparer.py`
+reprendra le tout comme négatifs précieux.
 
 ## 12. Boucler, puis s'arrêter
 
