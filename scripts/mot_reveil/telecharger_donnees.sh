@@ -39,9 +39,8 @@ if [ ! -f "$D/fonds/esc50/.fait" ]; then
     touch "$D/fonds/esc50/.fait"
 fi
 
-# Voix Piper françaises.
-for voix in fr_FR-mls-medium fr_FR-siwis-medium fr_FR-upmc-medium fr_FR-gilles-low \
-            fr_FR-tom-medium fr_FR-mls_1840-low; do
+# Voix Piper françaises validées à l'oreille (même liste que VOIX dans generer_piper.py).
+for voix in fr_FR-siwis-medium fr_FR-tom-medium fr_FR-gilles-low; do
     IFS=- read -r langue jeu qualite <<< "$voix"
     base="$HF/rhasspy/piper-voices/resolve/main/fr/$langue/$jeu/$qualite/$voix"
     recuperer "$base.onnx" "$V/$voix.onnx"

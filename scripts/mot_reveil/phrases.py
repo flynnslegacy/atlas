@@ -55,7 +55,8 @@ NEGATIVES_QWEN = [orthographe_usuelle(n) for n in NEGATIVES]
 _INTERJECTIONS = ("hey", "hei", "hay", "he", "eh", "ey", "eille", "heille", "et")
 _REVEIL = re.compile(r"\b(?:" + "|".join(_INTERJECTIONS) + r")\s+atlas(?:se)?\b")
 
-DUREE_MAX_POSITIF_S = 2.0
+DUREE_MIN_POSITIF_S = 0.4
+DUREE_MAX_POSITIF_S = 2.0  # la fenêtre d'openWakeWord vaut la médiane des positifs + 750 ms
 DUREE_MAX_NEGATIF_S = 3.5
 
 
@@ -70,9 +71,17 @@ def entend_hey_atlas(transcription: str) -> bool:
     return _REVEIL.search(normaliser(transcription)) is not None
 
 
-def a_garder(transcription: str, positif: bool, duree_s: float) -> bool:
-    """Décide si un extrait synthétisé mérite d'entrer dans l'entraînement."""
-    if positif:
-        return duree_s <= DUREE_MAX_POSITIF_S and entend_hey_atlas(transcription)
-    # Un négatif que Whisper entend comme « hey atlas » fausserait l'étiquette.
+def garder_positif(duree_s: float) -> bool:
+    """Un positif synthétisé se juge à sa durée, pas à ce qu'en dit Whisper.
+
+    Whisper ne reconnaît pas deux mots isolés : 29 % des prises de David, et des extraits
+    Piper justes à l'oreille transcrits « Un atlas » (24 septembre 2026). Les voix qui
+    déraillent, elles, produisent 3 à 9 s de charabia : la durée les écarte. La justesse
+    de chaque voix se vérifie à l'oreille, sur l'essai.
+    """
+    return DUREE_MIN_POSITIF_S <= duree_s <= DUREE_MAX_POSITIF_S
+
+
+def garder_negatif(transcription: str, duree_s: float) -> bool:
+    """Un négatif que Whisper entend comme « hey atlas » fausserait l'étiquette."""
     return duree_s <= DUREE_MAX_NEGATIF_S and not entend_hey_atlas(transcription)

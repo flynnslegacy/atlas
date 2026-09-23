@@ -1,4 +1,7 @@
-"""Garde les extraits synthétisés où Whisper entend ce qu'il faut.
+"""Garde les extraits synthétisés qui ont la bonne forme.
+
+Positifs : jugés à leur durée seule (voir phrases.garder_positif). Négatifs : écartés
+si Whisper y entend « hey atlas ». Les dossiers d'essai (<source>/essai/) sont ignorés.
 
     /opt/piper/bin/python -m scripts.mot_reveil.filtrer
         --clips /travail/clips --retenus /travail/retenus --stt http://localhost:9010
@@ -17,7 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from .phrases import a_garder
+from .phrases import garder_negatif, garder_positif
 
 SORTES = {"positifs": True, "negatifs": False}
 
@@ -67,12 +70,17 @@ async def filtrer(
         nonlocal decisions
         cle = f"{source}/{sorte}/{fichier.name}"
         if cle not in journal:
-            async with limite:
-                texte = await transcrire(http, url, fichier.read_bytes())
-            journal[cle] = {
-                "texte": texte,
-                "garde": a_garder(texte, SORTES[sorte], _duree_s(fichier)),
-            }
+            duree = round(_duree_s(fichier), 2)
+            if SORTES[sorte]:
+                journal[cle] = {"duree_s": duree, "garde": garder_positif(duree)}
+            else:
+                async with limite:
+                    texte = await transcrire(http, url, fichier.read_bytes())
+                journal[cle] = {
+                    "texte": texte,
+                    "duree_s": duree,
+                    "garde": garder_negatif(texte, duree),
+                }
             decisions += 1
             if decisions % sauvegarde_tous == 0:
                 _sauvegarder_journal(chemin_journal, journal)

@@ -3,7 +3,9 @@
 Tourne dans le conteneur d'entraînement, avec l'environnement /opt/piper :
     /opt/piper/bin/python -m scripts.mot_reveil.generer_piper
         --voix /travail/voix_piper --sortie /travail/clips/piper
-        [--essai] [--exclure fr_FR-mls-medium]
+        [--essai] [--exclure fr_FR-gilles-low]
+
+L'essai s'écrit dans <sortie>/essai/, que filtrer.py ignore : on l'écoute, on ne s'en sert pas.
 """
 
 from __future__ import annotations
@@ -20,14 +22,10 @@ import numpy as np
 from .audio import couper_silences, ecrire_wav, ramener_16k
 from .phrases import NEGATIVES, POSITIVES
 
-VOIX = (
-    "fr_FR-mls-medium",
-    "fr_FR-siwis-medium",
-    "fr_FR-upmc-medium",
-    "fr_FR-gilles-low",
-    "fr_FR-tom-medium",
-    "fr_FR-mls_1840-low",
-)
+# Seules les voix qui disent « Hey Atlas » juste, à l'oreille de David (essais du 24 septembre
+# 2026). Écartées : fr_FR-mls-medium et fr_FR-mls_1840-low (2 à 9 s de charabia pour deux
+# mots), fr_FR-upmc-medium (durée normale, mais prononciation fausse).
+VOIX = ("fr_FR-siwis-medium", "fr_FR-tom-medium", "fr_FR-gilles-low")
 
 
 @dataclass(frozen=True)
@@ -98,32 +96,40 @@ def produire(
         json.loads(chemin_manifeste.read_text()) if chemin_manifeste.exists() else {}
     )
     ecrits = 0
+    avant = dict(manifeste)
     for tache in taches:
         chemin = dossier / f"{tache.nom}.wav"
         if chemin.exists():
+            # Écrit avant un arrêt brutal, peut-être sans son entrée : le tirage est
+            # reproductible, la tâche la redonne.
+            manifeste.setdefault(tache.nom, _entree(tache))
             continue
         audio, frequence = synthetiser(voix_chargees[tache.voix], tache, fabrique_config)
         audio = couper_silences(ramener_16k(audio, frequence))
         if audio.size:
             ecrire_wav(chemin, audio)
-            manifeste[tache.nom] = {
-                "voix": tache.voix,
-                "locuteur": tache.locuteur,
-                "texte": tache.texte,
-                "vitesse": tache.vitesse,
-            }
+            manifeste[tache.nom] = _entree(tache)
             ecrits += 1
-    if ecrits:
+    if manifeste != avant:
         chemin_manifeste.write_text(json.dumps(manifeste, indent=1, ensure_ascii=False))
     return ecrits
+
+
+def _entree(tache: Tache) -> dict:
+    return {
+        "voix": tache.voix,
+        "locuteur": tache.locuteur,
+        "texte": tache.texte,
+        "vitesse": tache.vitesse,
+    }
 
 
 def main(argv: list[str] | None = None) -> None:
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument("--voix", type=Path, required=True)
     parseur.add_argument("--sortie", type=Path, required=True)
-    parseur.add_argument("--positifs", type=int, default=30000)
-    parseur.add_argument("--negatifs", type=int, default=20000)
+    parseur.add_argument("--positifs", type=int, default=6000)
+    parseur.add_argument("--negatifs", type=int, default=6000)
     parseur.add_argument("--graine", type=int, default=1)
     parseur.add_argument("--exclure", nargs="*", default=[])
     parseur.add_argument("--essai", action="store_true", help="50 positifs et 50 négatifs")
@@ -140,13 +146,14 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"Aucune voix Piper dans {args.voix} : lance telecharger_donnees.sh.")
     locuteurs = {nom: max(1, v.config.num_speakers) for nom, v in voix_chargees.items()}
     n_pos, n_neg = (50, 50) if args.essai else (args.positifs, args.negatifs)
+    dossier = args.sortie / "essai" if args.essai else args.sortie
     for sorte, textes, n, graine in (
         ("positifs", POSITIVES, n_pos, args.graine),
         ("negatifs", NEGATIVES, n_neg, args.graine + 1),
     ):
         taches = planifier(locuteurs, textes, n, f"piper_{sorte[:3]}", graine)
-        ecrits = produire(taches, voix_chargees, args.sortie / sorte)
-        print(f"{sorte} : {ecrits} extraits écrits dans {args.sortie / sorte}.")
+        ecrits = produire(taches, voix_chargees, dossier / sorte)
+        print(f"{sorte} : {ecrits} extraits écrits dans {dossier / sorte}.")
 
 
 if __name__ == "__main__":
