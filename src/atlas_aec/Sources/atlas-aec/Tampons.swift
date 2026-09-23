@@ -23,6 +23,14 @@ private func nouveauVerrou() -> UnsafeMutablePointer<os_unfair_lock> {
     return verrou
 }
 
+/// Le statut, suivi de son code à quatre caractères quand il en a un ('nope', '!dev'…).
+/// Hors temps réel seulement : sert aux messages d'erreur et au diagnostic de capture.
+func decrire(_ statut: OSStatus) -> String {
+    let octets = withUnsafeBytes(of: UInt32(bitPattern: statut).bigEndian, Array.init)
+    guard octets.allSatisfy({ (0x20...0x7E).contains($0) }) else { return "\(statut)" }
+    return "\(statut) ('\(String(decoding: octets, as: UTF8.self))')"
+}
+
 // --- capture : blocs en attente d'écriture sur stdout ---------------------
 //
 // Le rappel de capture tourne sur le fil temps réel : une écriture bloquante
@@ -34,11 +42,24 @@ private func nouveauVerrou() -> UnsafeMutablePointer<os_unfair_lock> {
 // indéfiniment un tampon qui de toute façon ne sera jamais consommé à temps.
 // `ajouter` tournant sur le fil temps réel, la file est un anneau de cases
 // fixes, et non plus un tableau de `Data` alloués bloc par bloc.
+//
+// Le rappel y note aussi les tranches du micro qu'il perd : sans bloc pendant
+// un moment, le fil d'écriture peut ainsi expliquer en français pourquoi le
+// micro se tait, au lieu de laisser Python attendre sans un mot.
 final class TamponSortie {
+    private struct Etat {
+        var debut = 0
+        var compte = 0
+        // Tranches du micro perdues depuis le dernier bloc publié.
+        var pertes = 0
+        var dernierStatut: OSStatus = noErr
+        var derniereTranche = 0
+    }
+
     private let tailleBloc: Int
     private let capaciteMax: Int
     private let cases: UnsafeMutableRawPointer
-    private let etat: UnsafeMutablePointer<(debut: Int, compte: Int)>
+    private let etat: UnsafeMutablePointer<Etat>
     private let verrou = nouveauVerrou()
     private let disponible = DispatchSemaphore(value: 0)
 
@@ -49,13 +70,14 @@ final class TamponSortie {
         cases = .allocate(byteCount: capaciteMax * tailleBloc, alignment: 16)
         etat = .allocate(capacity: 1)
         cases.initializeMemory(as: UInt8.self, repeating: 0, count: capaciteMax * tailleBloc)
-        etat.initialize(to: (debut: 0, compte: 0))
+        etat.initialize(to: Etat())
     }
 
     /// Fil temps réel : recopie un bloc de `tailleBloc` octets, sans jamais attendre.
     func ajouter(_ bloc: UnsafeRawPointer) {
         os_unfair_lock_lock(verrou)
-        let (debut, compte) = etat.pointee
+        etat.pointee.pertes = 0  // un bloc publié clôt l'épisode de pertes
+        let debut = etat.pointee.debut, compte = etat.pointee.compte
         if compte == capaciteMax {
             // Plein : le nouveau bloc prend la case du plus ancien, et le
             // nombre de blocs disponibles ne change pas — donc pas de signal
@@ -75,16 +97,48 @@ final class TamponSortie {
         disponible.signal()
     }
 
-    /// Fil d'écriture : attend un bloc, puis le recopie dans `destination`.
-    /// Le sémaphore ne compte jamais plus de blocs qu'il n'y en a : après
-    /// `wait()`, il y en a au moins un.
-    func prendre(dans destination: UnsafeMutableRawPointer) {
-        disponible.wait()
+    /// Fil temps réel : note une tranche du micro perdue, trop grande pour le
+    /// tampon de capture ou refusée par AudioUnitRender. Même verrou court que
+    /// `ajouter` : ni attente, ni allocation, ni entrée-sortie.
+    func noterPerte(statut: OSStatus, trames: Int) {
         os_unfair_lock_lock(verrou)
-        let (debut, compte) = etat.pointee
-        destination.copyMemory(from: cases + debut * tailleBloc, byteCount: tailleBloc)
-        etat.pointee = (debut: (debut + 1) % capaciteMax, compte: compte - 1)
+        etat.pointee.pertes += 1
+        etat.pointee.dernierStatut = statut
+        etat.pointee.derniereTranche = trames
         os_unfair_lock_unlock(verrou)
+    }
+
+    /// Fil d'écriture : attend un bloc au plus `delai` secondes ; s'il en vient
+    /// un, le recopie dans `destination` et rend true. Le sémaphore ne compte
+    /// jamais plus de blocs qu'il n'y en a : après un `wait` réussi, il y en a
+    /// au moins un ; une attente expirée ne consomme rien.
+    func prendre(dans destination: UnsafeMutableRawPointer, delai: Int) -> Bool {
+        guard disponible.wait(timeout: .now() + .seconds(delai)) == .success else { return false }
+        os_unfair_lock_lock(verrou)
+        let debut = etat.pointee.debut
+        destination.copyMemory(from: cases + debut * tailleBloc, byteCount: tailleBloc)
+        etat.pointee.debut = (debut + 1) % capaciteMax
+        etat.pointee.compte -= 1
+        os_unfair_lock_unlock(verrou)
+        return true
+    }
+
+    /// Fil d'écriture, après `delai` secondes sans bloc : une ligne en français
+    /// qui dit pourquoi, d'après les pertes notées depuis le dernier bloc.
+    func diagnosticSansCapture(delai: Int, capacite: Int) -> String {
+        os_unfair_lock_lock(verrou)
+        let releve = etat.pointee
+        os_unfair_lock_unlock(verrou)
+        let debut = "Capture interrompue : aucun bloc du micro depuis \(delai) s"
+        guard releve.pertes > 0 else {
+            return debut + ", et aucune erreur relevée : le micro ne livre rien."
+        }
+        let detail = "\(debut). Tranches perdues : \(releve.pertes) ; la dernière faisait "
+            + "\(releve.derniereTranche) trames"
+        if releve.derniereTranche > capacite {
+            return detail + ", plus que le tampon de capture (\(capacite))."
+        }
+        return detail + ", refusée par AudioUnitRender (statut \(decrire(releve.dernierStatut)))."
     }
 }
 
@@ -192,8 +246,15 @@ final class FileLecture {
         os_unfair_lock_unlock(verrou)
     }
 
-    /// Fil principal : jette tout ce qui attend d'être joué (barge-in), et
-    /// réveille un lecteur qui attendrait la contre-pression.
+    /// Fil principal : jette tout ce qui attend d'être joué (barge-in).
+    ///
+    /// Le réveil ci-dessous est défensif et ne peut pas se produire aujourd'hui :
+    /// le seul lecteur qui puisse attendre la contre-pression est le fil même
+    /// qui exécute ce vidage. Il ne sert qu'à garder l'invariant du sémaphore
+    /// si le vidage changeait un jour de fil. Limite connue de la phase 1 : sous
+    /// contre-pression, une trame de vidage attend derrière tout ce qui la
+    /// précède dans le tube, consommé au rythme de la lecture (quelques secondes
+    /// au pire) ; le remède viendra côté Python.
     func vider() {
         os_unfair_lock_lock(verrou)
         etat.pointee.compte = 0

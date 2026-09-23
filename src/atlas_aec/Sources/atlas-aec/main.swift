@@ -20,16 +20,10 @@ let frequence = 16000
 let echantillonsParBloc = 320  // 20 ms, soit 640 octets s16le par bloc de stdout
 let tailleMaxTrame = 64 * 1024  // au-delà, le flux stdin est désynchronisé
 let secondesAvantContrePression = 30
+let secondesSansCapture = 2  // au-delà, le fil d'écriture explique le silence du micro
 
 func journal(_ message: String) {
     try? FileHandle.standardError.write(contentsOf: Data((message + "\n").utf8))
-}
-
-/// Le statut, suivi de son code à quatre caractères quand il en a un ('nope', '!dev'…).
-func decrire(_ statut: OSStatus) -> String {
-    let octets = withUnsafeBytes(of: UInt32(bitPattern: statut).bigEndian, Array.init)
-    guard octets.allSatisfy({ (0x20...0x7E).contains($0) }) else { return "\(statut)" }
-    return "\(statut) ('\(String(decoding: octets, as: UTF8.self))')"
 }
 
 /// Étape de mise en route : un échec donne une ligne en français, puis une sortie non nulle.
@@ -109,18 +103,26 @@ let rendu = UnsafeMutablePointer<TamponRendu>.allocate(capacity: 1)
 //
 // Ni allocation, ni tableau, ni entrée-sortie, ni attente : des copies dans
 // de la mémoire préallouée, sous des verrous tenus quelques instructions.
+// Une tranche perdue est notée ; le fil d'écriture l'explique si le micro se tait.
 
 /// Le micro a une tranche prête : rendue dans le tampon préalloué, puis
 /// découpée en blocs de 20 ms pour le fil d'écriture.
 let rappelCapture: AURenderCallback = { _, drapeaux, horodatage, _, nbTrames, _ in
     let r = rendu.pointee
+    let n = Int(nbTrames)
     // Tranche plus grande que prévu : perdue, plutôt que rendue hors du tampon.
-    guard Int(nbTrames) <= r.capacite else { return noErr }
+    guard n <= r.capacite else {
+        tamponSortie.noterPerte(statut: noErr, trames: n)
+        return noErr
+    }
     r.liste.pointee.mBuffers.mDataByteSize = nbTrames * 4
     r.liste.pointee.mBuffers.mData = UnsafeMutableRawPointer(r.echantillons)
-    guard AudioUnitRender(unite, drapeaux, horodatage, 1, nbTrames, r.liste) == noErr,
-          let donnees = r.liste.pointee.mBuffers.mData else { return noErr }
-    let rendus = min(Int(nbTrames), Int(r.liste.pointee.mBuffers.mDataByteSize) / 4)
+    let statut = AudioUnitRender(unite, drapeaux, horodatage, 1, nbTrames, r.liste)
+    guard statut == noErr, let donnees = r.liste.pointee.mBuffers.mData else {
+        tamponSortie.noterPerte(statut: statut, trames: n)
+        return noErr
+    }
+    let rendus = min(n, Int(r.liste.pointee.mBuffers.mDataByteSize) / 4)
     accumulateur.ajouter(donnees.assumingMemoryBound(to: Float.self), rendus)
     return noErr
 }
@@ -212,8 +214,19 @@ func terminer(_ code: Int32) -> Never {
 
 let blocSortie = UnsafeMutableRawPointer.allocate(byteCount: echantillonsParBloc * 2, alignment: 16)
 let filEcriture = Thread {
+    var muet = false  // une seule ligne par épisode sans capture
     while true {
-        tamponSortie.prendre(dans: blocSortie)
+        guard tamponSortie.prendre(dans: blocSortie, delai: secondesSansCapture) else {
+            // Sans cette ligne, Python attendrait le micro sans fin et sans un mot.
+            if !muet {
+                journal(tamponSortie.diagnosticSansCapture(delai: secondesSansCapture,
+                                                           capacite: capaciteRendu))
+            }
+            muet = true
+            continue
+        }
+        if muet { journal("Capture rétablie : le micro livre de nouveau.") }
+        muet = false
         do {
             try FileHandle.standardOutput.write(
                 contentsOf: UnsafeRawBufferPointer(start: blocSortie, count: echantillonsParBloc * 2))
