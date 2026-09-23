@@ -130,6 +130,12 @@ def _boucle():
         reveilleur=ReveilleurPremierBloc(),
         bargein=Endpointeur(silence_ms=400, parole_min_ms=300),
         horloge=horloge,
+        # PAROLE ne vaut que pour se distinguer de SILENCE au détecteur de contenu ;
+        # son énergie réelle (~-42 dBFS) est sous le seuil de barge-in par défaut. Ce
+        # test câble le client à la Session, il ne teste pas le seuil d'énergie du
+        # spike S2 (voir test_client_audio.py et test_vad.py pour celui-ci) : -120
+        # désactive la porte.
+        seuil_bargein_dbfs=-120.0,
     )
     recus: list = []
 

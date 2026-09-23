@@ -1,7 +1,10 @@
 import asyncio
 import logging
 
+import pytest
+
 from atlas_audio.client import ClientAudio, Reglages, lire_reglages
+from atlas_audio.vad import Endpointeur
 from atlas_core.protocole import (
     Dire,
     Erreur,
@@ -14,6 +17,9 @@ from atlas_core.protocole import (
 )
 
 BLOC = b"\x00" * 640
+# ~0 dBFS : nettement au-dessus du seuil de barge-in par défaut (-40 dBFS), pour les
+# tests qui doivent ressembler à de la vraie parole plutôt qu'à de l'écho résiduel.
+BLOC_FORT = b"\xff\x7f" * 320
 
 
 class FauxTransport:
@@ -90,8 +96,6 @@ class ReveilleurScript:
 
 
 def _client(transport, peripherique, parole: list[bool], reveil_au=0, horloge=None):
-    from atlas_audio.vad import Endpointeur
-
     return ClientAudio(
         transport=transport,
         peripherique=peripherique,
@@ -159,18 +163,34 @@ async def test_une_trame_perimee_n_est_pas_jouee():
     assert p.joues == []
 
 
-async def test_parler_pendant_la_parole_declenche_l_interruption():
+async def test_un_echo_calme_pendant_la_parole_ne_declenche_pas_l_interruption():
+    # Spike S2 : l'écho résiduel d'Atlas pendant que l'annulateur d'écho converge
+    # ressemble à de la parole pour le détecteur, mais reste sous le seuil d'énergie.
     t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
     c = _client(t, p, parole=[True] * 6, reveil_au=None)
     await _jouer(c, id_enonce=1, blocs=1)
     await c.boucle_capture()
 
+    assert not any(isinstance(m, Interruption) for m in t.json)
+    assert p.vidages == 0
+
+
+async def test_parler_fort_pendant_la_parole_declenche_l_interruption(caplog):
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT] * 6)
+    c = _client(t, p, parole=[True] * 6, reveil_au=None)
+    await _jouer(c, id_enonce=1, blocs=1)
+
+    with caplog.at_level(logging.INFO, logger="atlas_audio.client"):
+        await c.boucle_capture()
+
     assert any(isinstance(m, Interruption) for m in t.json)
     assert p.vidages >= 1
+    assert "interruption détectée (" in caplog.text
+    assert "dBFS sur 300 ms)" in caplog.text
 
 
 async def test_apres_le_bargein_une_trame_deja_en_vol_n_est_pas_jouee():
-    t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT] * 6)
     c = _client(t, p, parole=[True] * 6, reveil_au=None)
     await _jouer(c, id_enonce=1, blocs=1)
     await c.boucle_capture()  # détecte le barge-in et coupe l'énoncé 1
@@ -193,7 +213,7 @@ async def test_apres_un_stop_audio_une_trame_deja_en_vol_n_est_pas_jouee():
 
 async def test_le_bargein_reste_arme_apres_le_repos_tant_que_l_audio_se_joue():
     h = FausseHorloge()
-    t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT] * 6)
     c = _client(t, p, parole=[True] * 6, reveil_au=None, horloge=h)
     await _jouer(c, id_enonce=1, blocs=100)  # deux secondes d'audio livrées d'un coup
     await c.sur_message(Etat(valeur="repos"))  # le Core a fini d'ENVOYER, pas de jouer
@@ -219,7 +239,7 @@ async def test_le_bargein_se_desarme_quand_l_audio_a_fini_de_jouer():
 
 
 async def test_une_phrase_en_vol_de_la_reponse_coupee_ne_revient_jamais():
-    t, p = FauxTransport(), FauxPeripherique([BLOC] * 2)
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT] * 2)
     c = _client(t, p, parole=[True] * 2 + [True] * 4, reveil_au=None)
     await _jouer(c, id_enonce=3, blocs=1)
     await c.boucle_capture()  # barge-in sur l'énoncé 3
@@ -241,14 +261,14 @@ async def test_une_phrase_en_vol_de_la_reponse_coupee_ne_revient_jamais():
 
 
 async def test_une_nouvelle_phrase_du_meme_enonce_ne_remet_pas_le_bargein_a_zero():
-    t, p = FauxTransport(), FauxPeripherique([BLOC])
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT])
     c = _client(t, p, parole=[True, True], reveil_au=None)  # seuil : deux blocs
     await _jouer(c, id_enonce=1, blocs=1)
     await c.boucle_capture()  # un bloc de parole : pas encore d'interruption
     assert t.json == []
 
     await _jouer(c, id_enonce=1, blocs=1, rang=2)
-    p.ajouter([BLOC])
+    p.ajouter([BLOC_FORT])
     await c.boucle_capture()  # le second bloc atteint le seuil
 
     assert any(isinstance(m, Interruption) for m in t.json)
@@ -269,6 +289,69 @@ async def test_la_parole_qui_declenche_le_bargein_part_vers_le_core():
 
     # D'abord l'interruption, puis le pré-roulement, puis la suite de la capture.
     assert t.flux == ["interruption", *blocs]
+
+
+async def test_le_pre_roulement_rejoue_porte_le_verdict_brut_pas_filtre():
+    # Le bloc calme est de la vraie parole pour le détecteur (verdict brut) mais reste
+    # sous le seuil d'énergie : seul le bloc fort qui suit arme le barge-in. Si la
+    # capture qui suit l'interruption rejouait le verdict FILTRÉ par la porte au lieu
+    # du brut, le bloc calme compterait comme du silence, l'énoncé ne serait jamais
+    # vu comme commencé, et les trois blocs de silence plus bas ne le clôtureraient
+    # jamais avec un FinEnonce.
+    t = FauxTransport()
+    p = FauxPeripherique([BLOC, BLOC_FORT])
+    c = ClientAudio(
+        transport=t,
+        peripherique=p,
+        detecteur=DetecteurScript([True, True]),
+        endpointeur=Endpointeur(silence_ms=60, parole_min_ms=40),  # 3 blocs, 2 blocs
+        reveilleur=ReveilleurScript(None),
+        bargein=Endpointeur(silence_ms=60, parole_min_ms=20),  # un seul bloc fort suffit
+        horloge=FausseHorloge(),
+    )
+    await _jouer(c, id_enonce=1, blocs=1)
+    await c.boucle_capture()  # le bloc fort seul arme et déclenche l'interruption
+
+    assert any(isinstance(m, Interruption) for m in t.json)
+
+    p.ajouter([BLOC] * 3)  # silence, hors lecture désormais : capture normale
+    await c.boucle_capture()
+
+    assert any(isinstance(m, FinEnonce) for m in t.json), (
+        "le bloc calme du pré-roulement doit compter comme parole (verdict brut) une "
+        "fois rejoué dans la capture"
+    )
+
+
+async def test_une_nouvelle_phrase_reinitialise_la_fenetre_d_energie():
+    # Un bloc fort à la fin de la surveillance d'un énoncé ne doit pas faire passer la
+    # porte à de la parole calme sur l'énoncé suivant : la fenêtre d'énergie doit
+    # repartir de zéro à chaque nouvel énoncé, comme le pré-roulement et l'endpointeur
+    # de barge-in.
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT])
+    c = _client(t, p, parole=[False, True, True], reveil_au=None)
+    await _jouer(c, id_enonce=1, blocs=1)
+    await c.boucle_capture()  # un bloc fort, mais pas de la parole pour le détecteur
+
+    await _jouer(c, id_enonce=2, blocs=1, rang=1)  # nouvel énoncé : tout se réinitialise
+    p.ajouter([BLOC, BLOC])
+    await c.boucle_capture()  # deux blocs calmes, scriptés comme de la parole
+
+    assert not any(isinstance(m, Interruption) for m in t.json), (
+        "l'énergie du bloc fort de l'énoncé précédent ne doit pas faire passer la "
+        "porte à de la parole calme du nouvel énoncé"
+    )
+
+
+async def test_la_parole_calme_hors_lecture_compte_normalement():
+    # La porte d'énergie ne s'applique qu'à la surveillance du barge-in : hors lecture,
+    # une parole calme doit démarrer et clore un énoncé comme avant.
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 10)
+    c = _client(t, p, parole=[True] * 4 + [False] * 6, reveil_au=0)
+    await c.boucle_capture()
+
+    assert any(isinstance(m, FinEnonce) for m in t.json)
+    assert len(t.binaire) >= 4, "les blocs de parole calme doivent partir vers le Core"
 
 
 async def test_le_mot_de_reveil_ne_part_pas_vers_le_core():
@@ -315,13 +398,49 @@ def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):
     monkeypatch.delenv("ATLAS_REVEIL_SEUIL", raising=False)
     monkeypatch.delenv("ATLAS_SILENCE_MS", raising=False)
     monkeypatch.delenv("ATLAS_BARGEIN_MS", raising=False)
+    monkeypatch.delenv("ATLAS_BARGEIN_DBFS", raising=False)
 
-    assert lire_reglages() == Reglages(seuil_reveil=0.5, silence_ms=400, bargein_ms=300)
+    assert lire_reglages() == Reglages(
+        seuil_reveil=0.5, silence_ms=400, bargein_ms=300, bargein_dbfs=-40.0
+    )
 
 
 def test_lire_reglages_prend_les_variables_d_environnement(monkeypatch):
     monkeypatch.setenv("ATLAS_REVEIL_SEUIL", "0.7")
     monkeypatch.setenv("ATLAS_SILENCE_MS", "600")
     monkeypatch.setenv("ATLAS_BARGEIN_MS", "250")
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "-35")
 
-    assert lire_reglages() == Reglages(seuil_reveil=0.7, silence_ms=600, bargein_ms=250)
+    assert lire_reglages() == Reglages(
+        seuil_reveil=0.7, silence_ms=600, bargein_ms=250, bargein_dbfs=-35.0
+    )
+
+
+def test_lire_reglages_bargein_dbfs_accepte_les_bornes(monkeypatch):
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "-120")
+    assert lire_reglages().bargein_dbfs == -120.0
+
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "0")
+    assert lire_reglages().bargein_dbfs == 0.0
+
+
+def test_lire_reglages_bargein_dbfs_malforme_leve(monkeypatch):
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "pas-un-nombre")
+    with pytest.raises(ValueError, match="ATLAS_BARGEIN_DBFS"):
+        lire_reglages()
+
+
+def test_lire_reglages_bargein_dbfs_non_fini_leve(monkeypatch):
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "nan")
+    with pytest.raises(ValueError, match="ATLAS_BARGEIN_DBFS"):
+        lire_reglages()
+
+
+def test_lire_reglages_bargein_dbfs_hors_bornes_leve(monkeypatch):
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "5")
+    with pytest.raises(ValueError, match="ATLAS_BARGEIN_DBFS"):
+        lire_reglages()
+
+    monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "-125")
+    with pytest.raises(ValueError, match="ATLAS_BARGEIN_DBFS"):
+        lire_reglages()

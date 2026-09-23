@@ -1,9 +1,10 @@
+import math
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from atlas_audio.vad import DetecteurVoix, Endpointeur, verifier_bloc
+from atlas_audio.vad import DetecteurVoix, Endpointeur, FenetreEnergie, verifier_bloc
 
 BLOC_MS = 20
 _VOIX_ATLAS = Path("services/tts/voix/atlas_reference.wav")
@@ -55,6 +56,65 @@ def test_reinitialiser_oublie_l_etat():
     _jouer(e, [(True, 300)])
     e.reinitialiser()
     assert _jouer(e, [(False, 1000)]) == []
+
+
+def _bloc_constant(valeur: int) -> bytes:
+    """Bloc de 320 échantillons int16, tous à la même valeur."""
+    return np.full(320, valeur, dtype="<i2").tobytes()
+
+
+def test_fenetre_energie_silence_numerique_est_tres_bas():
+    f = FenetreEnergie()
+    assert f.ajouter(b"\x00" * 640) <= -100.0
+
+
+def test_fenetre_energie_bloc_constant_donne_le_niveau_attendu():
+    v = 8000
+    f = FenetreEnergie()
+    assert f.ajouter(_bloc_constant(v)) == pytest.approx(20 * math.log10(v / 32768))
+
+
+def test_fenetre_energie_moyenne_les_energies_pas_les_db():
+    # Une fenêtre qui moyennerait les dB donnerait (-120 + niveau_seul) / 2, très
+    # différent de la moyenne des énergies linéaires que la spec demande.
+    v = 8000
+    f = FenetreEnergie(blocs=2)
+    f.ajouter(b"\x00" * 640)  # énergie nulle
+    niveau = f.ajouter(_bloc_constant(v))
+
+    energie_v = (v / 32768) ** 2
+    attendu = 10 * math.log10(energie_v / 2 + 1e-12)
+    assert niveau == pytest.approx(attendu)
+    assert niveau != pytest.approx(20 * math.log10(v / 32768) / 2)
+
+
+def test_fenetre_energie_jusqu_a_ce_qu_elle_soit_pleine_moyenne_ce_qui_est_vu():
+    # Avant que la fenêtre de 15 blocs soit pleine, la moyenne ne porte que sur les
+    # blocs déjà vus, pas sur 15 (ce qui diluerait le niveau avec des zéros fantômes).
+    v = 8000
+    f = FenetreEnergie()
+    niveau = f.ajouter(_bloc_constant(v))
+    assert niveau == pytest.approx(20 * math.log10(v / 32768))
+
+
+def test_fenetre_energie_oublie_les_blocs_plus_vieux_que_la_fenetre():
+    f = FenetreEnergie(blocs=2)
+    f.ajouter(_bloc_constant(20000))  # sortira de la fenêtre de 2
+    f.ajouter(b"\x00" * 640)
+    niveau = f.ajouter(b"\x00" * 640)
+    assert niveau <= -100.0
+
+
+def test_fenetre_energie_reinitialiser_oublie_tout():
+    f = FenetreEnergie()
+    f.ajouter(_bloc_constant(20000))
+    f.reinitialiser()
+    assert f.ajouter(b"\x00" * 640) <= -100.0
+
+
+def test_fenetre_energie_refuse_un_bloc_de_mauvaise_taille():
+    with pytest.raises(ValueError):
+        FenetreEnergie().ajouter(b"\x00" * 100)
 
 
 def test_verifier_bloc_accepte_640_octets():

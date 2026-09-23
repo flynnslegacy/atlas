@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import time
 from collections import deque
@@ -33,7 +34,7 @@ from atlas_core.protocole import (
 
 from .aec import ouvrir_peripherique
 from .reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle, ReveilleurTouche
-from .vad import DetecteurVoix, Endpointeur
+from .vad import DetecteurVoix, Endpointeur, FenetreEnergie
 
 _journal = logging.getLogger(__name__)
 
@@ -54,11 +55,12 @@ _BLOCS_MAX_ENONCE = round(DUREE_MAX_ENONCE_S * _BLOCS_PAR_S)
 
 @dataclass(frozen=True)
 class Reglages:
-    """Les trois seuils que le banc de mesure (tâche 14) sert à choisir."""
+    """Les seuils que le banc de mesure (tâche 14) et le spike S2 servent à choisir."""
 
     seuil_reveil: float
     silence_ms: int
     bargein_ms: int
+    bargein_dbfs: float
 
 
 def lire_reglages() -> Reglages:
@@ -67,7 +69,21 @@ def lire_reglages() -> Reglages:
         seuil_reveil=float(os.environ.get("ATLAS_REVEIL_SEUIL", "0.5")),
         silence_ms=int(os.environ.get("ATLAS_SILENCE_MS", "400")),
         bargein_ms=int(os.environ.get("ATLAS_BARGEIN_MS", "300")),
+        bargein_dbfs=_lire_bargein_dbfs(),
     )
+
+
+def _lire_bargein_dbfs() -> float:
+    brute = os.environ.get("ATLAS_BARGEIN_DBFS", "-40")
+    try:
+        valeur = float(brute)
+    except ValueError as erreur:
+        raise ValueError(f"ATLAS_BARGEIN_DBFS invalide : {brute!r} n'est pas un nombre") from erreur
+    if not math.isfinite(valeur) or not (-120.0 <= valeur <= 0.0):
+        raise ValueError(
+            f"ATLAS_BARGEIN_DBFS invalide : {brute!r} doit être un nombre fini entre -120 et 0"
+        )
+    return valeur
 
 
 class Transport(Protocol):
@@ -85,6 +101,7 @@ class ClientAudio:
         reveilleur,
         bargein=None,
         horloge: Callable[[], float] | None = None,
+        seuil_bargein_dbfs: float = -40.0,
     ) -> None:
         self._transport = transport
         self._peripherique = peripherique
@@ -98,6 +115,12 @@ class ClientAudio:
         self._id_coupe = 0
         self._bargein = bargein or Endpointeur(silence_ms=400, parole_min_ms=300)
         self._horloge = horloge or time.monotonic
+        # Écho résiduel d'Atlas pendant que l'annulateur d'écho converge (spike S2) :
+        # une parole détectée pendant la lecture ne compte pour le barge-in que si son
+        # niveau sur 300 ms dépasse ce seuil. Ne s'applique qu'à la surveillance du
+        # barge-in ; jamais à la capture normale ni à la fin de phrase.
+        self._seuil_bargein_dbfs = seuil_bargein_dbfs
+        self._fenetre_energie = FenetreEnergie()
         # Échéance, sur notre propre horloge, de la fin de l'audio déjà confié au
         # haut-parleur. Le Core finit d'ENVOYER bien avant que le son finisse de jouer.
         self._fin_lecture = 0.0
@@ -165,10 +188,14 @@ class ClientAudio:
 
     async def _surveiller_bargein(self, bloc: bytes) -> None:
         parle = self._detecteur.parle(bloc)
+        # Le pré-roulement garde le verdict BRUT : une fois l'interruption détectée,
+        # la capture qui rejoue ces blocs doit voir la vraie parole, pas ce que la
+        # porte d'énergie en a laissé passer.
         self._pre_roulement.append((bloc, parle))
-        if self._bargein.ajouter(parle) != "debut":
+        niveau = self._fenetre_energie.ajouter(bloc)
+        if self._bargein.ajouter(parle and niveau > self._seuil_bargein_dbfs) != "debut":
             return
-        _journal.info("interruption détectée")
+        _journal.info("interruption détectée (%.1f dBFS sur 300 ms)", niveau)
         pre_roulement = list(self._pre_roulement)
         self._couper()
         await self._peripherique.vider()
@@ -187,6 +214,7 @@ class ClientAudio:
         self._id_courant = 0
         self._fin_lecture = 0.0
         self._pre_roulement.clear()
+        self._fenetre_energie.reinitialiser()
 
     # --- Core vers haut-parleur -------------------------------------------
 
@@ -200,6 +228,7 @@ class ClientAudio:
                 self._id_courant = msg.id_enonce
                 self._bargein.reinitialiser()
                 self._pre_roulement.clear()
+                self._fenetre_energie.reinitialiser()
         elif isinstance(msg, StopAudio):
             self._couper()
             await self._peripherique.vider()
@@ -255,6 +284,7 @@ async def principal() -> None:
             endpointeur=Endpointeur(silence_ms=reglages.silence_ms),
             reveilleur=reveilleur,
             bargein=Endpointeur(parole_min_ms=reglages.bargein_ms),
+            seuil_bargein_dbfs=reglages.bargein_dbfs,
         )
         await transport.envoyer_json(Bonjour(client="m5", capacites=["aec", "vad"]))
         capture = asyncio.create_task(client.boucle_capture())

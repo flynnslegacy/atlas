@@ -7,7 +7,9 @@ exhaustivement.
 
 from __future__ import annotations
 
+import math
 import os
+from collections import deque
 from typing import Literal
 
 import numpy as np
@@ -103,3 +105,27 @@ class Endpointeur:
             self.reinitialiser()
             return "fin"
         return "rien"
+
+
+class FenetreEnergie:
+    """Niveau d'énergie glissant, en dBFS, sur les derniers blocs.
+
+    Sert à écarter l'écho résiduel de la propre voix d'Atlas pendant que
+    l'annulateur d'écho d'Apple converge (spike S2) : un faux barge-in mesuré
+    au banc restait sous -41,6 dBFS sur 300 ms quand la vraie interruption de
+    l'utilisateur, à 3 m, tournait autour de -35 dBFS.
+    """
+
+    def __init__(self, blocs: int = 15) -> None:
+        self._taille = blocs
+        self.reinitialiser()
+
+    def reinitialiser(self) -> None:
+        self._energies: deque[float] = deque(maxlen=self._taille)
+
+    def ajouter(self, bloc: bytes) -> float:
+        verifier_bloc(bloc)
+        echantillons = np.frombuffer(bloc, dtype="<i2").astype(np.float64) / 32768.0
+        self._energies.append(float(np.mean(np.square(echantillons))))
+        niveau_moyen = sum(self._energies) / len(self._energies)
+        return 10 * math.log10(niveau_moyen + 1e-12)
