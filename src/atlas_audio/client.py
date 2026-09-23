@@ -42,6 +42,9 @@ URL_CORE = os.environ.get("ATLAS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
 
 DUREE_BLOC_S = DUREE_BLOC_MS / 1000  # 0,020 s joués par trame
 MARGE_SORTIE_S = 0.15  # latence de sortie du haut-parleur, à régler au banc
+# Seuil de barge-in par défaut (spike S2) : une seule source de vérité pour
+# _lire_bargein_dbfs() et ClientAudio, plutôt que la même valeur écrite deux fois.
+_SEUIL_BARGEIN_DBFS_DEFAUT = -40.0
 
 # Garde-fous de la capture : sans eux, un faux réveil ou un « Stop ! » isolé
 # laisserait le micro ouvert vers le Core indéfiniment.
@@ -74,7 +77,7 @@ def lire_reglages() -> Reglages:
 
 
 def _lire_bargein_dbfs() -> float:
-    brute = os.environ.get("ATLAS_BARGEIN_DBFS", "-40")
+    brute = os.environ.get("ATLAS_BARGEIN_DBFS", str(_SEUIL_BARGEIN_DBFS_DEFAUT))
     try:
         valeur = float(brute)
     except ValueError as erreur:
@@ -101,7 +104,7 @@ class ClientAudio:
         reveilleur,
         bargein=None,
         horloge: Callable[[], float] | None = None,
-        seuil_bargein_dbfs: float = -40.0,
+        seuil_bargein_dbfs: float = _SEUIL_BARGEIN_DBFS_DEFAUT,
     ) -> None:
         self._transport = transport
         self._peripherique = peripherique
@@ -126,9 +129,15 @@ class ClientAudio:
         self._fin_lecture = 0.0
         # Derniers blocs entendus pendant la surveillance du barge-in, avec leur
         # verdict de voix : la parole qui déclenche l'interruption (« Non, attends… »)
-        # doit partir vers le Core, sinon Whisper perd le premier mot.
+        # doit partir vers le Core, sinon Whisper perd le premier mot. La porte
+        # d'énergie retarde encore ce moment le temps que la fenêtre de 300 ms monte
+        # en régime (jusqu'à sa taille en blocs) : sans en tenir compte, les tout
+        # premiers blocs d'une parole calme sortiraient du pré-roulement avant même
+        # que l'interruption ne se déclenche.
         seuil_blocs = self._bargein.blocs_parole_min  # seuil de l'endpointeur de barge-in
-        self._pre_roulement: deque[tuple[bytes, bool]] = deque(maxlen=seuil_blocs + 10)
+        self._pre_roulement: deque[tuple[bytes, bool]] = deque(
+            maxlen=seuil_blocs + self._fenetre_energie.taille + 10
+        )
         self._blocs_captures = 0
         self._parole_vue = False
 

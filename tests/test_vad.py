@@ -85,7 +85,6 @@ def test_fenetre_energie_moyenne_les_energies_pas_les_db():
     energie_v = (v / 32768) ** 2
     attendu = 10 * math.log10(energie_v / 2 + 1e-12)
     assert niveau == pytest.approx(attendu)
-    assert niveau != pytest.approx(20 * math.log10(v / 32768) / 2)
 
 
 def test_fenetre_energie_jusqu_a_ce_qu_elle_soit_pleine_moyenne_ce_qui_est_vu():
@@ -115,6 +114,15 @@ def test_fenetre_energie_reinitialiser_oublie_tout():
 def test_fenetre_energie_refuse_un_bloc_de_mauvaise_taille():
     with pytest.raises(ValueError):
         FenetreEnergie().ajouter(b"\x00" * 100)
+
+
+def test_fenetre_energie_refuse_une_taille_de_fenetre_sous_un():
+    # blocs=0 rendrait une fenêtre qui ne peut jamais rien garder : ajouter() y
+    # diviserait par zéro dès le premier bloc.
+    with pytest.raises(ValueError):
+        FenetreEnergie(blocs=0)
+    with pytest.raises(ValueError):
+        FenetreEnergie(blocs=-1)
 
 
 def test_verifier_bloc_accepte_640_octets():

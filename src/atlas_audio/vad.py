@@ -117,8 +117,15 @@ class FenetreEnergie:
     """
 
     def __init__(self, blocs: int = 15) -> None:
+        if blocs < 1:
+            raise ValueError(f"FenetreEnergie : blocs doit valoir au moins 1, reçu {blocs}")
         self._taille = blocs
         self.reinitialiser()
+
+    @property
+    def taille(self) -> int:
+        """Nombre de blocs de 20 ms couverts par la fenêtre glissante."""
+        return self._taille
 
     def reinitialiser(self) -> None:
         self._energies: deque[float] = deque(maxlen=self._taille)

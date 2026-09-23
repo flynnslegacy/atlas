@@ -95,7 +95,14 @@ class ReveilleurScript:
         return self._n == self._cible
 
 
-def _client(transport, peripherique, parole: list[bool], reveil_au=0, horloge=None):
+def _client(
+    transport,
+    peripherique,
+    parole: list[bool],
+    reveil_au=0,
+    horloge=None,
+    seuil_bargein_dbfs: float = -40.0,
+):
     return ClientAudio(
         transport=transport,
         peripherique=peripherique,
@@ -104,6 +111,7 @@ def _client(transport, peripherique, parole: list[bool], reveil_au=0, horloge=No
         reveilleur=ReveilleurScript(reveil_au),
         bargein=Endpointeur(silence_ms=60, parole_min_ms=40),
         horloge=horloge or FausseHorloge(),
+        seuil_bargein_dbfs=seuil_bargein_dbfs,
     )
 
 
@@ -225,8 +233,11 @@ async def test_le_bargein_reste_arme_apres_le_repos_tant_que_l_audio_se_joue():
 
 
 async def test_le_bargein_se_desarme_quand_l_audio_a_fini_de_jouer():
+    # BLOC_FORT (pas BLOC) : un bloc calme échouerait déjà à la porte d'énergie, ce
+    # qui rendrait ce test vrai quoi que fasse _atlas_parle_encore — il doit rater à
+    # cause de l'échéance expirée, pas à cause du niveau du bloc.
     h = FausseHorloge()
-    t, p = FauxTransport(), FauxPeripherique([BLOC] * 6)
+    t, p = FauxTransport(), FauxPeripherique([BLOC_FORT] * 6)
     c = _client(t, p, parole=[True] * 6, reveil_au=None, horloge=h)
     await _jouer(c, id_enonce=1, blocs=100)
     await c.sur_message(Etat(valeur="repos"))
@@ -250,8 +261,9 @@ async def test_une_phrase_en_vol_de_la_reponse_coupee_ne_revient_jamais():
     assert p.joues == [BLOC], "aucune trame de l'énoncé 3 ne sonne après la coupure"
 
     # Le barge-in n'est pas ré-armé : la parole qui suit est capturée, pas prise
-    # pour une seconde interruption.
-    p.ajouter([BLOC] * 4)
+    # pour une seconde interruption. BLOC_FORT : sinon la porte d'énergie suffirait à
+    # elle seule à expliquer l'absence de seconde interruption.
+    p.ajouter([BLOC_FORT] * 4)
     await c.boucle_capture()
     assert sum(isinstance(m, Interruption) for m in t.json) == 1
 
@@ -278,6 +290,11 @@ def _bloc(n: int) -> bytes:
     return bytes([n]) * 640
 
 
+def _bloc_amplitude(v: int) -> bytes:
+    """Bloc de 320 échantillons int16 constants, pour contrôler finement le niveau."""
+    return v.to_bytes(2, "little", signed=True) * 320
+
+
 async def test_la_parole_qui_declenche_le_bargein_part_vers_le_core():
     # Seuil de barge-in : deux blocs. « Non » tient dans les blocs 3 et 4.
     blocs = [_bloc(n) for n in range(1, 6)]
@@ -289,6 +306,66 @@ async def test_la_parole_qui_declenche_le_bargein_part_vers_le_core():
 
     # D'abord l'interruption, puis le pré-roulement, puis la suite de la capture.
     assert t.flux == ["interruption", *blocs]
+
+
+async def test_le_pre_roulement_couvre_le_temps_de_montee_de_la_porte():
+    # La fenêtre de 300 ms doit se remplir de parole avant que son niveau moyen ne
+    # dépasse le seuil ; avec du silence juste avant que l'utilisateur parle, ça peut
+    # prendre jusqu'à ~13 blocs (proche de la taille de la fenêtre). Si le
+    # pré-roulement n'est dimensionné que sur le seuil de barge-in (+10), les tout
+    # premiers blocs de la parole sont perdus avant même que l'interruption ne se
+    # déclenche.
+    silence_echo = b"\x00" * 640
+    parole_calme = _bloc_amplitude(360)  # ~-39,2 dBFS seul ; dilué par les 15 blocs de
+    # silence qui précèdent, le niveau ne dépasse -40 dBFS qu'au 13e bloc de parole
+    # (vérifié avec FenetreEnergie directement).
+    blocs = [silence_echo] * 15 + [parole_calme] * 13
+    t = FauxTransport()
+    p = FauxPeripherique(blocs)
+    c = ClientAudio(
+        transport=t,
+        peripherique=p,
+        detecteur=DetecteurScript([False] * 15 + [True] * 13),
+        endpointeur=Endpointeur(silence_ms=60, parole_min_ms=260),  # 3 blocs, 13 blocs
+        reveilleur=ReveilleurScript(None),
+        bargein=Endpointeur(silence_ms=60, parole_min_ms=20),  # un seul bloc gaté suffit
+        horloge=FausseHorloge(),
+    )
+    await _jouer(c, id_enonce=1, blocs=1)
+    await c.boucle_capture()  # le 13e bloc de parole calme franchit enfin le seuil
+
+    assert any(isinstance(m, Interruption) for m in t.json)
+
+    p.ajouter([silence_echo] * 3)
+    await c.boucle_capture()
+
+    assert any(isinstance(m, FinEnonce) for m in t.json), (
+        "les 13 blocs de parole calme doivent tous survivre dans le pré-roulement, "
+        "sinon la capture ne voit jamais assez de parole pour clore l'énoncé"
+    )
+
+
+async def test_le_seuil_de_barge_in_passe_au_client_est_reellement_utilise():
+    # Les autres tests n'utilisent que des blocs à ~-120 dBFS (BLOC) ou ~0 dBFS
+    # (BLOC_FORT) : n'importe quel seuil raisonnable, même câblé en dur, les
+    # distinguerait pareil. Un seul bloc constant (_bloc(1), ~-42,1 dBFS) sous deux
+    # seuils qui l'encadrent : un seuil figé donnerait le même verdict dans les deux
+    # cas puisque le bloc ne change pas — seul un seuil réellement pris en compte peut
+    # inverser le résultat. (Un premier essai avec _bloc(1)/_bloc(2) sous un seul
+    # seuil personnalisé ne tuait pas le mutant « seuil câblé à -40 » : -40 sépare
+    # aussi bien -42,1 de -36,1 que ne le ferait n'importe quel seuil personnalisé
+    # pris dans cet intervalle — vérifié par un mutant sur une copie scratch.)
+    t, p = FauxTransport(), FauxPeripherique([_bloc(1)] * 6)
+    c = _client(t, p, parole=[True] * 6, reveil_au=None, seuil_bargein_dbfs=-45.0)
+    await _jouer(c, id_enonce=1, blocs=1)
+    await c.boucle_capture()
+    assert any(isinstance(m, Interruption) for m in t.json), "seuil permissif : doit passer"
+
+    t2, p2 = FauxTransport(), FauxPeripherique([_bloc(1)] * 6)
+    c2 = _client(t2, p2, parole=[True] * 6, reveil_au=None, seuil_bargein_dbfs=-39.0)
+    await _jouer(c2, id_enonce=1, blocs=1)
+    await c2.boucle_capture()
+    assert not any(isinstance(m, Interruption) for m in t2.json), "seuil strict : doit échouer"
 
 
 async def test_le_pre_roulement_rejoue_porte_le_verdict_brut_pas_filtre():
@@ -323,11 +400,12 @@ async def test_le_pre_roulement_rejoue_porte_le_verdict_brut_pas_filtre():
     )
 
 
-async def test_une_nouvelle_phrase_reinitialise_la_fenetre_d_energie():
-    # Un bloc fort à la fin de la surveillance d'un énoncé ne doit pas faire passer la
-    # porte à de la parole calme sur l'énoncé suivant : la fenêtre d'énergie doit
-    # repartir de zéro à chaque nouvel énoncé, comme le pré-roulement et l'endpointeur
-    # de barge-in.
+async def test_un_nouvel_enonce_reinitialise_la_fenetre_d_energie():
+    # Un ÉNONCÉ nouveau (id différent), pas une simple phrase du même énoncé (voir
+    # test_une_nouvelle_phrase_du_meme_enonce_ne_remet_pas_le_bargein_a_zero). Un bloc
+    # fort à la fin de la surveillance du premier ne doit pas faire passer la porte à
+    # de la parole calme sur le second : la fenêtre d'énergie doit repartir de zéro à
+    # chaque nouvel énoncé, comme le pré-roulement et l'endpointeur de barge-in.
     t, p = FauxTransport(), FauxPeripherique([BLOC_FORT])
     c = _client(t, p, parole=[False, True, True], reveil_au=None)
     await _jouer(c, id_enonce=1, blocs=1)

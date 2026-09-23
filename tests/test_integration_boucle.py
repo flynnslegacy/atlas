@@ -134,7 +134,7 @@ def _boucle():
         # son énergie réelle (~-42 dBFS) est sous le seuil de barge-in par défaut. Ce
         # test câble le client à la Session, il ne teste pas le seuil d'énergie du
         # spike S2 (voir test_client_audio.py et test_vad.py pour celui-ci) : -120
-        # désactive la porte.
+        # désactive en pratique la porte (PAROLE n'est pas un silence numérique pur).
         seuil_bargein_dbfs=-120.0,
     )
     recus: list = []
