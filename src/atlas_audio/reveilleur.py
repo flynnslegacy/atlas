@@ -33,7 +33,7 @@ class PredicteurOpenWakeWord:
         if not os.path.isfile(chemin):
             raise FileNotFoundError(
                 f"Modèle du mot de réveil introuvable : {chemin}. "
-                "Il s'entraîne en suivant scripts/entrainer_mot_reveil.md."
+                "Il s'entraîne en suivant scripts/mot_reveil/LISEZMOI.md."
             )
 
         import numpy as np

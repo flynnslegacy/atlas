@@ -44,7 +44,7 @@ def test_un_modele_de_reveil_absent_est_nomme_et_renvoie_a_la_procedure(tmp_path
     with pytest.raises(FileNotFoundError) as erreur:
         PredicteurOpenWakeWord(chemin=str(absent))
     assert str(absent) in str(erreur.value)
-    assert "scripts/entrainer_mot_reveil.md" in str(erreur.value)
+    assert "scripts/mot_reveil/LISEZMOI.md" in str(erreur.value)
 
 
 def test_des_modeles_de_traits_absents_disent_comment_les_telecharger(tmp_path, monkeypatch):

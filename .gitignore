@@ -11,3 +11,4 @@ models/
 bench/audio/
 src/atlas_aec/.build/
 bench/enregistrements/
+donnees/
