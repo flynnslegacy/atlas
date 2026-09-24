@@ -160,3 +160,24 @@ async def test_une_page_en_panne_ne_gene_ni_les_autres_ni_le_core():
     assert saine.types()[-1] == "reponse"
     await en_panne.fermer()
     await abonnement.fermer()
+
+
+async def test_une_page_en_panne_se_retire_seule():
+    d = _diffuseur()
+
+    async def envoyer_en_panne(msg) -> None:
+        raise ConnectionError("page fermée")
+
+    abonnement = d.abonner(envoyer_en_panne)
+    await _laisser_passer()
+    # La page en panne doit s'être retirée toute seule
+    assert abonnement not in d._abonnements
+    # Mémoriser la taille de file avant les nouveaux messages
+    taille_initiale = abonnement._file.qsize()
+    # Les messages publiés après ne doivent plus arriver à cette page
+    d.publier(Etat(valeur="parole"))
+    d.publier(Question(texte="test", source="voix"))
+    d.publier(Etat(valeur="repos"))
+    await _laisser_passer()
+    # La file ne doit pas avoir grossi (pas de nouveaux messages)
+    assert abonnement._file.qsize() == taille_initiale

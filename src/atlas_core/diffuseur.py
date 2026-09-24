@@ -47,8 +47,12 @@ class Abonnement:
         self._file.put_nowait(msg)
 
     async def _pomper(self, envoyer: Envoyer) -> None:
-        while True:
-            await envoyer(await self._file.get())
+        try:
+            while True:
+                await envoyer(await self._file.get())
+        finally:
+            # Une page qui ne reçoit plus (connexion rompue) quitte la diffusion d'elle-même.
+            self._diffuseur.retirer(self)
 
     async def fermer(self) -> None:
         self._diffuseur.retirer(self)
