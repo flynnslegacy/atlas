@@ -363,6 +363,12 @@ class Session:
                     if reflexion_ms is None:
                         reflexion_ms = _ms(self._horloge() - debut)
                     if isinstance(fragment, Recherche):
+                        # Le bloc de texte qui précède un appel d'outil est complet (Claude
+                        # n'y laisse pas d'espace de fin) : il faut le dire avant l'attente,
+                        # sinon il resterait dans le découpeur jusqu'à la phrase suivante,
+                        # après la recherche.
+                        for phrase in decoupeur.vider():
+                            await self._phrase(phrase)
                         await self._chercher()
                         continue
                     for phrase in decoupeur.ajouter(fragment):
@@ -377,7 +383,14 @@ class Session:
             _journal.warning("le cerveau n'a pas pu répondre : %s", erreur)
             message = Erreur(code="cerveau", message=str(erreur))
             await self._au_client(message)
-            await self._phrase(str(erreur), affichage=message)
+            # Seule la première phrase est dite (250 caractères au plus, comme tout
+            # texte) : une erreur plus longue resterait sinon sous la coupe de la
+            # synthèse, ou la dépasserait franchement. Les pages ont déjà le message
+            # complet, ci-dessus.
+            decoupeur_erreur = DecoupeurPhrases()
+            phrases_erreur = decoupeur_erreur.ajouter(str(erreur)) + decoupeur_erreur.vider()
+            if phrases_erreur:
+                await self._phrase(phrases_erreur[0], affichage=message)
 
         self._diffuseur.publier(
             Latences(

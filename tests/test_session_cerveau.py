@@ -221,6 +221,25 @@ async def test_le_muet_n_interrompt_pas_claude():
     await s.fermer()
 
 
+async def test_le_texte_avant_une_recherche_est_dit_avant_l_attente():
+    # Un bloc de texte de Claude se termine sans espace de fin : sans purge du
+    # découpeur avant la recherche, « Je vérifie. » resterait dans son tampon jusqu'à
+    # la phrase suivante, et serait donc dit après « Je regarde ça. » au lieu d'avant.
+    c, d, plan = Collecteur(), DiffuseurEspion(), FauxPlanificateur()
+    resultats = asyncio.Event()
+    cerveau = CerveauScript("Je vérifie.", RECHERCHE, resultats, " Il pleut.")
+    s = _session(c, d, cerveau, planifier=plan)
+
+    await s.sur_saisie("Il pleut ?")
+    await _attendre(lambda: _dits(c) == ["Je vérifie.", PHRASE_ATTENTE])
+
+    plan.jouer()
+    resultats.set()
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+    assert _dits(c) == ["Je vérifie.", PHRASE_ATTENTE, "Il pleut."]
+    await s.fermer()
+
+
 # --- les erreurs du cerveau ------------------------------------------------------------
 
 
@@ -251,6 +270,25 @@ async def test_sans_voix_une_erreur_du_cerveau_s_affiche_tout_de_suite():
     await s.sur_saisie("Bonjour")
     await _attendre(lambda: [e.valeur for e in d.de(Etat)][-1:] == ["repos"])
     assert [e.message for e in d.de(Erreur)] == ["Je n'arrive pas à joindre Claude."]
+    await s.fermer()
+
+
+async def test_une_erreur_longue_n_est_dite_qu_en_une_phrase_de_250_caracteres_au_plus():
+    # Une erreur « Autre » du SDK peut dépasser 250 caractères (au-delà de 1 000, la
+    # synthèse refuse) : on ne dit que sa première phrase, coupée comme tout texte ;
+    # les pages, elles, reçoivent le message complet dans l'erreur affichée.
+    c, d, plan = Collecteur(), DiffuseurEspion(), FauxPlanificateur()
+    longue = "x" * 400
+    s = _session(c, d, CerveauScript(ErreurCerveau(longue)), planifier=plan)
+    await s.sur_saisie("Raconte.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+    plan.jouer()
+
+    dits = _dits(c)
+    assert len(dits) == 1, "seule la première phrase de l'erreur est dite"
+    assert len(dits[0]) <= 250
+    assert c.de(Erreur) == [Erreur(code="cerveau", message=longue)]
+    assert d.de(Erreur) == [Erreur(code="cerveau", message=longue)]
     await s.fermer()
 
 
