@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime as dt
+import time
 
 import pytest
 from claude_agent_sdk import (
@@ -110,6 +111,7 @@ class FauxClientClaude:
         self.interruption_sans_effet = False
         self._tour: list = []
         self._reveil = asyncio.Event()
+        self._en_attente_du_reveil = False  # Claude n'a encore rien produit de plus
 
     async def connect(self) -> None:
         if self.echec_connexion is not None:
@@ -129,7 +131,11 @@ class FauxClientClaude:
         while self._tour:
             message = self._tour.pop(0)
             if message is BLOQUE:
-                await self._reveil.wait()
+                self._en_attente_du_reveil = True
+                try:
+                    await self._reveil.wait()
+                finally:
+                    self._en_attente_du_reveil = False
                 continue
             if isinstance(message, BaseException):
                 raise message
@@ -143,10 +149,17 @@ class FauxClientClaude:
         self.journal.append("interruption")
         if self.interruption_sans_effet:
             return
-        if self._tour:
-            # Comme le CLI : le tour s'arrête, et son message de fin arrive quand même.
-            self._tour = [fin(subtype="error_during_execution", is_error=True)]
-        self._reveil.set()
+        # Comme le vrai CLI (au plus 100 messages en attente) : la réponse à
+        # l'interruption arrive derrière tout ce qui était déjà en file, donc
+        # seulement une fois que `receive_response` l'a lu. On guette aussi, à
+        # chaque tour, le moment où le lecteur s'arrête sur `BLOQUE` (Claude n'a
+        # encore rien produit de plus) : le tour s'arrête alors net, et son
+        # message de fin arrive quand même, comme le ferait le CLI.
+        while self._tour:
+            if self._en_attente_du_reveil:
+                self._tour = [fin(subtype="error_during_execution", is_error=True)]
+                self._reveil.set()
+            await asyncio.sleep(0)
 
     async def disconnect(self) -> None:
         self.deconnexions += 1
@@ -486,3 +499,50 @@ async def test_une_question_annulee_en_attendant_le_menage_ne_l_annule_pas():
         await tache
     assert menage is not None and not menage.cancelled()
     menage.cancel()
+
+
+# --- le tampon plein du SDK ---------------------------------------------------------
+
+# Le vrai SDK ne garde que 100 messages en attente : quand la session prend du retard
+# sur Claude (elle synthétise chaque phrase le temps qu'elle parle), le tampon se
+# remplit. Le ménage doit alors lire pendant qu'il interrompt, sinon la réponse à
+# l'interruption reste coincée derrière les événements déjà en file.
+
+
+async def test_un_gros_reliquat_ne_bloque_pas_le_menage(monkeypatch):
+    monkeypatch.setattr(cerveau_claude, "DELAI_MENAGE_S", 0.05)
+    tour = [debut_texte(), *(delta(f"m{i} ") for i in range(150)), fin()]
+    client = FauxClientClaude(tour, reponse("Suite."))
+    cerveau = _cerveau(client)
+
+    flux = cerveau.repondre("Raconte.")
+    await anext(flux)
+    await flux.aclose()  # laisse un gros reliquat non lu (149 deltas + la fin)
+
+    assert await _tout(cerveau, "Attends.") == ["Suite."], "pas de fil perdu : le ménage a fini"
+    assert client.interruptions == 1
+
+
+async def test_une_interruption_croisee_n_attend_pas_tout_le_reliquat_de_l_autre():
+    tour_a = [debut_texte(), *(delta(f"m{i} ") for i in range(150)), fin()]
+    client = FauxClientClaude(tour_a, reponse("Seconde."))
+    cerveau = _cerveau(client)
+    premiere: list = []
+
+    async def lire_la_premiere() -> None:
+        async for f in cerveau.repondre("une"):
+            premiere.append(f)
+            await asyncio.sleep(0.02)  # la session « parle » chaque fragment reçu
+
+    tache = asyncio.create_task(lire_la_premiere())
+    while not premiere:
+        await asyncio.sleep(0)
+
+    debut = time.monotonic()
+    assert await _tout(cerveau, "deux") == ["Seconde."]
+    duree = time.monotonic() - debut
+    await tache  # finie sans erreur : l'interruption n'est pas un échec
+
+    assert duree < 0.5, "la deuxième question a attendu tout le reliquat de la première"
+    assert len(premiere) < 150, "la première a continué de parler après avoir été coupée"
+    assert client.interruptions == 1

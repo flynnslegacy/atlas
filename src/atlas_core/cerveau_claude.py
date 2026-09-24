@@ -219,6 +219,9 @@ class CerveauClaude:
         try:
             async with contextlib.aclosing(client.receive_response()) as messages:
                 async for message in messages:
+                    # Une question arrivée d'ailleurs a coupé ce tour (`_interrompu`) : on
+                    # continue à lire jusqu'au message de fin, pour vider le tampon du SDK
+                    # tout de suite, mais on ne rend plus rien — la réponse s'arrête là.
                     if isinstance(message, StreamEvent):
                         if message.parent_tool_use_id is not None:
                             continue  # un sous-agent : pas la réponse d'Atlas
@@ -229,7 +232,7 @@ class CerveauClaude:
                                 # Deux blocs de texte (avant et après une recherche) : sans
                                 # espace, « …vérifier.D'après… » ne se couperait jamais.
                                 separer = texte_rendu
-                            elif self._est_une_recherche(bloc, recherches):
+                            elif self._est_une_recherche(bloc, recherches) and not self._interrompu:
                                 yield RECHERCHE
                         elif evenement.get("type") == "content_block_delta":
                             delta = evenement.get("delta") or {}
@@ -238,14 +241,16 @@ class CerveauClaude:
                                 if separer:
                                     morceau, separer = " " + morceau, False
                                 texte_rendu = True
-                                yield morceau
+                                if not self._interrompu:
+                                    yield morceau
                     elif isinstance(message, AssistantMessage):
                         if message.error is not None:
                             raise ErreurCerveau(self._message_assistant(message))
                         for bloc in message.content:
-                            if isinstance(bloc, ToolUseBlock) and self._est_une_recherche(
-                                {"type": "tool_use", "name": bloc.name, "id": bloc.id}, recherches
-                            ):
+                            if not isinstance(bloc, ToolUseBlock):
+                                continue
+                            desc = {"type": "tool_use", "name": bloc.name, "id": bloc.id}
+                            if self._est_une_recherche(desc, recherches) and not self._interrompu:
                                 yield RECHERCHE
                     elif isinstance(message, RateLimitEvent):
                         if message.rate_limit_info.status == "rejected":
@@ -322,10 +327,23 @@ class CerveauClaude:
         tour à temps, la conversation est perdue : on repartira de zéro."""
         try:
             async with asyncio.timeout(DELAI_MENAGE_S):
-                await client.interrupt()
-                async with contextlib.aclosing(client.receive_response()) as reste:
-                    async for _message in reste:
-                        pass
+                # Le SDK ne garde que 100 messages en attente : lire pendant qu'on
+                # interrompt, sinon la réponse à l'interruption reste coincée derrière
+                # les événements déjà en file, et le ménage n'aboutit jamais.
+                interruption = asyncio.create_task(client.interrupt())
+                try:
+                    async with contextlib.aclosing(client.receive_response()) as reste:
+                        async for _message in reste:
+                            pass
+                finally:
+                    # Toujours reprendre la main sur cette tâche : si le vidage s'arrête en
+                    # cours de route (erreur, minuterie), l'interruption ne finira peut-être
+                    # jamais toute seule (plus personne ne lit) ; on la coupe alors, pour ne
+                    # laisser ni tâche oubliée ni exception jamais récupérée.
+                    if not interruption.done():
+                        interruption.cancel()
+                    with contextlib.suppress(BaseException):
+                        await interruption
             self._tour_ouvert = False
         except Exception as e:  # noqa: BLE001 — TimeoutError compris
             await self._perdre_le_fil(f"tour interrompu mal refermé : {type(e).__name__}")
