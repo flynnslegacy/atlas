@@ -1,10 +1,12 @@
 """Le daemon audio du M5.
 
-Deux boucles concurrentes : l'une lit le micro et parle au Core, l'autre reçoit
-du Core et joue le son. Le client ne décide de rien d'autre que du barge-in —
-il le décide localement parce que 200 ms d'aller-retour réseau rendraient
-l'interruption molle — et de la relance : une fois la réponse d'Atlas jouée, il
-rouvre l'écoute un moment sans mot de réveil, pour que la conversation continue.
+Trois tâches par connexion au Core (voir `connexion.py`) : l'une lit le micro et parle
+au Core, une autre reçoit du Core, et la dernière joue le son à son rythme, sans jamais
+prendre plus de quelques secondes d'avance. Le client ne décide de rien d'autre que du
+barge-in — il le décide localement parce que 200 ms d'aller-retour réseau rendraient
+l'interruption molle — et de la relance : une fois la réponse d'Atlas jouée, il rouvre
+l'écoute un moment sans mot de réveil, pour que la conversation continue. Si le Core
+disparaît, le client se reconnecte seul.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import math
 import os
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -36,6 +38,7 @@ from atlas_core.protocole import (
 )
 
 from .aec import ouvrir_peripherique
+from .connexion import boucle_de_connexion, servir_connexion
 from .reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle, ReveilleurTouche
 from .vad import DetecteurVoix, Endpointeur, FenetreEnergie
 
@@ -45,6 +48,9 @@ URL_CORE = os.environ.get("ATLAS_CORE_URL", "ws://127.0.0.1:8080/ws/audio")
 
 DUREE_BLOC_S = DUREE_BLOC_MS / 1000  # 0,020 s joués par trame
 MARGE_SORTIE_S = 0.15  # latence de sortie du haut-parleur, à régler au banc
+# Au plus ce son d'avance confié au haut-parleur (le binaire Swift en accepterait 30 s
+# avant de freiner) : un vidage reste immédiat, et l'horloge de lecture reste juste.
+AVANCE_MAX_S = 5.0
 # Seuil de barge-in par défaut (spike S2) : une seule source de vérité pour
 # _lire_bargein_dbfs() et ClientAudio, plutôt que la même valeur écrite deux fois.
 _SEUIL_BARGEIN_DBFS_DEFAUT = -40.0
@@ -135,6 +141,7 @@ class ClientAudio:
         horloge: Callable[[], float] | None = None,
         seuil_bargein_dbfs: float = _SEUIL_BARGEIN_DBFS_DEFAUT,
         relance_s: float = 0.0,
+        attendre: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._transport = transport
         self._peripherique = peripherique
@@ -148,6 +155,7 @@ class ClientAudio:
         self._id_coupe = 0
         self._bargein = bargein or Endpointeur(silence_ms=400, parole_min_ms=300)
         self._horloge = horloge or time.monotonic
+        self._attendre = attendre or asyncio.sleep
         # Écho résiduel d'Atlas pendant que l'annulateur d'écho converge (spike S2) :
         # une parole détectée pendant la lecture ne compte pour le barge-in que si son
         # niveau sur 300 ms dépasse ce seuil. Ne s'applique qu'à la surveillance du
@@ -324,11 +332,32 @@ class ClientAudio:
                 self._reponse_jouee = False
 
     async def sur_trame(self, trame: bytes) -> None:
+        """Joue une trame, sans jamais dépasser `AVANCE_MAX_S` d'avance : au-delà, on
+        attend que le haut-parleur en ait joué une partie. Une coupure pendant l'attente
+        ou pendant l'écriture jette la trame."""
         identifiant, pcm = decoder_audio_sortant(trame)
-        if identifiant <= self._id_coupe or identifiant != self._id_courant:
-            return  # trame d'un énoncé interrompu : on la jette
+        while True:
+            if not self._a_jouer(identifiant):
+                return  # trame d'un énoncé interrompu : on la jette
+            # L'avance qu'aurait le haut-parleur une fois cette trame écrite ; la
+            # demi-trame de marge absorbe les arrondis de l'horloge.
+            avance = self._fin_lecture - self._horloge() + DUREE_BLOC_S
+            if avance <= AVANCE_MAX_S + DUREE_BLOC_S / 2:
+                break
+            await self._attendre(avance - AVANCE_MAX_S)
         await self._peripherique.jouer(pcm)
-        self._fin_lecture = max(self._horloge(), self._fin_lecture) + DUREE_BLOC_S
+        if self._a_jouer(identifiant):
+            # Sinon, coupée pendant l'écriture : le vidage l'a suivie, l'horloge n'avance pas.
+            self._fin_lecture = max(self._horloge(), self._fin_lecture) + DUREE_BLOC_S
+
+    def _a_jouer(self, identifiant: int) -> bool:
+        return identifiant > self._id_coupe and identifiant == self._id_courant
+
+    async def arreter(self) -> None:
+        """La connexion au Core est perdue : ce qui restait à jouer se tait."""
+        self._couper()
+        with contextlib.suppress(Exception):  # le binaire Swift a pu mourir avec elle
+            await self._peripherique.vider()
 
 
 class TransportWebSocket:
@@ -343,49 +372,42 @@ class TransportWebSocket:
 
 
 async def principal() -> None:
-    import json
-
     import websockets
-    from pydantic import TypeAdapter
 
-    from atlas_core.protocole import MessageCore
-
-    adaptateur = TypeAdapter(MessageCore)
     logging.basicConfig(level=logging.INFO)
-    # Réglages et réveilleur d'abord : une variable mal formée ou un modèle absent
+    # Réglages, clé et réveilleur d'abord : une variable mal formée ou un modèle absent
     # doit échouer avant que le périphérique audio soit ouvert.
     reglages = lire_reglages()
+    cle = lire_cle_audio()
     if os.environ.get("ATLAS_REVEILLEUR", "touche") == "motcle":
         reveilleur = ReveilleurMotCle(PredicteurOpenWakeWord(), seuil=reglages.seuil_reveil)
     else:
         reveilleur = ReveilleurTouche()
+    detecteur = DetecteurVoix()
     peripherique = await ouvrir_peripherique()
 
-    async with websockets.connect(URL_CORE) as ws:
+    async def servir(ws) -> None:
         transport = TransportWebSocket(ws)
+        # Un client neuf à chaque connexion : le Core ouvre une session neuve, dont les
+        # énoncés repartent de 1 ; les repères de l'ancien client les jetteraient tous.
         client = ClientAudio(
             transport=transport,
             peripherique=peripherique,
-            detecteur=DetecteurVoix(),
+            detecteur=detecteur,
             endpointeur=Endpointeur(silence_ms=reglages.silence_ms),
             reveilleur=reveilleur,
             bargein=Endpointeur(parole_min_ms=reglages.bargein_ms),
             seuil_bargein_dbfs=reglages.bargein_dbfs,
             relance_s=reglages.relance_s,
         )
-        await transport.envoyer_json(Bonjour(client="m5", capacites=["aec", "vad"]))
-        capture = asyncio.create_task(client.boucle_capture())
-        try:
-            async for recu in ws:
-                if isinstance(recu, bytes):
-                    await client.sur_trame(recu)
-                else:
-                    await client.sur_message(adaptateur.validate_python(json.loads(recu)))
-        finally:
-            capture.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await capture
-            await peripherique.fermer()
+        await transport.envoyer_json(Bonjour(client="m5", capacites=["aec", "vad"], cle=cle))
+        _journal.info("connecté au Core")
+        await servir_connexion(ws, client)
+
+    try:
+        await boucle_de_connexion(lambda: websockets.connect(URL_CORE), servir)
+    finally:
+        await peripherique.fermer()
 
 
 if __name__ == "__main__":
