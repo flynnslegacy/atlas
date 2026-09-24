@@ -46,7 +46,7 @@ def test_une_phrase_faite_de_mise_en_forme_devient_vide():
         "Merci beaucoup.",
         "Sous-titres réalisés par la communauté d'Amara.org",
         "Sous-titrage ST' 501",
-        "Merci d'avoir regardé cette vidéo !",
+        "Merci d’avoir regardé cette vidéo !",
         "Abonnez-vous à la chaîne !",
         "[Musique]",
         "♪",

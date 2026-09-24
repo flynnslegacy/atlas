@@ -52,7 +52,7 @@ _PONCTUATION = re.compile(r"[^\w\s'-]")
 
 
 def _normaliser(texte: str) -> str:
-    texte = texte.lower().replace("'", "'")
+    texte = texte.lower().replace("’", "'")
     texte = _PONCTUATION.sub(" ", texte)
     return _BLANCS.sub(" ", texte).strip()
 
