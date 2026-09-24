@@ -7,15 +7,15 @@ import cymatique from "../../src/atlas_web/orbes/cymatique.js";
 import liquide from "../../src/atlas_web/orbes/liquide.js";
 import particules from "../../src/atlas_web/orbes/particules.js";
 import relief from "../../src/atlas_web/orbes/relief.js";
-import { ETATS, IMAGES_PAR_ETAT, animer, fauxCanevas } from "./faux_canevas.mjs";
+import { animer, fauxCanevas } from "./faux_canevas.mjs";
 
 function verifierOrbe(module) {
   assert.match(module.id, /^[a-z]+$/);
   assert.ok(module.nom.length > 0 && module.idee.length > 0);
   for (const [largeur, hauteur] of [[400, 400], [640, 400]]) {
     const canevas = fauxCanevas(largeur, hauteur);
-    animer(module, canevas);
-    assert.ok(canevas.bilan.dessins >= ETATS.length * IMAGES_PAR_ETAT, `${module.id} ne dessine pas à chaque image`);
+    const parImage = animer(module, canevas);
+    assert.ok(Math.min(...parImage) >= 2, `${module.id} ne dessine pas son corps à chaque image`);
     assert.equal(canevas.bilan.peinturesOpaquesPleines, 0, `${module.id} cache le fond`);
   }
 }

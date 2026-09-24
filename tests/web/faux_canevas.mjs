@@ -67,15 +67,21 @@ export function fauxCanevas(largeur = 400, hauteur = 400) {
   return { canvas, bilan };
 }
 
+// Rend le nombre de dessins faits à chaque image (halo compris), pour que le test de
+// contrat puisse vérifier que le corps de l'orbe dessine bien, pas seulement le halo.
 export function animer(module, canevas, couleur = [34, 211, 238]) {
   const dessin = module.creer(canevas.canvas);
+  const parImage = [];
   let t = 0;
   for (const etat of ETATS) {
     for (let i = 0; i < IMAGES_PAR_ETAT; i++) {
       t += 1 / 60;
       const parle = etat === "ecoute" || etat === "parole";
       const volume = parle ? 0.5 + 0.5 * Math.sin(i / 3) : 0.05;
+      const avant = canevas.bilan.dessins;
       dessin.dessiner(t, { etat, volume, couleur, syllabe: i % 12 === 0, dt: 1 / 60 });
+      parImage.push(canevas.bilan.dessins - avant);
     }
   }
+  return parImage;
 }
