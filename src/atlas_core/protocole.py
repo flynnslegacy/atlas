@@ -45,6 +45,12 @@ class Interruption(BaseModel):
     horodatage: float
 
 
+class Abandon(BaseModel):
+    """L'écoute s'est close sans qu'on entende de parole : rien à transcrire."""
+
+    type: Literal["abandon"] = "abandon"
+
+
 class ReponseConfirmation(BaseModel):
     type: Literal["reponse_confirmation"] = "reponse_confirmation"
     id_demande: str
@@ -52,7 +58,7 @@ class ReponseConfirmation(BaseModel):
 
 
 MessageClient = Annotated[
-    Bonjour | Reveil | FinEnonce | Interruption | ReponseConfirmation,
+    Bonjour | Reveil | FinEnonce | Interruption | Abandon | ReponseConfirmation,
     Field(discriminator="type"),
 ]
 _adaptateur_client = TypeAdapter(MessageClient)

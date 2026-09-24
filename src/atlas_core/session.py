@@ -28,6 +28,7 @@ from .etat import MachineEtat, Valeur
 from .niveaux import INTERVALLE_S, CalendrierNiveaux, Planifier, niveau
 from .phrases import DecoupeurPhrases
 from .protocole import (
+    Abandon,
     Dire,
     Erreur,
     Etat,
@@ -100,6 +101,8 @@ class Session:
                 await self._fin_enonce()
             elif isinstance(msg, Interruption):
                 await self._interrompre()
+            elif isinstance(msg, Abandon):
+                await self._abandonner()
 
     async def sur_audio(self, pcm: bytes) -> None:
         if self._machine.valeur != "ecoute":
@@ -184,6 +187,18 @@ class Session:
         self._machine.aller_vers("reflexion")
         await self._etat("reflexion")
         self._tache = asyncio.create_task(self._tour())
+
+    async def _abandonner(self) -> None:
+        """Le client a clos l'écoute sans entendre de parole : Whisper n'a rien à faire.
+
+        Sans cela, des secondes de silence partiraient à la transcription, qui peut y
+        inventer une phrase. Hors écoute, l'abandon arrive trop tard et ne change rien.
+        """
+        if self._machine.valeur != "ecoute":
+            return
+        self._tampon.clear()
+        self._machine.aller_vers("repos")
+        await self._etat("repos")
 
     async def _interrompre(self) -> None:
         await self._annuler_tache()

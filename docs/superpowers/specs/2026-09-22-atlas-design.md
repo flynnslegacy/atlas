@@ -131,6 +131,10 @@ connaissance de cause.
 7. La réponse revient en streaming et est **découpée phrase par phrase**.
 8. Chaque phrase part à `atlas-tts` et revient en audio pendant que la suivante s'écrit.
 9. Le client joue l'audio, en gardant le VAD actif.
+10. Une fois la réponse jouée jusqu'au bout, le client rouvre l'écoute pendant
+    `ATLAS_RELANCE_S` secondes (10 par défaut) sans mot de réveil : David peut enchaîner.
+    S'il ne dit rien, le client envoie `abandon` et le Core revient au repos sans
+    transcrire. Même chose quand rien n'est dit après « Hey Atlas ».
 
 ### Interruption en pleine phrase
 
@@ -270,6 +274,7 @@ Client vers Core :
 | *(binaire)* | trames PCM pendant la capture |
 | `utterance_end` | `{duration_ms}` |
 | `barge_in` | `{ts}` — David a repris la parole pendant la lecture |
+| `abandon` | `{}` — l'écoute s'est close sans parole : rien à transcrire |
 | `confirm_response` | `{request_id, accepted: bool}` |
 
 Core vers client :

@@ -3,7 +3,8 @@
 Deux boucles concurrentes : l'une lit le micro et parle au Core, l'autre reçoit
 du Core et joue le son. Le client ne décide de rien d'autre que du barge-in —
 il le décide localement parce que 200 ms d'aller-retour réseau rendraient
-l'interruption molle.
+l'interruption molle — et de la relance : une fois la réponse d'Atlas jouée, il
+rouvre l'écoute un moment sans mot de réveil, pour que la conversation continue.
 """
 
 from __future__ import annotations
@@ -21,9 +22,11 @@ from typing import Protocol
 
 from atlas_core.protocole import (
     DUREE_BLOC_MS,
+    Abandon,
     Bonjour,
     Dire,
     Erreur,
+    Etat,
     FinEnonce,
     Interruption,
     Reveil,
@@ -64,6 +67,7 @@ class Reglages:
     silence_ms: int
     bargein_ms: int
     bargein_dbfs: float
+    relance_s: float  # écoute rouverte après une réponse jouée ; 0 la désactive
 
 
 def lire_reglages() -> Reglages:
@@ -73,6 +77,7 @@ def lire_reglages() -> Reglages:
         silence_ms=int(os.environ.get("ATLAS_SILENCE_MS", "400")),
         bargein_ms=int(os.environ.get("ATLAS_BARGEIN_MS", "300")),
         bargein_dbfs=_lire_bargein_dbfs(),
+        relance_s=_lire_relance_s(),
     )
 
 
@@ -85,6 +90,19 @@ def _lire_bargein_dbfs() -> float:
     if not math.isfinite(valeur) or not (-120.0 <= valeur <= 0.0):
         raise ValueError(
             f"ATLAS_BARGEIN_DBFS invalide : {brute!r} doit être un nombre fini entre -120 et 0"
+        )
+    return valeur
+
+
+def _lire_relance_s() -> float:
+    brute = os.environ.get("ATLAS_RELANCE_S", "10")
+    try:
+        valeur = float(brute)
+    except ValueError as erreur:
+        raise ValueError(f"ATLAS_RELANCE_S invalide : {brute!r} n'est pas un nombre") from erreur
+    if not math.isfinite(valeur) or not (0.0 <= valeur <= 60.0):
+        raise ValueError(
+            f"ATLAS_RELANCE_S invalide : {brute!r} doit être un nombre de secondes entre 0 et 60"
         )
     return valeur
 
@@ -105,6 +123,7 @@ class ClientAudio:
         bargein=None,
         horloge: Callable[[], float] | None = None,
         seuil_bargein_dbfs: float = _SEUIL_BARGEIN_DBFS_DEFAUT,
+        relance_s: float = 0.0,
     ) -> None:
         self._transport = transport
         self._peripherique = peripherique
@@ -140,6 +159,12 @@ class ClientAudio:
         )
         self._blocs_captures = 0
         self._parole_vue = False
+        self._blocs_sans_parole = _BLOCS_SANS_PAROLE
+        # La relance : une réponse a été entendue jusqu'au bout (ni coupée, ni muette),
+        # et le Core a fini son tour. L'écoute se rouvre quand le son s'est tu.
+        self._relance_s = relance_s
+        self._reponse_jouee = False
+        self._relance_due = False
 
     def _atlas_parle_encore(self) -> bool:
         # Une échéance expire d'elle-même : le micro ne peut jamais rester sourd.
@@ -159,20 +184,30 @@ class ClientAudio:
             return
 
         if not self._capture:
-            # Pas de pré-roulement ici : envoyer « Hey Atlas » à Whisper
-            # polluerait la transcription.
-            if self._reveilleur.examiner(bloc):
-                self._ouvrir_capture()
-                await self._transport.envoyer_json(Reveil(confiance=1.0, horodatage=time.time()))
-            return
+            if not self._relance_due:
+                # Pas de pré-roulement ici : envoyer « Hey Atlas » à Whisper
+                # polluerait la transcription.
+                if self._reveilleur.examiner(bloc):
+                    self._ouvrir_capture()
+                    await self._annoncer_ecoute()
+                return
+            # Atlas vient de finir de parler : il écoute encore un moment, sans mot de
+            # réveil. Ce bloc-ci est déjà capturé, pour ne perdre aucun premier mot.
+            self._relance_due = False
+            self._ouvrir_capture(self._relance_s)
+            await self._annoncer_ecoute()
 
         await self._capturer(bloc, self._detecteur.parle(bloc))
 
-    def _ouvrir_capture(self) -> None:
+    def _ouvrir_capture(self, delai_sans_parole_s: float = DELAI_SANS_PAROLE_S) -> None:
         self._capture = True
         self._endpointeur.reinitialiser()
         self._blocs_captures = 0
         self._parole_vue = False
+        self._blocs_sans_parole = round(delai_sans_parole_s * _BLOCS_PAR_S)
+
+    async def _annoncer_ecoute(self) -> None:
+        await self._transport.envoyer_json(Reveil(confiance=1.0, horodatage=time.time()))
 
     async def _capturer(self, bloc: bytes, parle: bool) -> None:
         """Envoie un bloc capturé au Core et décide si l'énoncé est terminé."""
@@ -187,13 +222,19 @@ class ClientAudio:
         elif self._blocs_captures >= _BLOCS_MAX_ENONCE:
             _journal.info("capture close : durée maximale d'un énoncé atteinte")
             await self._clore_capture()
-        elif not self._parole_vue and self._blocs_captures >= _BLOCS_SANS_PAROLE:
+        elif not self._parole_vue and self._blocs_captures >= self._blocs_sans_parole:
             _journal.info("capture close : aucune parole entendue")
-            await self._clore_capture()
+            await self._abandonner_capture()
 
     async def _clore_capture(self) -> None:
         self._capture = False
         await self._transport.envoyer_json(FinEnonce(duree_ms=0))
+
+    async def _abandonner_capture(self) -> None:
+        # Rien n'a été dit : envoyer ce silence à Whisper l'inviterait à inventer une
+        # phrase. Le Core revient au repos sans transcrire.
+        self._capture = False
+        await self._transport.envoyer_json(Abandon())
 
     async def _surveiller_bargein(self, bloc: bytes) -> None:
         parle = self._detecteur.parle(bloc)
@@ -224,6 +265,10 @@ class ClientAudio:
         self._fin_lecture = 0.0
         self._pre_roulement.clear()
         self._fenetre_energie.reinitialiser()
+        # Une réponse coupée n'est pas une réponse entendue : l'écoute est déjà
+        # ouverte (interruption) ou une question tapée a pris la main.
+        self._reponse_jouee = False
+        self._relance_due = False
 
     # --- Core vers haut-parleur -------------------------------------------
 
@@ -235,6 +280,7 @@ class ClientAudio:
                 # Nouvel énoncé seulement : remettre le compteur à zéro à chaque
                 # phrase effacerait la parole que l'utilisateur a déjà accumulée.
                 self._id_courant = msg.id_enonce
+                self._reponse_jouee = True
                 self._bargein.reinitialiser()
                 self._pre_roulement.clear()
                 self._fenetre_energie.reinitialiser()
@@ -243,8 +289,16 @@ class ClientAudio:
             await self._peripherique.vider()
         elif isinstance(msg, Erreur):
             _journal.warning("erreur signalée par le Core [%s] : %s", msg.code, msg.message)
-        # Etat n'arme ni ne désarme rien : « repos » dit que le Core a fini
-        # d'ENVOYER, pas que le son est joué. Seule l'horloge de lecture tranche.
+        elif isinstance(msg, Etat):
+            # « repos » dit que le Core a fini d'ENVOYER, pas que le son est joué : il
+            # n'arme ni ne désarme le barge-in, que seule l'horloge de lecture tranche.
+            # Il arme en revanche la relance, qui attendra que le son se taise. Sans ce
+            # signal, un blanc entre deux phrases relancerait l'écoute en pleine réponse.
+            self._relance_due = (
+                msg.valeur == "repos" and self._reponse_jouee and self._relance_s > 0
+            )
+            if msg.valeur == "repos":
+                self._reponse_jouee = False
 
     async def sur_trame(self, trame: bytes) -> None:
         identifiant, pcm = decoder_audio_sortant(trame)
@@ -294,6 +348,7 @@ async def principal() -> None:
             reveilleur=reveilleur,
             bargein=Endpointeur(parole_min_ms=reglages.bargein_ms),
             seuil_bargein_dbfs=reglages.bargein_dbfs,
+            relance_s=reglages.relance_s,
         )
         await transport.envoyer_json(Bonjour(client="m5", capacites=["aec", "vad"]))
         capture = asyncio.create_task(client.boucle_capture())

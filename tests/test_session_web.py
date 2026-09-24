@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 from atlas_core.diffuseur import Diffuseur
 from atlas_core.protocole import (
+    Abandon,
     Dire,
     Erreur,
     Etat,
@@ -597,4 +598,33 @@ async def test_taire_pendant_la_fin_de_la_lecture_coupe_la_voix_et_remet_les_pag
     await s.taire()
     assert c.de(StopAudio), "la voix doit être coupée même si la machine est au repos"
     assert d.de(Etat)[-1].valeur == "repos"
+    await s.fermer()
+
+
+async def test_un_abandon_pendant_l_ecoute_revient_au_repos_sans_transcrire():
+    c, d = Collecteur(), DiffuseurEspion()
+    transcription = FausseTranscription()
+    s = _session(c, d, transcription=transcription)
+    await s.sur_message(Reveil(confiance=0.9, horodatage=0.0))
+    for _ in range(5):
+        await s.sur_audio(b"\x00" * 640)
+    await s.sur_message(Abandon())
+    await asyncio.sleep(0.01)
+    assert transcription.appels == 0, "rien n'a été dit : rien ne part à Whisper"
+    assert c.etats() == ["ecoute", "repos"]
+    assert d.de(Etat)[-1].valeur == "repos"
+    assert not d.de(Question)
+    await s.fermer()
+
+
+async def test_un_abandon_hors_ecoute_est_ignore():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, synthese=FausseSynthese(blocs=20, lenteur=0.005))
+    await s.sur_message(Reveil(confiance=0.9, horodatage=0.0))
+    await s.sur_audio(b"\x00" * 640)
+    await s.sur_message(FinEnonce(duree_ms=20))
+    await asyncio.sleep(0.01)  # le tour est en cours : réflexion ou parole
+    etats_avant = list(c.etats())
+    await s.sur_message(Abandon())
+    assert c.etats() == etats_avant, "un abandon tardif ne doit pas couper la réponse"
     await s.fermer()

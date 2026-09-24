@@ -2,6 +2,7 @@ import pytest
 
 from atlas_core.protocole import (
     TAILLE_BLOC_OCTETS,
+    Abandon,
     Etat,
     decoder_audio_entrant,
     decoder_audio_sortant,
@@ -17,6 +18,10 @@ def test_decoder_un_message_bonjour():
     )
     assert msg.client == "m5"
     assert "aec" in msg.capacites
+
+
+def test_decoder_un_abandon():
+    assert decoder_message('{"type":"abandon"}') == Abandon()
 
 
 def test_un_type_inconnu_est_refuse():

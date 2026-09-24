@@ -102,6 +102,7 @@ def _client(
     reveil_au=0,
     horloge=None,
     seuil_bargein_dbfs: float = -40.0,
+    relance_s: float = 0.0,
 ):
     return ClientAudio(
         transport=transport,
@@ -112,6 +113,7 @@ def _client(
         bargein=Endpointeur(silence_ms=60, parole_min_ms=40),
         horloge=horloge or FausseHorloge(),
         seuil_bargein_dbfs=seuil_bargein_dbfs,
+        relance_s=relance_s,
     )
 
 
@@ -447,7 +449,7 @@ async def test_une_capture_sans_parole_se_clot_au_bout_de_cinq_secondes():
 
     await c.boucle_capture()
 
-    assert t.types() == ["reveil", "fin_enonce"]
+    assert t.types() == ["reveil", "abandon"], "rien entendu : rien ne part à Whisper"
     assert len(t.binaire) == 250, "cinq secondes de blocs, puis le micro se ferme"
 
 
@@ -477,9 +479,10 @@ def test_lire_reglages_rend_les_defauts_sans_variable(monkeypatch):
     monkeypatch.delenv("ATLAS_SILENCE_MS", raising=False)
     monkeypatch.delenv("ATLAS_BARGEIN_MS", raising=False)
     monkeypatch.delenv("ATLAS_BARGEIN_DBFS", raising=False)
+    monkeypatch.delenv("ATLAS_RELANCE_S", raising=False)
 
     assert lire_reglages() == Reglages(
-        seuil_reveil=0.5, silence_ms=400, bargein_ms=300, bargein_dbfs=-40.0
+        seuil_reveil=0.5, silence_ms=400, bargein_ms=300, bargein_dbfs=-40.0, relance_s=10.0
     )
 
 
@@ -488,9 +491,10 @@ def test_lire_reglages_prend_les_variables_d_environnement(monkeypatch):
     monkeypatch.setenv("ATLAS_SILENCE_MS", "600")
     monkeypatch.setenv("ATLAS_BARGEIN_MS", "250")
     monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "-35")
+    monkeypatch.setenv("ATLAS_RELANCE_S", "15")
 
     assert lire_reglages() == Reglages(
-        seuil_reveil=0.7, silence_ms=600, bargein_ms=250, bargein_dbfs=-35.0
+        seuil_reveil=0.7, silence_ms=600, bargein_ms=250, bargein_dbfs=-35.0, relance_s=15.0
     )
 
 
@@ -521,4 +525,130 @@ def test_lire_reglages_bargein_dbfs_hors_bornes_leve(monkeypatch):
 
     monkeypatch.setenv("ATLAS_BARGEIN_DBFS", "-125")
     with pytest.raises(ValueError, match="ATLAS_BARGEIN_DBFS"):
+        lire_reglages()
+
+
+# --- relance : après la réponse, Atlas écoute encore un moment sans mot de réveil ----
+
+
+async def _reponse_jouee(c, h, id_enonce: int = 1, blocs: int = 50) -> None:
+    """Atlas dit une phrase, le Core annonce la fin du tour, et le son a fini de jouer."""
+    await _jouer(c, id_enonce=id_enonce, blocs=blocs)
+    await c.sur_message(Etat(valeur="repos"))
+    h.avancer(blocs * 0.02 + 0.5)  # au-delà de l'audio et de la marge de sortie
+
+
+async def test_apres_une_reponse_jouee_l_ecoute_se_relance_sans_mot_de_reveil():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 12)
+    c = _client(t, p, parole=[True] * 4 + [False] * 8, reveil_au=None, horloge=h, relance_s=10)
+    await _reponse_jouee(c, h)
+
+    await c.boucle_capture()
+
+    assert t.types() == ["reveil", "fin_enonce"]
+    assert t.flux[1] == BLOC, "le premier bloc après la réponse part : aucun mot perdu"
+
+
+async def test_sans_parole_la_relance_s_abandonne_sans_transcription():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * (500 + 10))
+    c = _client(t, p, parole=[], reveil_au=None, horloge=h, relance_s=10)
+    await _reponse_jouee(c, h)
+
+    await c.boucle_capture()
+
+    assert t.types() == ["reveil", "abandon"]
+    assert len(t.binaire) == 500, "dix secondes d'écoute, puis retour au repos"
+
+
+async def test_apres_un_abandon_la_relance_ne_recommence_pas():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 510)
+    c = _client(t, p, parole=[], reveil_au=None, horloge=h, relance_s=10)
+    await _reponse_jouee(c, h)
+    await c.boucle_capture()
+    await c.sur_message(Etat(valeur="repos"))  # le Core confirme le retour au repos
+    p.ajouter([BLOC] * 600)
+
+    await c.boucle_capture()
+
+    assert t.types() == ["reveil", "abandon"]
+
+
+async def test_la_conversation_continue_tant_que_david_repond():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 12)
+    c = _client(t, p, parole=[True] * 4 + [False] * 8, reveil_au=None, horloge=h, relance_s=10)
+    await _reponse_jouee(c, h, id_enonce=1)
+    await c.boucle_capture()  # David répond pendant la relance
+    await _reponse_jouee(c, h, id_enonce=2)  # Atlas lui répond à son tour
+    p.ajouter([BLOC] * 510)
+
+    await c.boucle_capture()
+
+    assert t.types() == ["reveil", "fin_enonce", "reveil", "abandon"]
+
+
+async def test_pas_de_relance_si_la_reponse_a_ete_coupee():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 20)
+    c = _client(t, p, parole=[], reveil_au=None, horloge=h, relance_s=10)
+    await _jouer(c, id_enonce=1, blocs=50)
+    await c.sur_message(StopAudio(id_enonce=1))  # une question tapée a coupé la réponse
+    await c.sur_message(Etat(valeur="repos"))
+    h.avancer(2.0)
+
+    await c.boucle_capture()
+
+    assert t.types() == []
+
+
+async def test_pas_de_relance_sans_voix():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 20)
+    c = _client(t, p, parole=[], reveil_au=None, horloge=h, relance_s=10)
+    await c.sur_message(Etat(valeur="parole"))
+    await c.sur_message(Etat(valeur="repos"))  # une réponse en mode muet : rien n'a joué
+
+    await c.boucle_capture()
+
+    assert t.types() == []
+
+
+async def test_pas_de_relance_dans_un_blanc_entre_deux_phrases():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 20)
+    c = _client(t, p, parole=[], reveil_au=None, horloge=h, relance_s=10)
+    await _jouer(c, id_enonce=1, blocs=50)
+    h.avancer(2.0)  # la phrase suivante tarde : le son s'est tu, mais le Core n'a pas fini
+
+    await c.boucle_capture()
+
+    assert t.types() == [], "une relance ici couperait Atlas au milieu de sa réponse"
+
+
+async def test_une_relance_de_zero_seconde_la_desactive():
+    h = FausseHorloge()
+    t, p = FauxTransport(), FauxPeripherique([BLOC] * 20)
+    c = _client(t, p, parole=[], reveil_au=None, horloge=h, relance_s=0)
+    await _reponse_jouee(c, h)
+
+    await c.boucle_capture()
+
+    assert t.types() == []
+
+
+def test_lire_reglages_relance_accepte_les_bornes(monkeypatch):
+    monkeypatch.setenv("ATLAS_RELANCE_S", "0")
+    assert lire_reglages().relance_s == 0.0
+
+    monkeypatch.setenv("ATLAS_RELANCE_S", "60")
+    assert lire_reglages().relance_s == 60.0
+
+
+@pytest.mark.parametrize("brute", ["pas-un-nombre", "nan", "-1", "61"])
+def test_lire_reglages_relance_invalide_leve(monkeypatch, brute):
+    monkeypatch.setenv("ATLAS_RELANCE_S", brute)
+    with pytest.raises(ValueError, match="ATLAS_RELANCE_S"):
         lire_reglages()
