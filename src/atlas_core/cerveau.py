@@ -1,7 +1,8 @@
-"""Le cerveau de la phase 1 : des réponses figées.
+"""L'interface du cerveau, et le cerveau de la phase 1 : des réponses figées.
 
-Claude arrive en phase 2. Ce bouchon existe pour valider la chaîne audio seule —
-si la voix ne marche pas, on veut le savoir sans avoir à déboguer un LLM en même temps.
+Claude est branché en phase 2 (`cerveau_claude.py`). Le bouchon reste : il valide la
+chaîne audio seule — si la voix ne marche pas, on veut le savoir sans avoir à déboguer
+un LLM en même temps — et fait tourner Atlas sans Claude (`ATLAS_CERVEAU=bouchon`).
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Protocol
 
 _UNITES = {
@@ -71,9 +73,28 @@ def _heure_actuelle() -> tuple[int, int]:
     return maintenant.hour, maintenant.minute
 
 
+@dataclass(frozen=True)
+class Recherche:
+    """Dans le flux d'une réponse : le cerveau commence une recherche sur le web."""
+
+
+RECHERCHE = Recherche()
+
+
+class ErreurCerveau(Exception):
+    """Le cerveau n'a pas pu répondre. Le message est en français, prêt à être dit."""
+
+
 class Cerveau(Protocol):
-    def repondre(self, texte: str) -> AsyncIterator[str]:
-        """Rend la réponse en fragments, au fil de l'eau."""
+    def repondre(self, texte: str) -> AsyncIterator[str | Recherche]:
+        """Rend la réponse en fragments de texte, au fil de l'eau, et signale une recherche
+        sur le web par `RECHERCHE`. Lève `ErreurCerveau` si la réponse est impossible.
+
+        Fermer le flux avant la fin (`aclose`) abandonne la réponse."""
+        ...
+
+    async def fermer(self) -> None:
+        """Arrêt du Core : le cerveau libère ce qu'il tient."""
         ...
 
 
@@ -96,3 +117,6 @@ class CerveauBouchon:
         for mot in phrase.split(" "):
             yield mot + " "
             await asyncio.sleep(0)
+
+    async def fermer(self) -> None:
+        """Rien à libérer."""
