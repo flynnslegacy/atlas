@@ -163,6 +163,37 @@ class CerveauAttend:
             await asyncio.sleep(0)
 
 
+class CollecteurQuiCede(Collecteur):
+    """Comme un vrai envoi WebSocket : chaque envoi rend la main à la boucle événementielle,
+    pour que deux appels concurrents (`asyncio.gather`) s'entrelacent vraiment, au lieu de
+    s'exécuter chacun d'un bloc entre deux points de reprise."""
+
+    async def envoyer_json(self, msg) -> None:
+        self.json.append(msg)
+        await asyncio.sleep(0)
+
+    async def envoyer_binaire(self, trame: bytes) -> None:
+        self.binaire.append(trame)
+        await asyncio.sleep(0)
+
+
+class CollecteurRetenu(Collecteur):
+    """Retient le 3ᵉ envoi binaire jusqu'à ce que le test le libère : la tâche reste
+    suspendue *dans* l'envoi d'une trame, comme un vrai `taire()` reçu en pleine écriture
+    WebSocket, plutôt qu'entre deux trames."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.en_envoi = asyncio.Event()
+        self.reprendre = asyncio.Event()
+
+    async def envoyer_binaire(self, trame: bytes) -> None:
+        self.binaire.append(trame)
+        if len(self.binaire) == 3:
+            self.en_envoi.set()
+            await self.reprendre.wait()
+
+
 def _session(collecteur, diffuseur=None, **options) -> Session:
     return Session(
         envoyer_json=collecteur.envoyer_json,
@@ -360,7 +391,9 @@ async def test_une_erreur_sans_message_donne_au_moins_son_type():
 
 
 async def test_deux_questions_tapees_en_meme_temps_ne_laissent_qu_une_reponse():
-    c, d = Collecteur(), DiffuseurEspion()
+    # Un collecteur dont les envois rendent la main (comme un vrai WebSocket) : sans le
+    # verrou, `gather` entrelace vraiment les deux `sur_saisie` et laisse deux réponses.
+    c, d = CollecteurQuiCede(), DiffuseurEspion()
     s = _session(c, d, avec_voix=lambda: False)
     await asyncio.gather(s.sur_saisie("quelle heure est-il"), s.sur_saisie("il fait quel temps"))
     await asyncio.sleep(0.02)
@@ -372,7 +405,9 @@ async def test_deux_questions_tapees_en_meme_temps_ne_laissent_qu_une_reponse():
 
 
 async def test_une_question_tapee_et_un_reveil_simultanes_restent_coherents():
-    c, d = Collecteur(), DiffuseurEspion()
+    # Idem : un collecteur qui rend la main pour que le Reveil s'entrelace vraiment
+    # avec la saisie, au lieu de s'exécuter après elle sans jamais céder la main.
+    c, d = CollecteurQuiCede(), DiffuseurEspion()
     s = _session(c, d, avec_voix=lambda: False)
     await asyncio.gather(
         s.sur_saisie("quelle heure est-il"),
@@ -464,21 +499,74 @@ async def test_la_reflexion_dure_jusqu_a_la_premiere_phrase():
 
 
 async def test_taire_pendant_l_envoi_ne_programme_plus_de_niveau():
+    # Un collecteur qui retient la 3e trame : la tâche est suspendue *dans* l'envoi
+    # quand `taire()` coupe la voix, pour prouver que rien n'est programmé après.
     voix = {"active": True}
-    c, d = Collecteur(), DiffuseurEspion()
+    c, d = CollecteurRetenu(), DiffuseurEspion()
     plan = FauxPlanificateur()
     s = _session(
         c,
         d,
         avec_voix=lambda: voix["active"],
         planifier=plan,
-        synthese=FausseSynthese(blocs=20, lenteur=0.005),
+        synthese=FausseSynthese(blocs=20),
     )
     await s.sur_saisie("quelle heure est-il")
-    await asyncio.sleep(0.03)
+    await c.en_envoi.wait()
     nombre_avant = len(plan.prevues)
     voix["active"] = False
     await s.taire()
-    await asyncio.sleep(0.2)
+    c.reprendre.set()
+    await asyncio.sleep(0.05)
     await s.fermer()
-    assert len(plan.prevues) <= nombre_avant + 1
+    assert len(plan.prevues) == nombre_avant
+
+
+# --- fix round 2 : en_lecture() gardée, _ecrit_en_cours, taire() en fin de lecture ----
+
+
+async def test_une_question_tapee_pendant_la_fin_de_la_lecture_coupe_la_voix():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    # Le client a déjà tout reçu (la machine est au repos)...
+    assert c.etats()[-1] == "repos"
+    # ...mais la lecture, elle, n'est pas finie : `plan` ne l'a pas simulée.
+    await s.sur_saisie("bonjour")
+    assert c.de(StopAudio), "la lecture n'est pas finie côté client : il faut couper le son"
+    await s.fermer()
+
+
+async def test_une_question_tapee_annulee_avant_de_commencer_ne_trompe_pas_fermer():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, synthese=FausseSynthese(blocs=20, lenteur=0.005))
+    # Dans le même tour de boucle : la question tapée n'a pas encore fait son premier pas
+    # quand le Reveil l'annule. Sans le correctif, `_ecrit_en_cours` reste vrai alors
+    # qu'aucune tâche n'a jamais rien écrit (son `finally` n'a jamais tourné).
+    await asyncio.gather(
+        s.sur_saisie("quelle heure est-il"),
+        s.sur_message(Reveil(confiance=0.9, horodatage=0.0)),
+    )
+    # Un vrai tour à la voix, ensuite : sans le correctif, `fermer()` croit qu'une
+    # réponse tapée est en cours et ne l'annule pas.
+    for _ in range(5):
+        await s.sur_audio(b"\x00" * 640)
+    await s.sur_message(FinEnonce(duree_ms=100))
+    await asyncio.sleep(0.01)  # le tour a démarré, sans avoir eu le temps de finir
+    await s.fermer()
+    await asyncio.sleep(0.1)
+    assert not d.de(Latences)
+
+
+async def test_taire_pendant_la_fin_de_la_lecture_coupe_la_voix_et_remet_les_pages_au_repos():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    assert c.etats()[-1] == "repos"
+    assert d.de(Etat)[-1].valeur == "parole"  # les pages n'ont pas encore vu le repos
+    await s.taire()
+    assert c.de(StopAudio), "la voix doit être coupée même si la machine est au repos"
+    assert d.de(Etat)[-1].valeur == "repos"
+    await s.fermer()

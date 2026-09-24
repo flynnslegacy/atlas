@@ -104,6 +104,19 @@ def test_apres_lecture_programme_a_la_fin_de_la_lecture_puis_annule():
     assert plan.prevues[-1].annulee
 
 
+def test_en_lecture_reflete_la_lecture_en_cours():
+    horloge = [0.0]
+    calendrier, plan = _calendrier(horloge)
+    assert calendrier.en_lecture() is False
+    calendrier.ajouter(_pcm(3000))  # 0.02 s de lecture programmée (320 échantillons à 16 kHz)
+    assert calendrier.en_lecture() is True
+    horloge[0] = 0.02
+    assert calendrier.en_lecture() is False
+    calendrier.ajouter(_pcm(3000))
+    calendrier.annuler()
+    assert calendrier.en_lecture() is False
+
+
 async def test_par_defaut_le_niveau_est_publie_par_la_boucle():
     recus: list[float] = []
     calendrier = CalendrierNiveaux(recus.append, horloge=time.monotonic)

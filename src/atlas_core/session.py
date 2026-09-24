@@ -135,8 +135,16 @@ class Session:
     async def taire(self) -> None:
         """Le mode muet vient d'être activé : la voix se tait, le texte continue."""
         async with self._verrou:
-            if self._machine.valeur == "parole":
+            # La machine peut déjà être au repos alors que la lecture, elle, ne l'est
+            # pas (la synthèse va plus vite que la lecture) : « activer le muet pendant
+            # qu'Atlas parle » couvre aussi cette fin de lecture différée pour les pages.
+            if self._machine.valeur == "parole" or self._niveaux.en_lecture():
                 await self._couper_la_voix()
+                if self._machine.valeur == "repos" and self._etat_pages != "repos":
+                    # `_couper_la_voix` vient d'annuler le repos différé des pages (via
+                    # `niveaux.annuler()`) : sans ceci, elles resteraient bloquées en
+                    # « parole » pour toujours, plus rien ne devant jamais le publier.
+                    self._publier_etat("repos")
 
     async def fermer(self) -> None:
         async with self._verrou:
@@ -198,6 +206,11 @@ class Session:
             tache.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await tache
+            # Une tâche annulée n'écrit plus rien — même si elle a été coupée avant son
+            # premier pas, auquel cas son propre `finally` n'a jamais tourné pour
+            # remettre ce drapeau à faux (sinon `fermer()` croit à tort qu'une réponse
+            # tapée est encore en cours pour un tour ultérieur, et ne l'annule pas).
+            self._ecrit_en_cours = False
         # Une autre entrée a pu créer une nouvelle tâche pendant qu'on attendait
         # celle-ci : ne pas l'écraser.
         if self._tache is tache:
@@ -208,23 +221,31 @@ class Session:
     async def _au_client(self, msg: MessageCore) -> None:
         try:
             await self._envoyer_json(msg)
-        except Exception:  # noqa: BLE001 — client audio parti : la suite continue par écrit
-            self._oublier_client()
+        except Exception as e:  # noqa: BLE001 — client audio parti : la suite continue par écrit
+            self._oublier_client(e)
 
     async def _audio_au_client(self, trame: bytes) -> None:
         try:
             await self._envoyer_binaire(trame)
-        except Exception:  # noqa: BLE001 — idem
-            self._oublier_client()
+        except Exception as e:  # noqa: BLE001 — idem
+            self._oublier_client(e)
 
-    def _oublier_client(self) -> None:
+    def _oublier_client(self, e: Exception | None = None) -> None:
         """Le client audio est injoignable (parti, ou jamais connecté) : la suite de la
         réponse continue par écrit, pour les pages seulement."""
         self._envoyer_json = sans_destinataire
         self._envoyer_binaire = sans_destinataire
         self._avec_voix = lambda: False
         self._niveaux.annuler()
-        _journal.info("client audio injoignable : la réponse continue par écrit")
+        # Le type de l'exception, pour qu'un bogue de sérialisation ne passe pas pour un
+        # départ du client (auquel cas `e` est `None` : fermeture normale de la session).
+        if e is not None:
+            _journal.info(
+                "client audio injoignable (%s) : la réponse continue par écrit",
+                type(e).__name__,
+            )
+        else:
+            _journal.info("client audio parti : la réponse continue par écrit")
 
     async def _couper_la_voix(self) -> None:
         """`StopAudio` au client, et les niveaux programmés annulés : la voix d'Atlas
@@ -320,6 +341,9 @@ class Session:
         # Aux pages d'abord : un client audio injoignable ne doit pas leur masquer l'erreur.
         self._diffuseur.publier(erreur)
         await self._au_client(erreur)
+        # Aucun niveau programmé ne doit plus arriver aux pages après le repos, sur le
+        # chemin d'erreur : rien ne l'annulerait sinon (pas de tour normal pour le faire).
+        self._niveaux.annuler()
         if self._machine.peut_aller_vers("repos"):
             self._machine.aller_vers("repos")
             await self._etat("repos")
