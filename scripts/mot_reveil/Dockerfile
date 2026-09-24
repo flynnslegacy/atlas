@@ -12,8 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 1. openWakeWord figé au commit vérifié, avec sa pile d'entraînement.
+# train.py y déclare ses options booléennes avec default="False" : une chaîne, donc vraie.
+# --convert_to_tflite, testé par sa seule vérité, se déclenchait toujours, et TensorFlow 2.8.1
+# plantait (conflit protobuf 3.9.2 / 3.20.3) juste après l'export ONNX, le seul format utile.
+# La construction échoue si le motif subsiste.
 RUN git clone https://github.com/dscripka/openWakeWord /opt/openWakeWord \
-    && git -C /opt/openWakeWord checkout 368c037
+    && git -C /opt/openWakeWord checkout 368c037 \
+    && sed -i 's/default="False",/default=False,/' /opt/openWakeWord/openwakeword/train.py \
+    && ! grep -q 'default="False"' /opt/openWakeWord/openwakeword/train.py
 RUN pip install --no-cache-dir torch==1.13.1+cu117 torchaudio==0.13.1+cu117 \
         --extra-index-url https://download.pytorch.org/whl/cu117 \
     && pip install --no-cache-dir -e "/opt/openWakeWord[full]" \

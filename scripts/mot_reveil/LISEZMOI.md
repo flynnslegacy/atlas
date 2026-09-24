@@ -238,7 +238,10 @@ docker run --rm -it --network host $TRAVAIL atlas-mot-reveil \
 ## 8. Essai à blanc
 
 Vérifie que toute la chaîne tourne avant de lancer plusieurs heures
-d'entraînement pour de vrai (300 extraits, 500 pas) :
+d'entraînement pour de vrai (300 extraits, 500 pas).
+L'enrichissement des extraits tourne sur le processeur : sur une carte RTX 40xx,
+la FFT de CUDA 11.7 qu'embarque torch 1.13 plante sur le GPU. L'entraînement,
+lui, reste sur le GPU.
 
 ```bash
 GPU="--runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=all"
