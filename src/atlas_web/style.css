@@ -1,0 +1,394 @@
+/* Atlas — disposition « cinéma » : le fond, l'orbe, les sous-titres et la saisie. */
+
+:root {
+  color-scheme: dark;
+  --texte: #e6e9f2;
+  --texte-doux: #8b93a7;
+  --erreur: #f87171;
+  --accent: #fbbf24;
+  --verre: rgba(10, 13, 24, 0.72);
+  --verre-fort: rgba(8, 10, 18, 0.94);
+  --bord: rgba(255, 255, 255, 0.12);
+  --marge: max(16px, env(safe-area-inset-left));
+}
+
+[hidden] {
+  display: none !important;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #02030a;
+  color: var(--texte);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Les deux calques : le fond peint tout l'écran, l'orbe transparente flotte devant. */
+#fond {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#orbe {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  width: min(62vh, 92vw);
+  height: min(62vh, 92vw);
+  transform: translate(-50%, -50%);
+  display: block;
+  pointer-events: none;
+}
+
+/* La barre du haut. */
+#barre {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: max(12px, env(safe-area-inset-top)) var(--marge) 12px;
+}
+
+/* « Hors ligne — nouvelle tentative… » peut passer sur deux lignes sur un téléphone. */
+.etat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-right: auto;
+  font-size: 15px;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+}
+
+#pastille {
+  flex: none;
+}
+
+#pastille {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(90, 96, 110);
+}
+
+.icone {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  color: var(--texte-doux);
+}
+
+.icone:hover,
+.icone:focus-visible {
+  color: var(--texte);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* L'interrupteur « muet » : une case à cocher habillée. */
+.interrupteur {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--texte-doux);
+  cursor: pointer;
+  user-select: none;
+}
+
+.interrupteur input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  margin: 0;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.interrupteur input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--texte);
+  transition: transform 0.2s;
+}
+
+.interrupteur input:checked {
+  background: var(--accent);
+}
+
+.interrupteur input:checked::after {
+  transform: translateX(16px);
+}
+
+.interrupteur input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Les sous-titres, au-dessus de la saisie. */
+#sous-titres {
+  position: fixed;
+  left: 50%;
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  width: min(760px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 0.8s;
+}
+
+#sous-titres.efface {
+  opacity: 0;
+}
+
+#st-question {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--texte-doux);
+}
+
+#st-reponse {
+  margin: 0;
+  font-size: clamp(18px, 2.6vw, 24px);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8);
+}
+
+#st-reponse.erreur {
+  color: var(--erreur);
+}
+
+/* La saisie, en bas. */
+#saisie {
+  position: fixed;
+  left: 50%;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  width: min(760px, calc(100vw - 32px));
+  transform: translateX(-50%);
+}
+
+#champ {
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 24px;
+  border: 1px solid var(--bord);
+  background: var(--verre);
+  color: var(--texte);
+  font: inherit;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#champ::placeholder {
+  color: var(--texte-doux);
+}
+
+#champ:focus {
+  outline: none;
+  border-color: rgba(251, 191, 36, 0.6);
+}
+
+/* Les panneaux : historique et paramètres, par-dessus l'orbe. */
+.panneau {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  width: min(900px, 100vw);
+  max-height: 82vh;
+  transform: translateX(-50%);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--marge) max(24px, env(safe-area-inset-bottom));
+  background: var(--verre-fort);
+  border: 1px solid var(--bord);
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.panneau > header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0 8px;
+  background: var(--verre-fort);
+}
+
+.panneau h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.panneau h3 {
+  margin: 18px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--texte-doux);
+}
+
+#liste-historique {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#liste-historique li {
+  padding: 12px 0;
+  border-top: 1px solid var(--bord);
+}
+
+#liste-historique p {
+  margin: 2px 0;
+}
+
+#liste-historique .entete,
+#liste-historique .latences {
+  font-size: 12px;
+  color: var(--texte-doux);
+  font-variant-numeric: tabular-nums;
+}
+
+#liste-historique .question {
+  color: var(--texte-doux);
+}
+
+#liste-historique .erreur {
+  color: var(--erreur);
+}
+
+.galerie {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(128px, 40vw), 1fr));
+  gap: 10px;
+}
+
+.carte {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--bord);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+}
+
+.carte canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+}
+
+.galerie.fonds .carte canvas {
+  aspect-ratio: 16 / 10;
+  border-radius: 6px;
+}
+
+.carte.choisie {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.carte:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* L'écran de la clé d'accès. */
+.cle {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(2, 3, 10, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.cle form {
+  width: min(380px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid var(--bord);
+  background: var(--verre-fort);
+}
+
+.cle h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.cle p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--texte-doux);
+}
+
+.cle input {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--bord);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--texte);
+  font: inherit;
+}
+
+.cle button {
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #111;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #sous-titres,
+  .interrupteur input,
+  .interrupteur input::after {
+    transition: none;
+  }
+}

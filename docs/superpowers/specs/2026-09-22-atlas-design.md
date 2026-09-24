@@ -131,6 +131,10 @@ connaissance de cause.
 7. La réponse revient en streaming et est **découpée phrase par phrase**.
 8. Chaque phrase part à `atlas-tts` et revient en audio pendant que la suivante s'écrit.
 9. Le client joue l'audio, en gardant le VAD actif.
+10. Une fois la réponse jouée jusqu'au bout, le client rouvre l'écoute pendant
+    `ATLAS_RELANCE_S` secondes (10 par défaut) sans mot de réveil : David peut enchaîner.
+    S'il ne dit rien, le client envoie `abandon` et le Core revient au repos sans
+    transcrire. Même chose quand rien n'est dit après « Hey Atlas ».
 
 ### Interruption en pleine phrase
 
@@ -250,9 +254,11 @@ caractères, donc aucun morceau ne doit dépasser cette longueur.
 
 ### 6.5 `atlas-web` (servi par le Core)
 
-L'orbe Three.js qui réagit à la voix — amplitude d'entrée, état d'écoute, de réflexion, de
-parole — et le tableau de bord : état des workflows n8n, contenu de la mémoire, documents
-produits, historique de conversation, erreurs, latences mesurées.
+L'orbe qui réagit à la voix — amplitude d'entrée, état d'écoute, de réflexion, de parole —,
+dessinée en Canvas 2D, sans Three.js : 12 orbes et 6 fonds animés au choix, avec la
+conversation en sous-titres et une saisie au clavier (voir
+`2026-09-24-interface-orbe-design.md`). Puis le tableau de bord : état des workflows n8n,
+contenu de la mémoire, documents produits, erreurs.
 
 ### 6.6 Protocole entre le client audio et le Core
 
@@ -268,6 +274,7 @@ Client vers Core :
 | *(binaire)* | trames PCM pendant la capture |
 | `utterance_end` | `{duration_ms}` |
 | `barge_in` | `{ts}` — David a repris la parole pendant la lecture |
+| `abandon` | `{}` — l'écoute s'est close sans parole : rien à transcrire |
 | `confirm_response` | `{request_id, accepted: bool}` |
 
 Core vers client :
@@ -280,6 +287,10 @@ Core vers client :
 | `stop_audio` | `{utterance_id}` — vidage immédiat de la file |
 | `confirm` | `{request_id, action_fr, level, timeout_s}` |
 | `error` | `{code, message_fr}` |
+
+La page web ouvre une seconde connexion, `/ws/web`, réservée à l'affichage et à la saisie :
+clé d'accès dans le premier message, origine vérifiée, messages décrits au §4.4 de
+`2026-09-24-interface-orbe-design.md`.
 
 ---
 
@@ -474,7 +485,8 @@ point quotidien, déclenchement vocal, diagnostic.
 *Critère de réussite :* un workflow n8n qui échoue déclenche une alerte vocale exacte, et
 un workflow se déclenche à la voix.
 
-**Phase 4 — Présence et accès.** Orbe et tableau de bord, Hermes en porte mobile.
+**Phase 4 — Présence et accès.** Tableau de bord, Hermes en porte mobile. L'orbe et la
+conversation ont été avancées (`2026-09-24-interface-orbe-design.md`).
 *Critère de réussite :* David parle à Atlas depuis Telegram hors de chez lui, et le
 tableau de bord montre l'état réel du système.
 
@@ -520,7 +532,7 @@ Atlas/
   src/
     atlas_audio/      client M5 : Python + binaire Swift pour l'AEC
     atlas_core/       Core : hub, Brain, routeur, mémoire, permissions, MCP
-    atlas_web/        front : orbe Three.js + tableau de bord
+    atlas_web/        front : orbe Canvas 2D, conversation, puis tableau de bord
   tools/               un fichier par outil, découverte automatique
   services/
     stt/               Dockerfile + service faster-whisper

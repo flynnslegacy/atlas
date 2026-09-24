@@ -2,13 +2,17 @@
 -include .env
 export
 
-.PHONY: install test test-swift lint format bench run-core run-audio
+.PHONY: install test test-web test-swift lint format bench run-core run-audio
 
 install:
 	uv sync --extra core --extra audio --extra dev
 
 test:
 	uv run pytest -v
+	node --test "tests/web/*.test.mjs"
+
+test-web:
+	node --test "tests/web/*.test.mjs"
 
 test-swift:
 	swiftc -sanitize=thread src/atlas_aec/Sources/atlas-aec/Tampons.swift tests/aec/tampons/main.swift -o "$$TMPDIR/harnais" && "$$TMPDIR/harnais"

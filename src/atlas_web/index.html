@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#02030a">
+  <title>Atlas</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <canvas id="fond" aria-hidden="true"></canvas>
+  <canvas id="orbe" aria-hidden="true"></canvas>
+
+  <header id="barre">
+    <div class="etat" role="status">
+      <span id="pastille"></span>
+      <span id="libelle-etat">Connexion…</span>
+    </div>
+    <label class="interrupteur">
+      <input type="checkbox" id="muet">
+      <span>Muet</span>
+    </label>
+    <button type="button" class="icone" id="ouvrir-historique" aria-label="Historique">☰</button>
+    <button type="button" class="icone" id="ouvrir-parametres" aria-label="Paramètres">⚙</button>
+  </header>
+
+  <section id="sous-titres" aria-live="polite">
+    <p id="st-question"></p>
+    <p id="st-reponse"></p>
+  </section>
+
+  <form id="saisie" autocomplete="off">
+    <input id="champ" type="text" maxlength="1000" enterkeyhint="send"
+           placeholder="Écrire à Atlas…" aria-label="Question pour Atlas">
+  </form>
+
+  <section id="panneau-historique" class="panneau" aria-label="Historique" hidden>
+    <header>
+      <h2>Historique</h2>
+      <button type="button" class="icone fermer" aria-label="Fermer">✕</button>
+    </header>
+    <ol id="liste-historique"></ol>
+  </section>
+
+  <section id="panneau-parametres" class="panneau" aria-label="Paramètres" hidden>
+    <header>
+      <h2>Paramètres</h2>
+      <button type="button" class="icone fermer" aria-label="Fermer">✕</button>
+    </header>
+    <h3>Orbe</h3>
+    <div id="galerie-orbes" class="galerie"></div>
+    <h3>Fond</h3>
+    <div id="galerie-fonds" class="galerie fonds"></div>
+  </section>
+
+  <section id="panneau-cle" class="cle" hidden>
+    <form id="formulaire-cle">
+      <h2>Clé d'accès</h2>
+      <p id="message-cle"></p>
+      <input id="champ-cle" type="password" autocomplete="off" aria-label="Clé d'accès">
+      <button type="submit">Valider</button>
+    </form>
+  </section>
+</body>
+</html>

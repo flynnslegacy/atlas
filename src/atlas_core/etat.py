@@ -7,7 +7,7 @@ from typing import Literal
 Valeur = Literal["repos", "ecoute", "reflexion", "parole"]
 
 _PERMISES: dict[Valeur, set[Valeur]] = {
-    "repos": {"ecoute"},
+    "repos": {"ecoute", "reflexion"},  # « reflexion » : une question tapée, sans écoute
     "ecoute": {"reflexion", "repos"},
     "reflexion": {"parole", "repos"},
     "parole": {"repos", "ecoute"},  # « ecoute » est le chemin de l'interruption
