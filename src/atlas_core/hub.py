@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+from claude_agent_sdk import ClaudeSDKClient
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from .cerveau import CerveauBouchon
+from .cerveau import Cerveau, CerveauBouchon
+from .cerveau_claude import CerveauClaude, options_cerveau, purger_cles_api
 from .config import Config
 from .diffuseur import Diffuseur
-from .protocole import Erreur, decoder_audio_entrant, decoder_message
+from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_web import Authentification, Muet, Saisie, decoder_message_page
 from .regie import Regie
 from .session import Session, sans_destinataire
@@ -25,21 +28,42 @@ from .web import cle_valide, origine_autorisee, politique_securite
 _journal = logging.getLogger(__name__)
 _config = Config.depuis_environnement()
 _http: httpx.AsyncClient | None = None
+_cerveau: Cerveau | None = None
 
 RACINE_WEB = Path(__file__).resolve().parent.parent / "atlas_web"
+# Le dossier de travail de Claude : vide, à lui seul, hors de tout projet.
+DOSSIER_CERVEAU = Path.home() / ".atlas" / "cerveau"
 DELAI_AUTHENTIFICATION_S = 5.0
 FERMETURE_CLE_ABSENTE = 4000
 FERMETURE_NON_AUTORISE = 4401
 FERMETURE_ORIGINE = 1008  # « policy violation », avant même d'accepter la connexion
 
 
+def creer_cerveau(config: Config) -> Cerveau:
+    """Le cerveau unique du Core, partagé par la voix et le clavier."""
+    if config.cerveau == "bouchon":
+        return CerveauBouchon()
+    retirees = purger_cles_api(os.environ)
+    if retirees:
+        _journal.warning("retiré de l'environnement, pour Claude : %s", ", ".join(retirees))
+
+    def fabrique() -> ClaudeSDKClient:
+        DOSSIER_CERVEAU.mkdir(parents=True, exist_ok=True)
+        return ClaudeSDKClient(options=options_cerveau(config.cerveau_modele, DOSSIER_CERVEAU))
+
+    return CerveauClaude(fabrique, oubli_s=config.cerveau_oubli_min * 60)
+
+
 @asynccontextmanager
 async def _cycle_de_vie(app: FastAPI):
-    global _http
+    global _http, _cerveau
     _http = httpx.AsyncClient()
+    _cerveau = creer_cerveau(_config)
     try:
         yield
     finally:
+        await _cerveau.fermer()
+        _cerveau = None
         await _http.aclose()
         _http = None
 
@@ -48,11 +72,11 @@ app = FastAPI(title="atlas-core", lifespan=_cycle_de_vie)
 
 
 def _services() -> dict:
-    assert _http is not None, "le cycle de vie de l'application n'a pas démarré"
+    assert _http is not None and _cerveau is not None, "le cycle de vie n'a pas démarré"
     return {
         "transcription": ClientTranscription(_config.stt_url, _http),
         "synthese": ClientSynthese(_config.tts_url, _config.tts_voix, _http),
-        "cerveau": CerveauBouchon(),
+        "cerveau": _cerveau,
     }
 
 
@@ -100,11 +124,25 @@ async def sante() -> dict:
 @app.websocket("/ws/audio")
 async def ws_audio(ws: WebSocket) -> None:
     if ws.headers.get("origin") is not None:
-        # un navigateur envoie toujours un en-tête Origin ; le client audio du Mac n'en
-        # envoie jamais ; la clé de /ws/audio reste prévue avant la phase 2.
+        # Un navigateur envoie toujours un en-tête Origin ; le client audio du Mac n'en
+        # envoie jamais.
         await ws.close(code=FERMETURE_ORIGINE)
         return
     await ws.accept()
+    if not _config.audio_cle:
+        message = (
+            "La clé du client audio n'est pas configurée : ajoute ATLAS_AUDIO_CLE dans le .env "
+            "du Core, puis redémarre-le."
+        )
+        await ws.send_text(Erreur(code="cle_absente", message=message).model_dump_json())
+        await ws.close(code=FERMETURE_CLE_ABSENTE)
+        return
+    authentifie = await _client_audio_authentifie(ws)
+    if authentifie is None:
+        return  # le client est déjà parti
+    if not authentifie:
+        await ws.close(code=FERMETURE_NON_AUTORISE)
+        return
 
     async def envoyer_json(msg) -> None:
         await ws.send_text(msg.model_dump_json())
@@ -137,13 +175,29 @@ async def ws_audio(ws: WebSocket) -> None:
 
 
 async def _recevoir_texte(ws: WebSocket) -> str | None:
-    """Le prochain message texte de la page, ou None si elle s'est déconnectée."""
+    """Le prochain message texte, ou None si l'autre bout s'est déconnecté."""
     while True:
         recu = await ws.receive()
         if recu["type"] == "websocket.disconnect":
             return None
         if (texte := recu.get("text")) is not None:
             return texte
+
+
+async def _client_audio_authentifie(ws: WebSocket) -> bool | None:
+    """Vrai si le premier message est un `Bonjour` portant la bonne clé, reçu à temps ;
+    None si le client est parti avant."""
+    try:
+        premier = await asyncio.wait_for(_recevoir_texte(ws), DELAI_AUTHENTIFICATION_S)
+    except TimeoutError:
+        return False
+    if premier is None:
+        return None
+    try:
+        bonjour = decoder_message(premier)
+    except ValueError:
+        return False
+    return isinstance(bonjour, Bonjour) and cle_valide(bonjour.cle, _config.audio_cle)
 
 
 @app.websocket("/ws/web")

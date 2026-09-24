@@ -6,6 +6,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from atlas_core import hub
 from atlas_core.diffuseur import Diffuseur
+from atlas_core.protocole import Bonjour
 
 ORIGINE = {"origin": "http://testserver"}
 CLE = "cle-de-test"
@@ -152,7 +153,11 @@ class SessionAudioEspionne:
 def test_le_client_audio_est_rattache_puis_detache_de_la_regie(monkeypatch):
     fake = SessionAudioEspionne(None, None)
     monkeypatch.setattr(hub, "creer_session", lambda envoyer_json, envoyer_binaire: fake)
+    monkeypatch.setattr(hub, "_config", replace(hub._config, audio_cle="cle-audio"))
     with TestClient(hub.app) as client, client.websocket_connect("/ws/audio") as ws:
+        ws.send_text(Bonjour(client="test", cle="cle-audio").model_dump_json())
+        ws.send_text('{"type":"nimporte_quoi"}')
+        assert ws.receive_json()["code"] == "message_invalide"  # la boucle est atteinte
         assert hub._regie._session_audio is fake
         ws.close()
     assert hub._regie._session_audio is None

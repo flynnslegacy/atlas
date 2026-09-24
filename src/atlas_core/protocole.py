@@ -23,10 +23,14 @@ _TYPE_AUDIO_SORTANT = 0x02
 
 
 class Bonjour(BaseModel):
+    """Le premier message du client audio : il porte `ATLAS_AUDIO_CLE`, sans laquelle le
+    Core ferme la connexion."""
+
     type: Literal["bonjour"] = "bonjour"
     client: str
     frequence: int = FREQUENCE_HZ
     capacites: list[str] = Field(default_factory=list)
+    cle: str = ""
 
 
 class Reveil(BaseModel):
