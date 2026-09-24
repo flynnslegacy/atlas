@@ -73,6 +73,35 @@ def test_une_erreur_s_attache_a_l_echange_en_cours_ou_en_cree_un():
     assert second.question == "" and second.erreur.endswith("TimeoutError")
 
 
+def test_a_une_erreur_apres_l_ecoute_ne_touche_pas_l_echange_termine():
+    d = _diffuseur()
+    d.publier(Question(texte="quelle heure est-il", source="voix"))
+    d.publier(Reponse(texte="Il est midi."))
+    d.publier(Latences(transcription_ms=420, reflexion_ms=12, premiere_voix_ms=900))
+    d.publier(Etat(valeur="repos"))
+    d.publier(Etat(valeur="ecoute"))
+    d.publier(Etat(valeur="reflexion"))
+    d.publier(Erreur(code="tour", message="Je n'ai pas pu répondre : ConnectError"))
+    premier, second = d.historique().echanges
+    assert premier.question == "quelle heure est-il"
+    assert premier.reponse == "Il est midi." and premier.erreur is None
+    assert second.question == "" and second.erreur.endswith("ConnectError")
+
+
+def test_b_une_coupure_pendant_la_reponse_n_empeche_pas_une_nouvelle_erreur():
+    d = _diffuseur()
+    d.publier(Question(texte="quelle heure est-il", source="voix"))
+    d.publier(Etat(valeur="parole"))
+    d.publier(Reponse(texte="Il est"))
+    d.publier(Etat(valeur="ecoute"))  # coupure : l'échange n'est plus en cours
+    d.publier(Etat(valeur="reflexion"))
+    d.publier(Erreur(code="tour", message="Je n'ai pas pu répondre : ConnectError"))
+    premier, second = d.historique().echanges
+    assert premier.question == "quelle heure est-il"
+    assert premier.reponse == "Il est" and premier.erreur is None
+    assert second.question == "" and second.erreur.endswith("ConnectError")
+
+
 def test_l_historique_est_limite():
     d = Diffuseur(taille_historique=3, heure=lambda: "09:00")
     for i in range(5):

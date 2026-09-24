@@ -10,8 +10,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
-from .protocole import Erreur, Etat
-
 LONGUEUR_MAX_SAISIE = 1000
 TAILLE_MAX_CLE = 256
 
@@ -63,9 +61,6 @@ class Echange(BaseModel):
 class Historique(BaseModel):
     type: Literal["historique"] = "historique"
     echanges: list[Echange]
-
-
-MessageWeb = Etat | Niveau | Question | Reponse | Erreur | Latences | Muet | Historique
 
 
 # --- page vers Core -----------------------------------------------------

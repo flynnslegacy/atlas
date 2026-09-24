@@ -88,6 +88,7 @@ class Session:
         self._premiere_voix_ms: int | None = None
         self._ecrit_en_cours = False
         self._etat_pages: Valeur = "repos"  # le dernier état publié aux pages
+        self._voix_coupee = False  # le muet, posé jusqu'à la fin du tour même si redésactivé
 
     # --- entrées ---------------------------------------------------------
 
@@ -139,6 +140,9 @@ class Session:
             # pas (la synthèse va plus vite que la lecture) : « activer le muet pendant
             # qu'Atlas parle » couvre aussi cette fin de lecture différée pour les pages.
             if self._machine.valeur == "parole" or self._niveaux.en_lecture():
+                # Jusqu'à la fin du tour, même si le muet est redésactivé entre-temps :
+                # sinon la synthèse reprendrait à la phrase suivante pour personne.
+                self._voix_coupee = True
                 await self._couper_la_voix()
                 if self._machine.valeur == "repos" and self._etat_pages != "repos":
                     # `_couper_la_voix` vient d'annuler le repos différé des pages (via
@@ -284,6 +288,7 @@ class Session:
             self._ecrit_en_cours = False
 
     async def _repondre(self, texte: str, source: Source, transcription_ms: int | None) -> None:
+        self._voix_coupee = False
         self._diffuseur.publier(Question(texte=texte, source=source))
         self._premiere_voix_ms = None
         reflexion_ms: int | None = None
@@ -350,13 +355,13 @@ class Session:
 
     async def _dire(self, identifiant: int, rang: int, phrase: str) -> None:
         self._diffuseur.publier(Reponse(texte=phrase))
-        if not self._avec_voix():
+        if not self._avec_voix() or self._voix_coupee:
             return
         await self._au_client(Dire(id_enonce=identifiant, rang=rang, texte=phrase))
         n = 0
         async with contextlib.aclosing(self._synthese.synthetiser(phrase)) as blocs:
             async for bloc in blocs:
-                if not self._avec_voix():
+                if not self._avec_voix() or self._voix_coupee:
                     return  # muet activé en pleine phrase : taire() a déjà coupé le son
                 n += 1
                 if self._premiere_voix_ms is None:

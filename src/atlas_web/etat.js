@@ -30,6 +30,7 @@ export function creerEtat() {
     erreur: "",
     historique: [],
     muet: false,
+    enCours: false,
   };
 }
 
@@ -51,6 +52,15 @@ export function appliquerMessage(e, message, maintenantMs) {
   const dernier = e.historique[e.historique.length - 1];
   switch (message.type) {
     case "etat":
+      // Des sous-titres déjà effacés (10 s de repos) ne doivent pas réapparaître avec
+      // l'ancien échange au réveil suivant : on les vide avant de changer d'état.
+      if (!sousTitresVisibles(e, maintenantMs)) {
+        e.question = "";
+        e.reponse = "";
+        e.erreur = "";
+      }
+      // Un échange en cours se termine dès que la page retourne à « repos » ou « ecoute ».
+      if (message.valeur === "repos" || message.valeur === "ecoute") e.enCours = false;
       e.etat = message.valeur;
       e.reposDepuis = message.valeur === "repos" ? maintenantMs : null;
       if (message.valeur === "repos" || message.valeur === "reflexion") e.volumeCible = 0;
@@ -62,6 +72,7 @@ export function appliquerMessage(e, message, maintenantMs) {
       e.question = message.texte;
       e.reponse = "";
       e.erreur = "";
+      e.enCours = true;
       ajouterEchange(e, {
         heure: heureDe(maintenantMs),
         source: message.source,
@@ -78,8 +89,9 @@ export function appliquerMessage(e, message, maintenantMs) {
     case "erreur":
       e.erreur = message.message;
       if (e.etat === "repos") e.reposDepuis = maintenantMs; // l'erreur reste 10 s à l'écran
-      if (message.code === "cle_absente") break;
-      if (dernier && e.etat !== "repos") {
+      // Une saisie refusée n'est pas un échange : elle ne va que dans les sous-titres.
+      if (message.code === "cle_absente" || message.code === "message_invalide") break;
+      if (dernier && e.enCours) {
         dernier.erreur = message.message;
       } else {
         e.question = "";

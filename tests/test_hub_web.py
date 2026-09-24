@@ -115,6 +115,12 @@ def test_la_page_est_servie_avec_sa_politique_de_securite():
     assert r.headers["x-content-type-options"] == "nosniff"
 
 
+def test_les_fichiers_de_la_page_ne_sont_jamais_mis_en_cache_sans_revalidation():
+    with TestClient(hub.app) as client:
+        assert client.get("/").headers["cache-control"] == "no-cache"
+        assert client.get("/app.js").headers["cache-control"] == "no-cache"
+
+
 def test_la_route_de_sante_reste_disponible():
     with TestClient(hub.app) as client:
         assert client.get("/sante").json()["ok"] is True

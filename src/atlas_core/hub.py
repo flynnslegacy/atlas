@@ -86,6 +86,9 @@ async def _en_tetes_de_securite(request: Request, call_next):
     reponse.headers["Content-Security-Policy"] = politique_securite(request.headers.get("host", ""))
     reponse.headers["X-Content-Type-Options"] = "nosniff"
     reponse.headers["Referrer-Policy"] = "no-referrer"
+    # Sans ceci, l'iPad peut mélanger des modules anciens et nouveaux après une mise à
+    # jour : le navigateur revalide à chaque fois (l'ETag donne un 304 sur le réseau local).
+    reponse.headers["Cache-Control"] = "no-cache"
     return reponse
 
 

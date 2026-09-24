@@ -355,6 +355,34 @@ async def test_taire_coupe_la_voix_et_laisse_finir_le_texte():
     assert c.etats()[-1] == "repos"
 
 
+async def test_le_muet_desactive_en_pleine_reponse_ne_reprend_pas_la_voix():
+    # Le muet est activé puis désactivé pendant une réponse à la voix : sans le drapeau,
+    # la synthèse reprendrait à la phrase suivante alors que plus personne n'écoute.
+    voix = {"active": True}
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(
+        c, d, avec_voix=lambda: voix["active"], synthese=FausseSynthese(blocs=20, lenteur=0.005)
+    )
+    await s.sur_saisie("quelle heure est-il")
+    await asyncio.sleep(0.03)
+    voix["active"] = False
+    await s.taire()
+    trames = len(c.binaire)
+    dires = len(c.de(Dire))
+    voix["active"] = True  # le muet est désactivé avant la fin de la réponse
+    await asyncio.sleep(0.2)
+    await s.fermer()
+    assert len(c.binaire) == trames, "plus aucune trame pour ce tour, même voix réactivée"
+    assert len(c.de(Dire)) == dires, "plus aucun Dire pour ce tour, même voix réactivée"
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi.", "Tu déjeunes ?"]
+    # Le tour suivant a de nouveau la voix.
+    c.binaire.clear()
+    await s.sur_saisie("il fait quel temps")
+    await asyncio.sleep(0.03)
+    await s.fermer()
+    assert c.binaire, "la réponse suivante doit de nouveau être parlée"
+
+
 async def test_le_client_audio_qui_part_laisse_finir_la_reponse_ecrite():
     c, d = Collecteur(), DiffuseurEspion()
     s = _session(c, d, synthese=FausseSynthese(blocs=20, lenteur=0.005))

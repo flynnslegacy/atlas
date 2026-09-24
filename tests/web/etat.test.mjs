@@ -121,6 +121,57 @@ test("l'erreur de clé absente ne va pas dans l'historique", () => {
   assert.deepEqual(e.historique, []);
 });
 
+test("A : une erreur après l'écoute ne touche pas l'échange terminé", () => {
+  const e = creerEtat();
+  appliquerMessage(e, { type: "question", texte: "quelle heure est-il", source: "voix" }, T0);
+  appliquerMessage(e, { type: "reponse", texte: "Il est midi." }, T0);
+  appliquerMessage(
+    e,
+    { type: "latences", transcription_ms: 420, reflexion_ms: 12, premiere_voix_ms: 900 },
+    T0,
+  );
+  appliquerMessage(e, { type: "etat", valeur: "repos" }, T0);
+  appliquerMessage(e, { type: "etat", valeur: "ecoute" }, T0);
+  appliquerMessage(e, { type: "etat", valeur: "reflexion" }, T0);
+  appliquerMessage(e, { type: "erreur", code: "tour", message: "Je n'ai pas pu répondre : ConnectError" }, T0);
+  assert.equal(e.historique.length, 2);
+  const [premier, second] = e.historique;
+  assert.equal(premier.question, "quelle heure est-il");
+  assert.equal(premier.reponse, "Il est midi.");
+  assert.equal(premier.erreur, null);
+  assert.equal(second.question, "");
+  assert.equal(second.erreur, "Je n'ai pas pu répondre : ConnectError");
+});
+
+test("B : une coupure pendant la réponse n'empêche pas une nouvelle erreur", () => {
+  const e = creerEtat();
+  appliquerMessage(e, { type: "question", texte: "quelle heure est-il", source: "voix" }, T0);
+  appliquerMessage(e, { type: "etat", valeur: "parole" }, T0);
+  appliquerMessage(e, { type: "reponse", texte: "Il est" }, T0);
+  appliquerMessage(e, { type: "etat", valeur: "ecoute" }, T0); // coupure : l'échange n'est plus en cours
+  appliquerMessage(e, { type: "etat", valeur: "reflexion" }, T0);
+  appliquerMessage(e, { type: "erreur", code: "tour", message: "Je n'ai pas pu répondre : ConnectError" }, T0);
+  assert.equal(e.historique.length, 2);
+  const [premier, second] = e.historique;
+  assert.equal(premier.question, "quelle heure est-il");
+  assert.equal(premier.reponse, "Il est");
+  assert.equal(premier.erreur, null);
+  assert.equal(second.question, "");
+  assert.equal(second.erreur, "Je n'ai pas pu répondre : ConnectError");
+});
+
+test("C : une saisie refusée pendant la réponse s'affiche sans toucher l'historique", () => {
+  const e = creerEtat();
+  appliquerMessage(e, { type: "question", texte: "quelle heure est-il", source: "voix" }, T0);
+  appliquerMessage(e, { type: "etat", valeur: "parole" }, T0);
+  appliquerMessage(e, { type: "reponse", texte: "Il est midi." }, T0);
+  appliquerMessage(e, { type: "erreur", code: "message_invalide", message: "Texte invalide" }, T0);
+  assert.equal(e.historique.length, 1);
+  assert.equal(e.historique[0].erreur, null);
+  assert.equal(e.historique[0].reponse, "Il est midi.");
+  assert.equal(e.erreur, "Texte invalide");
+});
+
 test("les latences s'attachent au dernier échange, le muet est suivi", () => {
   const e = creerEtat();
   appliquerMessage(e, { type: "question", texte: "q", source: "voix" }, T0);
@@ -169,6 +220,20 @@ test("une erreur au repos reste affichée 10 s", () => {
   appliquerMessage(e, { type: "etat", valeur: "repos" }, T0);
   appliquerMessage(e, { type: "erreur", code: "tour", message: "panne" }, T0 + 60000);
   assert.equal(sousTitresVisibles(e, T0 + 65000), true);
+});
+
+test("les sous-titres effacés ne reviennent pas au réveil suivant", () => {
+  const e = creerEtat();
+  appliquerMessage(e, { type: "etat", valeur: "reflexion" }, T0);
+  appliquerMessage(e, { type: "question", texte: "Quelle heure ?", source: "voix" }, T0);
+  appliquerMessage(e, { type: "reponse", texte: "Il est midi." }, T0);
+  appliquerMessage(e, { type: "erreur", code: "tour", message: "Je n'ai pas pu répondre : panne" }, T0);
+  appliquerMessage(e, { type: "etat", valeur: "repos" }, T0);
+  // 60 s de repos, puis un réveil : les sous-titres n'étaient plus visibles avant ce message.
+  appliquerMessage(e, { type: "etat", valeur: "ecoute" }, T0 + 60000);
+  assert.equal(e.question, "");
+  assert.equal(e.reponse, "");
+  assert.equal(e.erreur, "");
 });
 
 test("la scène d'une page hors ligne est au repos, et réduite si demandé", () => {

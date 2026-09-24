@@ -175,24 +175,34 @@ document.addEventListener(
 let t = 0;
 let precedent = null;
 let idImage = null;
+let erreurDessinSignalee = false;
 
 function image(ms) {
-  const dt = precedent === null ? 0 : Math.min(0.1, (ms - precedent) / 1000);
-  precedent = ms;
-  // Hors ligne, l'orbe se fige : son temps s'arrête, seule sa couleur glisse vers le gris.
-  const pas = etat.enLigne ? dt * (reduire.matches ? 0.5 : 1) : 0;
-  t += pas;
-  avancer(etat, dt);
-  sceneCourante = sceneDe(etat, pas, reduire.matches);
-  dimensionner($("fond"));
-  dimensionner($("orbe"));
-  fond.dessiner(t, sceneCourante);
-  orbe.dessiner(t, sceneCourante);
-  $("pastille").style.backgroundColor = rgba(etat.couleur, 1);
-  const libelle = etat.enLigne ? LIBELLES[etat.etat] : (STATUTS[statut] ?? "");
-  if ($("libelle-etat").textContent !== libelle) $("libelle-etat").textContent = libelle;
-  afficherSousTitres(sousTitres, etat, Date.now());
+  // L'image suivante d'abord : une exception plus bas ne doit jamais figer la boucle
+  // (visibilitychange ne pourrait pas la relancer, idImage restant non nul).
   idImage = requestAnimationFrame(image);
+  try {
+    const dt = precedent === null ? 0 : Math.min(0.1, (ms - precedent) / 1000);
+    precedent = ms;
+    // Hors ligne, l'orbe se fige : son temps s'arrête, seule sa couleur glisse vers le gris.
+    const pas = etat.enLigne ? dt * (reduire.matches ? 0.5 : 1) : 0;
+    t += pas;
+    avancer(etat, dt);
+    sceneCourante = sceneDe(etat, pas, reduire.matches);
+    dimensionner($("fond"));
+    dimensionner($("orbe"));
+    fond.dessiner(t, sceneCourante);
+    orbe.dessiner(t, sceneCourante);
+    $("pastille").style.backgroundColor = rgba(etat.couleur, 1);
+    const libelle = etat.enLigne ? LIBELLES[etat.etat] : (STATUTS[statut] ?? "");
+    if ($("libelle-etat").textContent !== libelle) $("libelle-etat").textContent = libelle;
+    afficherSousTitres(sousTitres, etat, Date.now());
+  } catch (e) {
+    if (!erreurDessinSignalee) {
+      erreurDessinSignalee = true; // une seule ligne, pas une par image, à 60 par seconde
+      console.error("dessin interrompu :", e);
+    }
+  }
 }
 
 // Onglet caché : plus aucune image, ni de l'orbe ni du fond.

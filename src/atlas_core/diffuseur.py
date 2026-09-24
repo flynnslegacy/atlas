@@ -97,7 +97,7 @@ class Diffuseur:
     def _noter(self, msg: BaseModel) -> None:
         if isinstance(msg, Etat):
             self._dernier_etat = msg
-            if msg.valeur == "repos":
+            if msg.valeur in ("repos", "ecoute"):
                 self._en_cours = None
         elif isinstance(msg, Muet):
             self._muet = msg.actif
