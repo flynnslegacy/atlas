@@ -15,9 +15,9 @@ muet. La même page sert du téléphone au grand écran : un iPad posé sur le b
 |---|---|
 | Réaction de l'orbe | L'état affiché change dès que le Core change d'état, et le volume suit la voix entendue, sans avance visible sur la lecture |
 | Question tapée | Traitée comme une question dite : réponse à voix haute sur le Mac et par écrit, ou par écrit seulement en mode muet ou sans client audio |
-| Choix de l'orbe | 12 styles au choix dans les paramètres, mémorisés par écran ; l'aurore boréale par défaut |
+| Choix de l'orbe et du fond | 12 orbes et 6 fonds animés au choix dans les paramètres, combinables librement et mémorisés par écran ; par défaut, l'aurore boréale sur le bokeh |
 | Accès | Impossible sans la clé, et impossible depuis un autre site ouvert dans le navigateur |
-| Légèreté | Une page ouverte toute la journée sur un iPad reste fluide : une seule orbe animée hors de la galerie, et une pause quand l'onglet est caché |
+| Légèreté | Une page ouverte toute la journée sur un iPad reste fluide : une seule orbe et un seul fond animés hors de la galerie, et une pause quand l'onglet est caché |
 
 ## 2. Décisions
 
@@ -37,6 +37,9 @@ muet. La même page sert du téléphone au grand écran : un iPad posé sur le b
   Canvas 2D sans aucune bibliothèque : on garde ce choix.
 - **D9. Aucune étape de compilation, aucune dépendance.** Des modules JavaScript standard, testés avec `node --test`
   (Node 26, déjà installé sur le Mac).
+- **D10. Six fonds d'écran animés, derrière l'orbe.** Ils donnent de la profondeur et habillent l'écran. Chaque fond est
+  un calque indépendant, derrière celui de l'orbe : n'importe quelle orbe va avec n'importe quel fond. Le fond se choisit
+  dans les paramètres et se mémorise par écran, comme l'orbe. Le bokeh est le fond par défaut.
 
 ## 3. Architecture
 
@@ -62,7 +65,9 @@ muet. La même page sert du téléphone au grand écran : un iPad posé sur le b
 | `etat.js` | L'état courant, construit à partir des messages : état, volume lissé, couleur, attaques de syllabes, sous-titres, historique, muet |
 | `orbes/index.js` | Le registre des 12 orbes et le choix mémorisé (aurore par défaut) |
 | `orbes/*.js` | Une orbe par fichier (§6) |
-| `parametres.js` | La galerie des 12 orbes |
+| `fonds/index.js` | Le registre des 6 fonds et le choix mémorisé (bokeh par défaut) |
+| `fonds/*.js` | Un fond par fichier (§6.3) |
+| `parametres.js` | Les deux galeries : les 12 orbes et les 6 fonds |
 | `historique.js`, `sous_titres.js` | Les deux affichages de la conversation |
 
 ## 4. Connexion et sécurité
@@ -153,7 +158,8 @@ en espaçant ses tentatives jusqu'à 30 secondes.
 ### 6.1 L'interface commune
 
 Chaque orbe est un module qui exporte son identifiant, son nom, une phrase de présentation et une fonction
-`creer(canvas)`. Celle-ci rend un objet dont la méthode `dessiner(t, scene)` est appelée à chaque image, avec
+`creer(canvas)`. Elle dessine sur un calque **transparent** : elle efface son canevas sans le peindre, pour laisser voir le
+fond derrière elle. Celle-ci rend un objet dont la méthode `dessiner(t, scene)` est appelée à chaque image, avec
 `scene = { etat, volume, couleur, syllabe }` :
 
 - `volume` : le niveau lissé, de 0 à 1 ;
@@ -182,6 +188,21 @@ Une orbe ne touche ni au réseau ni au reste de la page. On peut donc en ajouter
 Les couleurs par état : ardoise au repos, cyan à l'écoute, violet en réflexion, or en parole. Les maquettes validées
 sont le point de départ du code.
 
+### 6.3 Les six fonds
+
+Un fond suit la même interface qu'une orbe (`creer(canvas)`, puis `dessiner(t, scene)` à chaque image, avec en plus
+`dt`, le temps écoulé depuis l'image précédente). Il peint tout son canevas, sur le calque du dessous. Les fonds restent
+lents et discrets, pour que l'orbe garde le premier rôle, et prennent légèrement la teinte de l'état.
+
+| N° | Identifiant | Fond |
+|---|---|---|
+| 1 | `nuit` | Dégradé bleu nuit et vignettage, fixe : la référence sobre |
+| 2 | `etoiles` | Trois couches d'étoiles qui s'écartent du centre à des vitesses différentes, plus vite en réflexion |
+| 3 | `nebuleuse` | Nuages colorés qui dérivent très lentement, teintés par l'état |
+| 4 | `horizon` | Sol quadrillé en perspective qui défile et pulse sur les syllabes ; l'orbe flotte au-dessus de l'horizon |
+| 5 | `bokeh` | Halos de lumière flous qui montent lentement à plusieurs profondeurs (**par défaut**) |
+| 6 | `tunnel` | Anneaux en perspective qui viennent vers le spectateur, plus vite en réflexion |
+
 ## 7. La page
 
 - **La barre du haut :** un point de couleur et l'état en toutes lettres, l'interrupteur « muet », la roue ⚙.
@@ -191,9 +212,9 @@ sont le point de départ du code.
 - **La saisie en bas :** Entrée pour envoyer, puis le champ se vide.
 - **L'historique :** un panneau par-dessus l'orbe, ouvert en glissant vers le haut ou par un bouton discret, fermé par
   Échap ou un glissement vers le bas. Pour chaque échange : l'heure, 🎙 ou ⌨, la question, la réponse et les délais.
-- **Les paramètres :** la galerie des 12 orbes animées. Un clic applique le style tout de suite, et le navigateur s'en
-  souvient. Les aperçus ne tournent que pendant que la galerie est ouverte.
-- **La pause :** l'animation s'arrête quand l'onglet est caché.
+- **Les paramètres :** deux galeries animées, les 12 orbes et les 6 fonds. Un clic applique le choix tout de suite, et le
+  navigateur s'en souvient. Les aperçus ne tournent que pendant que la galerie est ouverte.
+- **La pause :** l'animation, de l'orbe comme du fond, s'arrête quand l'onglet est caché.
 - **La clé :** un petit écran au premier affichage, et de nouveau si le Core la refuse.
 - **Hors ligne :** l'orbe devient grise et immobile, avec « Hors ligne — nouvelle tentative… ».
 - **« Réduire les animations »** (`prefers-reduced-motion`) : les orbes s'animent plus lentement et plus doucement.
@@ -224,9 +245,10 @@ sont le point de départ du code.
   - la détection des syllabes ;
   - le passage d'une couleur à l'autre ;
   - la reconnexion ;
-  - le choix d'orbe mémorisé, avec l'aurore par défaut ;
-  - **un test de contrat pour les 12 orbes :** chacune est animée sur un faux canevas, dans les quatre états, pendant
-    plusieurs centaines d'images. Elle ne doit pas planter, et doit dessiner quelque chose.
+  - les choix d'orbe et de fond mémorisés, avec l'aurore et le bokeh par défaut ;
+  - **un test de contrat pour les 12 orbes et les 6 fonds :** chacun est animé sur un faux canevas, dans les quatre états,
+    pendant plusieurs centaines d'images. Il ne doit pas planter, et doit dessiner quelque chose. Une orbe ne doit jamais
+    peindre tout son canevas d'une couleur opaque, pour ne pas cacher le fond.
 - **`make test`** lance les deux séries.
 - **À la fin, un essai sur le vrai matériel avec David :** la page sur le Mac et l'iPad, à la voix et au clavier.
 
@@ -240,6 +262,6 @@ sont le point de départ du code.
 
 ## 11. Changements dans la spec parente
 
-- **§6.5 :** l'orbe se dessine en Canvas 2D, sans Three.js ; 12 styles au choix.
+- **§6.5 :** l'orbe se dessine en Canvas 2D, sans Three.js ; 12 orbes et 6 fonds au choix.
 - **§6.6 :** le protocole gagne la connexion `/ws/web` et ses messages (§4.4 ci-dessus).
 - **Phases :** l'orbe et la conversation, prévues en phase 4, sont avancées. Le reste du tableau de bord reste en phase 4.
