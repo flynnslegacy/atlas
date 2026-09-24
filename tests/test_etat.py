@@ -16,6 +16,7 @@ def test_l_etat_de_depart_est_le_repos():
         ("parole", "repos"),
         ("parole", "ecoute"),
         ("ecoute", "repos"),
+        ("repos", "reflexion"),
     ],
 )
 def test_les_transitions_permises_passent(depart, arrivee):
@@ -26,7 +27,7 @@ def test_les_transitions_permises_passent(depart, arrivee):
 
 @pytest.mark.parametrize(
     "depart,arrivee",
-    [("repos", "parole"), ("repos", "reflexion"), ("ecoute", "parole"), ("reflexion", "ecoute")],
+    [("repos", "parole"), ("ecoute", "parole"), ("reflexion", "ecoute")],
 )
 def test_les_transitions_interdites_levent(depart, arrivee):
     m = MachineEtat(depart)
