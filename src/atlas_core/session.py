@@ -90,6 +90,8 @@ class Session:
         self._ecrit_en_cours = False
         self._etat_pages: Valeur = "repos"  # le dernier état publié aux pages
         self._voix_coupee = False  # le muet, posé jusqu'à la fin du tour même si redésactivé
+        # Les phrases dont le sous-titre attend que leur voix commence à jouer.
+        self._textes_en_attente: list[Reponse] = []
 
     # --- entrées ---------------------------------------------------------
 
@@ -123,7 +125,7 @@ class Session:
             if self._machine.valeur != "repos" or self._niveaux.en_lecture():
                 await self._couper_la_voix()
             else:
-                self._niveaux.annuler()
+                self._arreter_calendrier(garder_le_texte=False)
             self._tampon.clear()
             if self._machine.valeur == "parole":
                 self._machine.aller_vers("ecoute")
@@ -146,6 +148,9 @@ class Session:
                 # Jusqu'à la fin du tour, même si le muet est redésactivé entre-temps :
                 # sinon la synthèse reprendrait à la phrase suivante pour personne.
                 self._voix_coupee = True
+                # Le texte continue sans la voix : les phrases déjà programmées
+                # paraissent tout de suite, avant que la coupure ne les annule.
+                self._publier_textes_en_attente()
                 await self._couper_la_voix()
                 if self._machine.valeur == "repos" and self._etat_pages != "repos":
                     # `_couper_la_voix` vient d'annuler le repos différé des pages (via
@@ -161,7 +166,7 @@ class Session:
                 self._oublier_client()
                 return
             await self._annuler_tache()
-            self._niveaux.annuler()
+            self._arreter_calendrier(garder_le_texte=False)
             if self._etat_pages != "repos":
                 # Sans cela, le diffuseur rejoue un état périmé (« parole », « ecoute »)
                 # à toute page qui se connecte après la fermeture.
@@ -172,9 +177,9 @@ class Session:
     async def _reveiller(self) -> None:
         if self._machine.valeur in ("parole", "reflexion"):
             await self._interrompre()
-        # Un repos différé ou des niveaux de la réponse précédente ne doivent pas
-        # continuer d'arriver pendant la nouvelle écoute.
-        self._niveaux.annuler()
+        # Un repos différé, des niveaux ou des sous-titres de la réponse précédente ne
+        # doivent pas continuer d'arriver pendant la nouvelle écoute.
+        self._arreter_calendrier(garder_le_texte=False)
         if self._machine.valeur == "repos":
             self._machine.aller_vers("ecoute")
         self._tampon.clear()
@@ -255,7 +260,7 @@ class Session:
         self._envoyer_json = sans_destinataire
         self._envoyer_binaire = sans_destinataire
         self._avec_voix = lambda: False
-        self._niveaux.annuler()
+        self._arreter_calendrier(garder_le_texte=True)
         # Le type de l'exception, pour qu'un bogue de sérialisation ne passe pas pour un
         # départ du client (auquel cas `e` est `None` : fermeture normale de la session).
         if e is not None:
@@ -267,10 +272,36 @@ class Session:
             _journal.info("client audio parti : la réponse continue par écrit")
 
     async def _couper_la_voix(self) -> None:
-        """`StopAudio` au client, et les niveaux programmés annulés : la voix d'Atlas
-        s'arrête net."""
+        """`StopAudio` au client, et tout ce qui était programmé annulé : la voix d'Atlas
+        s'arrête net, et les phrases qu'il n'a pas dites ne s'affichent pas."""
         await self._au_client(StopAudio(id_enonce=self._id_enonce))
+        self._arreter_calendrier(garder_le_texte=False)
+
+    def _arreter_calendrier(self, garder_le_texte: bool) -> None:
+        """Annule niveaux, repos différé et sous-titres programmés. Si le texte continue
+        sans la voix (muet, client parti, erreur), les sous-titres en attente paraissent
+        tout de suite ; sinon (interruption), ils tombent avec la voix."""
+        if garder_le_texte:
+            self._publier_textes_en_attente()
+        self._textes_en_attente.clear()
         self._niveaux.annuler()
+
+    def _programmer_texte(self, reponse: Reponse) -> None:
+        """Le sous-titre suit la voix : la phrase paraît quand son premier morceau joue,
+        c'est-à-dire quand tout ce qui a été envoyé avant elle aura été entendu."""
+        self._textes_en_attente.append(reponse)
+
+        def paraitre() -> None:
+            if any(attente is reponse for attente in self._textes_en_attente):
+                self._textes_en_attente.remove(reponse)
+                self._diffuseur.publier(reponse)
+
+        self._niveaux.apres_lecture(paraitre)
+
+    def _publier_textes_en_attente(self) -> None:
+        attente, self._textes_en_attente = self._textes_en_attente, []
+        for reponse in attente:
+            self._diffuseur.publier(reponse)
 
     # --- le tour lui-même ------------------------------------------------
 
@@ -353,6 +384,8 @@ class Session:
 
     async def _echouer(self, e: Exception) -> None:
         _journal.exception("échec du tour de parole")
+        # Les phrases déjà envoyées seront entendues : leur texte paraît avant l'erreur.
+        self._publier_textes_en_attente()
         # str(e) est vide pour certaines exceptions (httpx.ConnectTimeout…) : le type,
         # au moins, dit ce qui s'est passé.
         erreur = Erreur(
@@ -363,33 +396,44 @@ class Session:
         await self._au_client(erreur)
         # Aucun niveau programmé ne doit plus arriver aux pages après le repos, sur le
         # chemin d'erreur : rien ne l'annulerait sinon (pas de tour normal pour le faire).
-        self._niveaux.annuler()
+        self._arreter_calendrier(garder_le_texte=True)
         if self._machine.peut_aller_vers("repos"):
             self._machine.aller_vers("repos")
             await self._etat("repos")
 
     async def _dire(self, identifiant: int, rang: int, phrase: str) -> None:
-        self._diffuseur.publier(Reponse(texte=phrase))
-        if not self._avec_voix() or self._voix_coupee:
+        reponse = Reponse(texte=phrase)
+        if not self._voix_active():
+            self._diffuseur.publier(reponse)
             return
         await self._au_client(Dire(id_enonce=identifiant, rang=rang, texte=phrase))
         n = 0
         async with contextlib.aclosing(self._synthese.synthetiser(phrase)) as blocs:
             async for bloc in blocs:
-                if not self._avec_voix() or self._voix_coupee:
-                    return  # muet activé en pleine phrase : taire() a déjà coupé le son
+                if not self._voix_active():
+                    break  # muet activé en pleine phrase : taire() a déjà coupé le son
                 n += 1
+                if n == 1:
+                    # Programmé avant d'ajouter ce premier morceau au calendrier : il
+                    # commencera à jouer quand tout ce qui précède aura été entendu.
+                    self._programmer_texte(reponse)
                 if self._premiere_voix_ms is None:
                     self._premiere_voix_ms = _ms(self._horloge() - self._t_fin)
                 await self._audio_au_client(encoder_audio_sortant(identifiant, bloc))
-                if self._avec_voix():
+                if self._voix_active():
                     self._niveaux.ajouter(bloc)
                 # Sinon, muet activé pendant l'envoi de cette trame : elle est déjà
                 # partie, mais rien ne doit plus bouger l'orbe en son nom.
-        if n == 0 and phrase.strip():
-            # Sans cela, une synthèse muette (voix absente…) rend Atlas silencieux
-            # sans que rien, nulle part, ne dise pourquoi.
-            raise RuntimeError(f"la synthèse n'a produit aucun audio pour « {phrase} »")
+        if n == 0:
+            # Muet avant le premier morceau, ou synthèse muette : le texte part tel quel.
+            self._diffuseur.publier(reponse)
+            if self._voix_active() and phrase.strip():
+                # Sans cela, une synthèse muette (voix absente…) rend Atlas silencieux
+                # sans que rien, nulle part, ne dise pourquoi.
+                raise RuntimeError(f"la synthèse n'a produit aucun audio pour « {phrase} »")
+
+    def _voix_active(self) -> bool:
+        return self._avec_voix() and not self._voix_coupee
 
     # --- état et niveaux, pour les pages -----------------------------------
 

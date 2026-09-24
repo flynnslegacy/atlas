@@ -1,6 +1,8 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import pytest
+
 from atlas_core.diffuseur import Diffuseur
 from atlas_core.protocole import (
     Abandon,
@@ -221,17 +223,19 @@ async def test_un_tour_a_la_voix_est_publie_pour_les_pages():
     plan = FauxPlanificateur()
     s = _session(c, d, planifier=plan)
     await _tour_a_la_voix(s)
-    plan.jouer()  # le repos des pages arrive après la lecture, pas avant
+    plan.jouer()  # la 2e phrase et le repos des pages arrivent quand la voix joue
     await s.fermer()
     sans_niveaux = [m.type for m in d.publies if not isinstance(m, Niveau)]
+    # Les délais sont publiés dès la fin de l'envoi ; la 2e phrase, elle, attend que la
+    # voix l'atteigne : elle arrive donc après eux.
     assert sans_niveaux == [
         "etat",
         "etat",
         "question",
         "etat",
         "reponse",
-        "reponse",
         "latences",
+        "reponse",
         "etat",
     ]
     question = d.de(Question)[0]
@@ -627,4 +631,89 @@ async def test_un_abandon_hors_ecoute_est_ignore():
     etats_avant = list(c.etats())
     await s.sur_message(Abandon())
     assert c.etats() == etats_avant, "un abandon tardif ne doit pas couper la réponse"
+    await s.fermer()
+
+
+# --- le sous-titre suit la voix -------------------------------------------------
+
+
+class SyntheseQuiEchoueSur(FausseSynthese):
+    """Rend l'audio des phrases, sauf celle-ci, dont la synthèse échoue."""
+
+    def __init__(self, phrase_en_echec: str) -> None:
+        super().__init__()
+        self.phrase_en_echec = phrase_en_echec
+
+    async def synthetiser(self, texte: str) -> AsyncIterator[bytes]:
+        if texte == self.phrase_en_echec:
+            raise RuntimeError("voix indisponible")
+        async for bloc in super().synthetiser(texte):
+            yield bloc
+
+
+async def test_le_texte_d_une_phrase_attend_son_premier_morceau_de_voix():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, synthese=FausseSynthese(blocs=3, lenteur=0.03))
+    await s.sur_saisie("quelle heure est-il")
+    await asyncio.sleep(0.015)  # la synthèse de la première phrase n'a encore rien rendu
+    assert d.de(Etat)[-1].valeur == "parole"
+    assert not d.de(Reponse), "le texte ne doit pas devancer la voix"
+    await asyncio.sleep(0.3)
+    assert [r.texte for r in d.de(Reponse)][:1] == ["Il est midi."]
+    await s.fermer()
+
+
+async def test_la_phrase_suivante_parait_quand_elle_commence_a_jouer():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi."], "la 2e phrase attend son tour"
+    for poignee in plan.prevues:
+        avant = len(d.de(Reponse))
+        poignee.rappel(poignee.valeur)
+        if len(d.de(Reponse)) > avant:
+            # Trois morceaux de 20 ms pour « Il est midi. » : la suite joue 60 ms après.
+            assert poignee.delai == pytest.approx(0.06, abs=0.02)
+            break
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi.", "Tu déjeunes ?"]
+    await s.fermer()
+
+
+async def test_une_interruption_fait_tomber_la_phrase_jamais_dite():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    await s.sur_message(Interruption(horodatage=0.0))
+    plan.jouer()
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi."]
+    await s.fermer()
+
+
+async def test_le_muet_fait_paraitre_tout_de_suite_les_phrases_programmees():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    await s.taire()
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi.", "Tu déjeunes ?"]
+    await s.fermer()
+
+
+async def test_une_erreur_fait_paraitre_les_phrases_deja_envoyees_avant_elle():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(
+        c,
+        d,
+        planifier=plan,
+        cerveau=CerveauFixe("Il est midi. Tu déjeunes ? Moi aussi."),
+        synthese=SyntheseQuiEchoueSur("Moi aussi."),
+    )
+    await s.sur_saisie("quelle heure est-il")
+    await asyncio.sleep(0.05)
+    reponses = d.de(Reponse)
+    assert [r.texte for r in reponses] == ["Il est midi.", "Tu déjeunes ?"]
+    assert d.publies.index(reponses[-1]) < d.publies.index(d.de(Erreur)[0])
     await s.fermer()
