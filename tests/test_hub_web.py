@@ -118,3 +118,35 @@ def test_la_page_est_servie_avec_sa_politique_de_securite():
 def test_la_route_de_sante_reste_disponible():
     with TestClient(hub.app) as client:
         assert client.get("/sante").json()["ok"] is True
+
+
+def test_une_page_web_ne_peut_pas_se_brancher_sur_ws_audio():
+    with TestClient(hub.app) as client:
+        for origine in ("http://ailleurs.example", "http://testserver"):
+            with pytest.raises(WebSocketDisconnect) as fermeture:
+                with client.websocket_connect("/ws/audio", headers={"origin": origine}):
+                    pass
+            assert fermeture.value.code == hub.FERMETURE_ORIGINE
+
+
+class SessionAudioEspionne:
+    def __init__(self, envoyer_json, envoyer_binaire) -> None:
+        pass
+
+    async def sur_message(self, msg) -> None:
+        pass
+
+    async def sur_audio(self, pcm: bytes) -> None:
+        pass
+
+    async def fermer(self) -> None:
+        pass
+
+
+def test_le_client_audio_est_rattache_puis_detache_de_la_regie(monkeypatch):
+    fake = SessionAudioEspionne(None, None)
+    monkeypatch.setattr(hub, "creer_session", lambda envoyer_json, envoyer_binaire: fake)
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/audio") as ws:
+        assert hub._regie._session_audio is fake
+        ws.close()
+    assert hub._regie._session_audio is None

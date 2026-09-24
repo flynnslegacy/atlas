@@ -41,3 +41,9 @@ def test_un_hote_bizarre_n_entre_pas_dans_la_politique():
     politique = politique_securite("x; script-src *")
     assert "script-src" not in politique
     assert "connect-src 'self';" in politique
+
+
+def test_un_hote_avec_un_saut_de_ligne_n_entre_pas_dans_la_politique():
+    politique = politique_securite("atlas.local:8080\n")
+    assert "connect-src 'self';" in politique
+    assert "\n" not in politique

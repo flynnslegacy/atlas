@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 # Un hôte « normal » (nom ou IPv4, IPv6 entre crochets, port facultatif) : lui seul entre
 # dans l'en-tête de politique de sécurité, pour qu'un en-tête Host fantaisiste n'y
 # injecte rien.
-_HOTE_SUR = re.compile(r"^(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$")
+_HOTE_SUR = re.compile(r"(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?")
 
 
 def origine_autorisee(origine: str | None, hote: str | None) -> bool:
@@ -32,7 +32,7 @@ def cle_valide(proposee: str, attendue: str) -> bool:
 
 def politique_securite(hote: str) -> str:
     connexions = "'self'"
-    if _HOTE_SUR.match(hote or ""):
+    if _HOTE_SUR.fullmatch(hote or ""):
         connexions += f" ws://{hote} wss://{hote}"
     return (
         "default-src 'self'; "

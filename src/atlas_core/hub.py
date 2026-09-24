@@ -96,6 +96,11 @@ async def sante() -> dict:
 
 @app.websocket("/ws/audio")
 async def ws_audio(ws: WebSocket) -> None:
+    if ws.headers.get("origin") is not None:
+        # un navigateur envoie toujours un en-tête Origin ; le client audio du Mac n'en
+        # envoie jamais ; la clé de /ws/audio reste prévue avant la phase 2.
+        await ws.close(code=FERMETURE_ORIGINE)
+        return
     await ws.accept()
 
     async def envoyer_json(msg) -> None:
