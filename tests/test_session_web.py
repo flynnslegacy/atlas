@@ -103,7 +103,8 @@ class CerveauFixe:
 
 
 class FaussePoignee:
-    def __init__(self) -> None:
+    def __init__(self, delai: float, rappel, valeur: float) -> None:
+        self.delai, self.rappel, self.valeur = delai, rappel, valeur
         self.annulee = False
 
     def cancel(self) -> None:
@@ -115,8 +116,51 @@ class FauxPlanificateur:
         self.prevues: list[FaussePoignee] = []
 
     def __call__(self, delai, rappel, valeur) -> FaussePoignee:
-        self.prevues.append(FaussePoignee())
-        return self.prevues[-1]
+        poignee = FaussePoignee(delai, rappel, valeur)
+        self.prevues.append(poignee)
+        return poignee
+
+    def jouer(self) -> None:
+        """Simule l'écoulement du temps : déclenche, dans l'ordre, les rappels dont la
+        poignée n'a pas été annulée."""
+        for poignee in self.prevues:
+            if not poignee.annulee:
+                poignee.rappel(poignee.valeur)
+
+
+class CollecteurQuiPart:
+    """Un client audio qui répond normalement, jusqu'à ce qu'il « parte » (WebSocket
+    fermée : Starlette lève alors une exception sur tout envoi ultérieur)."""
+
+    def __init__(self) -> None:
+        self.parti = False
+        self.json: list = []
+        self.binaire: list[bytes] = []
+
+    async def envoyer_json(self, msg) -> None:
+        if self.parti:
+            raise RuntimeError("client audio parti")
+        self.json.append(msg)
+
+    async def envoyer_binaire(self, trame: bytes) -> None:
+        if self.parti:
+            raise RuntimeError("client audio parti")
+        self.binaire.append(trame)
+
+
+class CerveauAttend:
+    """N'émet sa première phrase qu'une fois l'événement mis : pour observer combien de
+    temps la session reste en « reflexion »."""
+
+    def __init__(self, evenement: asyncio.Event, phrase: str = "Il est midi. Tu déjeunes ?"):
+        self._evenement = evenement
+        self.phrase = phrase
+
+    async def repondre(self, texte: str) -> AsyncIterator[str]:
+        await self._evenement.wait()
+        for mot in self.phrase.split(" "):
+            yield mot + " "
+            await asyncio.sleep(0)
 
 
 def _session(collecteur, diffuseur=None, **options) -> Session:
@@ -142,8 +186,10 @@ async def _tour_a_la_voix(session, blocs: int = 5) -> None:
 
 async def test_un_tour_a_la_voix_est_publie_pour_les_pages():
     c, d = Collecteur(), DiffuseurEspion()
-    s = _session(c, d)
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
     await _tour_a_la_voix(s)
+    plan.jouer()  # le repos des pages arrive après la lecture, pas avant
     await s.fermer()
     sans_niveaux = [m.type for m in d.publies if not isinstance(m, Niveau)]
     assert sans_niveaux == [
@@ -308,3 +354,131 @@ async def test_une_erreur_sans_message_donne_au_moins_son_type():
     assert d.de(Erreur)[0].message == "Je n'ai pas pu répondre : TimeoutError"
     assert c.de(Erreur)[0].message == "Je n'ai pas pu répondre : TimeoutError"
     assert c.etats()[-1] == "repos"
+
+
+# --- fix round 1 : appels simultanés, client audio injoignable, timing des pages -----
+
+
+async def test_deux_questions_tapees_en_meme_temps_ne_laissent_qu_une_reponse():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, avec_voix=lambda: False)
+    await asyncio.gather(s.sur_saisie("quelle heure est-il"), s.sur_saisie("il fait quel temps"))
+    await asyncio.sleep(0.02)
+    await s.fermer()
+    assert not d.de(Erreur)
+    assert len(d.de(Latences)) == 1
+    assert len(d.de(Reponse)) == 2
+    assert d.de(Etat)[-1].valeur == "repos"
+
+
+async def test_une_question_tapee_et_un_reveil_simultanes_restent_coherents():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, avec_voix=lambda: False)
+    await asyncio.gather(
+        s.sur_saisie("quelle heure est-il"),
+        s.sur_message(Reveil(confiance=0.9, horodatage=0.0)),
+    )
+    await asyncio.sleep(0.02)
+    # Avant fermer() : une fois fermée, la session republie « repos » aux pages (voir
+    # le test dédié), ce qui n'est pas ce qu'on observe ici.
+    assert not d.de(Erreur)
+    assert d.de(Etat)[-1].valeur == "ecoute"
+    await s.fermer()
+
+
+async def test_un_client_audio_injoignable_laisse_finir_la_reponse_ecrite():
+    c, d = CollecteurQuiPart(), DiffuseurEspion()
+    s = _session(c, d, synthese=FausseSynthese(blocs=20, lenteur=0.005))
+    await s.sur_saisie("quelle heure est-il")
+    await asyncio.sleep(0.03)
+    c.parti = True
+    await asyncio.sleep(0.2)
+    await s.fermer()
+    assert not d.de(Erreur)
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi.", "Tu déjeunes ?"]
+    assert len(d.de(Latences)) == 1
+    assert d.de(Etat)[-1].valeur == "repos"
+
+
+async def test_fermer_juste_apres_une_question_tapee_la_laisse_finir():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d)
+    await s.sur_saisie("quelle heure est-il")
+    await s.fermer()
+    await asyncio.sleep(0.02)
+    assert [r.texte for r in d.de(Reponse)] == ["Il est midi.", "Tu déjeunes ?"]
+    assert d.de(Etat)[-1].valeur == "repos"
+
+
+async def test_fermer_pendant_l_ecoute_ou_la_parole_remet_les_pages_au_repos():
+    # Après un Reveil (écoute), sans qu'aucun tour n'ait commencé.
+    c1, d1 = Collecteur(), DiffuseurEspion()
+    s1 = _session(c1, d1)
+    await s1.sur_message(Reveil(confiance=0.9, horodatage=0.0))
+    await s1.fermer()
+    assert d1.de(Etat)[-1].valeur == "repos"
+
+    # En pleine parole, pendant un tour à la voix.
+    c2, d2 = Collecteur(), DiffuseurEspion()
+    s2 = _session(c2, d2, synthese=FausseSynthese(blocs=20, lenteur=0.005))
+    await _tour_a_la_voix(s2)
+    await s2.fermer()
+    assert d2.de(Etat)[-1].valeur == "repos"
+
+
+async def test_les_pages_restent_en_parole_jusqu_a_la_fin_de_la_lecture():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    assert c.etats()[-1] == "repos"
+    assert d.de(Etat)[-1].valeur == "parole"
+    plan.jouer()
+    assert d.de(Etat)[-1].valeur == "repos"
+    await s.fermer()
+
+
+async def test_un_reveil_avant_la_fin_de_la_lecture_annule_le_repos_prevu():
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(c, d, planifier=plan)
+    await _tour_a_la_voix(s)
+    await s.sur_message(Reveil(confiance=0.9, horodatage=1.0))
+    assert d.de(Etat)[-1].valeur == "ecoute"
+    plan.jouer()
+    assert d.de(Etat)[-1].valeur == "ecoute"
+    await s.fermer()
+
+
+async def test_la_reflexion_dure_jusqu_a_la_premiere_phrase():
+    c, d = Collecteur(), DiffuseurEspion()
+    evenement = asyncio.Event()
+    s = _session(c, d, cerveau=CerveauAttend(evenement), avec_voix=lambda: False)
+    await s.sur_saisie("quelle heure est-il")
+    await asyncio.sleep(0.01)
+    assert d.de(Etat)[-1].valeur == "reflexion"
+    evenement.set()
+    await asyncio.sleep(0.01)
+    assert [e.valeur for e in d.de(Etat)][-2:] == ["parole", "repos"]
+    await s.fermer()
+
+
+async def test_taire_pendant_l_envoi_ne_programme_plus_de_niveau():
+    voix = {"active": True}
+    c, d = Collecteur(), DiffuseurEspion()
+    plan = FauxPlanificateur()
+    s = _session(
+        c,
+        d,
+        avec_voix=lambda: voix["active"],
+        planifier=plan,
+        synthese=FausseSynthese(blocs=20, lenteur=0.005),
+    )
+    await s.sur_saisie("quelle heure est-il")
+    await asyncio.sleep(0.03)
+    nombre_avant = len(plan.prevues)
+    voix["active"] = False
+    await s.taire()
+    await asyncio.sleep(0.2)
+    await s.fermer()
+    assert len(plan.prevues) <= nombre_avant + 1

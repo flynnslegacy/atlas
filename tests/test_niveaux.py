@@ -83,6 +83,27 @@ def test_annuler_arrete_les_niveaux_prevus_et_remet_la_lecture_a_zero():
     assert plan.prevues[-1].delai == 0.0
 
 
+def test_apres_lecture_appelle_tout_de_suite_sans_lecture_en_cours():
+    horloge = [0.0]
+    calendrier, plan = _calendrier(horloge)
+    appels = []
+    calendrier.apres_lecture(lambda: appels.append(True))
+    assert appels == [True]
+    assert plan.prevues == []
+
+
+def test_apres_lecture_programme_a_la_fin_de_la_lecture_puis_annule():
+    horloge = [0.0]
+    calendrier, plan = _calendrier(horloge)
+    calendrier.ajouter(_pcm(3000))  # de la lecture reste programmée
+    appels = []
+    calendrier.apres_lecture(lambda: appels.append(True))
+    assert appels == []
+    assert plan.prevues[-1].delai > 0.0
+    calendrier.annuler()
+    assert plan.prevues[-1].annulee
+
+
 async def test_par_defaut_le_niveau_est_publie_par_la_boucle():
     recus: list[float] = []
     calendrier = CalendrierNiveaux(recus.append, horloge=time.monotonic)

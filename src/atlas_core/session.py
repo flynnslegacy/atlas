@@ -5,6 +5,13 @@ quand aucun client audio n'est connecté. Elle ne connaît ni le réseau ni le
 transport : elle reçoit des messages décodés et appelle deux fonctions d'envoi.
 Tout ce qui se passe est aussi publié au diffuseur, pour les pages web. C'est ce
 qui la rend testable sans WebSocket.
+
+Les entrées (`sur_message`, `sur_saisie`, `taire`, `fermer`) sont sérialisées par un
+verrou : avec la régie, elles peuvent arriver en même temps depuis les connexions
+des pages et celle du client audio. `sur_audio` n'a pas besoin du verrou : elle ne
+fait qu'ajouter au tampon. Les tâches de tour, elles, ne prennent jamais le verrou —
+sinon interblocage, puisqu'une entrée peut attendre qu'une tâche annulée se termine
+en tenant le verrou.
 """
 
 from __future__ import annotations
@@ -67,11 +74,11 @@ class Session:
         self._transcription = transcription
         self._synthese = synthese
         self._cerveau = cerveau
-        # Sans diffuseur fourni, un diffuseur sans abonné : publier ne coûte presque rien.
-        self._diffuseur = diffuseur or Diffuseur()
+        self._diffuseur = diffuseur if diffuseur is not None else Diffuseur()
         self._avec_voix = avec_voix or (lambda: True)
         self._horloge = horloge or time.monotonic
         self._machine = MachineEtat()
+        self._verrou = asyncio.Lock()
         self._tampon: list[bytes] = []
         self._tache: asyncio.Task | None = None
         self._id_enonce = 0
@@ -80,16 +87,18 @@ class Session:
         self._t_fin = 0.0  # fin de la phrase de David, ou envoi de la question tapée
         self._premiere_voix_ms: int | None = None
         self._ecrit_en_cours = False
+        self._etat_pages: Valeur = "repos"  # le dernier état publié aux pages
 
     # --- entrées ---------------------------------------------------------
 
     async def sur_message(self, msg: MessageClient) -> None:
-        if isinstance(msg, Reveil):
-            await self._reveiller()
-        elif isinstance(msg, FinEnonce):
-            await self._fin_enonce()
-        elif isinstance(msg, Interruption):
-            await self._interrompre()
+        async with self._verrou:
+            if isinstance(msg, Reveil):
+                await self._reveiller()
+            elif isinstance(msg, FinEnonce):
+                await self._fin_enonce()
+            elif isinstance(msg, Interruption):
+                await self._interrompre()
 
     async def sur_audio(self, pcm: bytes) -> None:
         if self._machine.valeur != "ecoute":
@@ -102,42 +111,55 @@ class Session:
 
     async def sur_saisie(self, texte: str) -> None:
         """Une question tapée : elle passe devant tout, comme une coupure à la voix."""
-        await self._annuler_tache()
-        if self._machine.valeur != "repos":
-            await self._envoyer_json(StopAudio(id_enonce=self._id_enonce))
-            self._niveaux.annuler()
+        async with self._verrou:
+            await self._annuler_tache()
+            # Une lecture peut être encore en cours côté client alors que la machine est
+            # déjà « repos » (la synthèse va plus vite que la lecture) : il faut alors
+            # couper le son quand même.
+            if self._machine.valeur != "repos" or self._niveaux.en_lecture():
+                await self._couper_la_voix()
+            else:
+                self._niveaux.annuler()
             self._tampon.clear()
-        if self._machine.valeur == "parole":
-            self._machine.aller_vers("ecoute")
-        if self._machine.valeur != "reflexion":
-            self._machine.aller_vers("reflexion")
-        await self._etat("reflexion")
-        self._t_fin = self._horloge()
-        self._tache = asyncio.create_task(self._tour_texte(texte))
+            if self._machine.valeur == "parole":
+                self._machine.aller_vers("ecoute")
+            if self._machine.valeur != "reflexion":
+                self._machine.aller_vers("reflexion")
+            await self._etat("reflexion")
+            self._t_fin = self._horloge()
+            # Posé ici, pas dans la tâche : entre `create_task` et son premier pas, un
+            # `fermer()` doit déjà savoir qu'une réponse tapée est en cours.
+            self._ecrit_en_cours = True
+            self._tache = asyncio.create_task(self._tour_texte(texte))
 
     async def taire(self) -> None:
         """Le mode muet vient d'être activé : la voix se tait, le texte continue."""
-        if self._machine.valeur == "parole":
-            await self._envoyer_json(StopAudio(id_enonce=self._id_enonce))
-            self._niveaux.annuler()
+        async with self._verrou:
+            if self._machine.valeur == "parole":
+                await self._couper_la_voix()
 
     async def fermer(self) -> None:
-        if self._ecrit_en_cours and self._tache is not None and not self._tache.done():
-            # Le client audio part pendant une réponse à une question tapée : elle se
-            # termine par écrit, pour les pages.
-            self._envoyer_json = sans_destinataire
-            self._envoyer_binaire = sans_destinataire
-            self._avec_voix = lambda: False
+        async with self._verrou:
+            if self._ecrit_en_cours and self._tache is not None and not self._tache.done():
+                # Le client audio part pendant une réponse à une question tapée : elle
+                # se termine par écrit, pour les pages.
+                self._oublier_client()
+                return
+            await self._annuler_tache()
             self._niveaux.annuler()
-            return
-        await self._annuler_tache()
-        self._niveaux.annuler()
+            if self._etat_pages != "repos":
+                # Sans cela, le diffuseur rejoue un état périmé (« parole », « ecoute »)
+                # à toute page qui se connecte après la fermeture.
+                self._publier_etat("repos")
 
     # --- transitions -----------------------------------------------------
 
     async def _reveiller(self) -> None:
         if self._machine.valeur in ("parole", "reflexion"):
             await self._interrompre()
+        # Un repos différé ou des niveaux de la réponse précédente ne doivent pas
+        # continuer d'arriver pendant la nouvelle écoute.
+        self._niveaux.annuler()
         if self._machine.valeur == "repos":
             self._machine.aller_vers("ecoute")
         self._tampon.clear()
@@ -153,8 +175,7 @@ class Session:
 
     async def _interrompre(self) -> None:
         await self._annuler_tache()
-        await self._envoyer_json(StopAudio(id_enonce=self._id_enonce))
-        self._niveaux.annuler()
+        await self._couper_la_voix()
         if self._machine.valeur == "parole":
             self._machine.aller_vers("ecoute")
             self._tampon.clear()
@@ -172,11 +193,44 @@ class Session:
             await self._etat("ecoute")
 
     async def _annuler_tache(self) -> None:
-        if self._tache and not self._tache.done():
-            self._tache.cancel()
+        tache = self._tache
+        if tache and not tache.done():
+            tache.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await self._tache
-        self._tache = None
+                await tache
+        # Une autre entrée a pu créer une nouvelle tâche pendant qu'on attendait
+        # celle-ci : ne pas l'écraser.
+        if self._tache is tache:
+            self._tache = None
+
+    # --- envoi au client, avec garde ---------------------------------------
+
+    async def _au_client(self, msg: MessageCore) -> None:
+        try:
+            await self._envoyer_json(msg)
+        except Exception:  # noqa: BLE001 — client audio parti : la suite continue par écrit
+            self._oublier_client()
+
+    async def _audio_au_client(self, trame: bytes) -> None:
+        try:
+            await self._envoyer_binaire(trame)
+        except Exception:  # noqa: BLE001 — idem
+            self._oublier_client()
+
+    def _oublier_client(self) -> None:
+        """Le client audio est injoignable (parti, ou jamais connecté) : la suite de la
+        réponse continue par écrit, pour les pages seulement."""
+        self._envoyer_json = sans_destinataire
+        self._envoyer_binaire = sans_destinataire
+        self._avec_voix = lambda: False
+        self._niveaux.annuler()
+        _journal.info("client audio injoignable : la réponse continue par écrit")
+
+    async def _couper_la_voix(self) -> None:
+        """`StopAudio` au client, et les niveaux programmés annulés : la voix d'Atlas
+        s'arrête net."""
+        await self._au_client(StopAudio(id_enonce=self._id_enonce))
+        self._niveaux.annuler()
 
     # --- le tour lui-même ------------------------------------------------
 
@@ -187,7 +241,7 @@ class Session:
             debut = self._horloge()
             texte = await self._transcription.transcrire(pcm)
             transcription_ms = _ms(self._horloge() - debut)
-            await self._envoyer_json(Transcription(texte=texte, finale=True))
+            await self._au_client(Transcription(texte=texte, finale=True))
             if not texte.strip():
                 self._machine.aller_vers("repos")
                 await self._etat("repos")
@@ -199,7 +253,6 @@ class Session:
             await self._echouer(e)
 
     async def _tour_texte(self, texte: str) -> None:
-        self._ecrit_en_cours = True
         try:
             await self._repondre(texte, "clavier", None)
         except asyncio.CancelledError:
@@ -211,24 +264,25 @@ class Session:
 
     async def _repondre(self, texte: str, source: Source, transcription_ms: int | None) -> None:
         self._diffuseur.publier(Question(texte=texte, source=source))
-        self._machine.aller_vers("parole")
-        await self._etat("parole")
-        self._id_enonce += 1
-        identifiant = self._id_enonce
         self._premiere_voix_ms = None
         reflexion_ms: int | None = None
         debut = self._horloge()
+        identifiant = self._id_enonce + 1
+        rang = 0
 
         decoupeur = DecoupeurPhrases()
-        rang = 0
         async with contextlib.aclosing(self._cerveau.repondre(texte)) as fragments:
             async for fragment in fragments:
                 if reflexion_ms is None:
                     reflexion_ms = _ms(self._horloge() - debut)
                 for phrase in decoupeur.ajouter(fragment):
+                    if rang == 0:
+                        await self._entrer_en_parole(identifiant)
                     rang += 1
                     await self._dire(identifiant, rang, phrase)
         for phrase in decoupeur.vider():
+            if rang == 0:
+                await self._entrer_en_parole(identifiant)
             rang += 1
             await self._dire(identifiant, rang, phrase)
 
@@ -239,8 +293,22 @@ class Session:
                 premiere_voix_ms=self._premiere_voix_ms,
             )
         )
+        if rang == 0:
+            # Le cerveau n'a produit aucune phrase : « reflexion » va droit au repos.
+            self._machine.aller_vers("repos")
+            await self._etat("repos")
+            return
         self._machine.aller_vers("repos")
-        await self._etat("repos")
+        await self._au_client(Etat(valeur="repos"))
+        # La synthèse va environ deux fois plus vite que la lecture : les pages restent
+        # en « parole » tant qu'Atlas parle encore, pas seulement tant qu'on lui envoie.
+        self._niveaux.apres_lecture(lambda: self._publier_etat("repos"))
+
+    async def _entrer_en_parole(self, identifiant: int) -> None:
+        """La première phrase de la réponse : « reflexion » dure jusque-là, pas au-delà."""
+        self._id_enonce = identifiant
+        self._machine.aller_vers("parole")
+        await self._etat("parole")
 
     async def _echouer(self, e: Exception) -> None:
         _journal.exception("échec du tour de parole")
@@ -249,8 +317,9 @@ class Session:
         erreur = Erreur(
             code="tour", message=f"Je n'ai pas pu répondre : {str(e) or type(e).__name__}"
         )
-        await self._envoyer_json(erreur)
+        # Aux pages d'abord : un client audio injoignable ne doit pas leur masquer l'erreur.
         self._diffuseur.publier(erreur)
+        await self._au_client(erreur)
         if self._machine.peut_aller_vers("repos"):
             self._machine.aller_vers("repos")
             await self._etat("repos")
@@ -259,7 +328,7 @@ class Session:
         self._diffuseur.publier(Reponse(texte=phrase))
         if not self._avec_voix():
             return
-        await self._envoyer_json(Dire(id_enonce=identifiant, rang=rang, texte=phrase))
+        await self._au_client(Dire(id_enonce=identifiant, rang=rang, texte=phrase))
         n = 0
         async with contextlib.aclosing(self._synthese.synthetiser(phrase)) as blocs:
             async for bloc in blocs:
@@ -268,17 +337,28 @@ class Session:
                 n += 1
                 if self._premiere_voix_ms is None:
                     self._premiere_voix_ms = _ms(self._horloge() - self._t_fin)
-                await self._envoyer_binaire(encoder_audio_sortant(identifiant, bloc))
-                self._niveaux.ajouter(bloc)
+                await self._audio_au_client(encoder_audio_sortant(identifiant, bloc))
+                if self._avec_voix():
+                    self._niveaux.ajouter(bloc)
+                # Sinon, muet activé pendant l'envoi de cette trame : elle est déjà
+                # partie, mais rien ne doit plus bouger l'orbe en son nom.
         if n == 0 and phrase.strip():
             # Sans cela, une synthèse muette (voix absente…) rend Atlas silencieux
             # sans que rien, nulle part, ne dise pourquoi.
             raise RuntimeError(f"la synthèse n'a produit aucun audio pour « {phrase} »")
 
+    # --- état et niveaux, pour les pages -----------------------------------
+
     async def _etat(self, valeur: Valeur) -> None:
-        etat = Etat(valeur=valeur)
-        await self._envoyer_json(etat)
-        self._diffuseur.publier(etat)
+        # Aux pages d'abord : un client audio injoignable ne doit pas leur masquer l'état.
+        self._publier_etat(valeur)
+        await self._au_client(Etat(valeur=valeur))
+
+    def _publier_etat(self, valeur: Valeur) -> None:
+        """Publie l'état aux pages, et retient le dernier pour que `fermer()` sache s'il
+        doit republier « repos » quand la session se termine en plein tour."""
+        self._etat_pages = valeur
+        self._diffuseur.publier(Etat(valeur=valeur))
 
     def _publier_niveau(self, valeur: float) -> None:
         self._diffuseur.publier(Niveau(valeur=valeur))

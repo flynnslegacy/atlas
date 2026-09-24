@@ -83,3 +83,21 @@ class CalendrierNiveaux:
         self._poignees.clear()
         self._fin_lecture = 0.0
         self._dernier = -math.inf
+
+    def en_lecture(self) -> bool:
+        """Vrai s'il reste de la voix d'Atlas programmée, pas encore jouée."""
+        return self._fin_lecture > self._horloge()
+
+    def apres_lecture(self, rappel: Callable[[], None]) -> None:
+        """Appelle `rappel` une fois que tout ce qui est programmé aura fini de jouer.
+
+        Tout de suite s'il ne reste rien à jouer ; sinon à la fin de la lecture prévue.
+        La poignée est rangée avec les autres, pour qu'une interruption l'annule aussi.
+        """
+        maintenant = self._horloge()
+        if self._fin_lecture <= maintenant:
+            rappel()
+            return
+        self._poignees.append(
+            self._planifier(self._fin_lecture - maintenant, lambda _valeur: rappel(), 0.0)
+        )
