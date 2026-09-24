@@ -94,6 +94,17 @@ def _lire_bargein_dbfs() -> float:
     return valeur
 
 
+def lire_cle_audio() -> str:
+    """La clé que le client présente au Core dans son `Bonjour` : la même des deux côtés."""
+    cle = os.environ.get("ATLAS_AUDIO_CLE", "").strip()
+    if not cle:
+        raise ValueError(
+            "ATLAS_AUDIO_CLE manquante : mets dans le .env du client la même clé que dans "
+            "celui du Core"
+        )
+    return cle
+
+
 def _lire_relance_s() -> float:
     brute = os.environ.get("ATLAS_RELANCE_S", "10")
     try:
@@ -146,6 +157,10 @@ class ClientAudio:
         # Échéance, sur notre propre horloge, de la fin de l'audio déjà confié au
         # haut-parleur. Le Core finit d'ENVOYER bien avant que le son finisse de jouer.
         self._fin_lecture = 0.0
+        # Le Core dit une réponse à voix haute : un « Dire » est arrivé, et aucun état
+        # autre que « parole » ne l'a encore suivi. Le barge-in reste armé même dans un
+        # blanc entre deux phrases, quand plus aucun son ne joue.
+        self._core_parle = False
         # Derniers blocs entendus pendant la surveillance du barge-in, avec leur
         # verdict de voix : la parole qui déclenche l'interruption (« Non, attends… »)
         # doit partir vers le Core, sinon Whisper perd le premier mot. La porte
@@ -167,8 +182,9 @@ class ClientAudio:
         self._relance_due = False
 
     def _atlas_parle_encore(self) -> bool:
-        # Une échéance expire d'elle-même : le micro ne peut jamais rester sourd.
-        return self._horloge() < self._fin_lecture + MARGE_SORTIE_S
+        # Une échéance expire d'elle-même, et tout état autre que « parole » désarme le
+        # Core : le micro ne peut jamais rester sourd.
+        return self._core_parle or self._horloge() < self._fin_lecture + MARGE_SORTIE_S
 
     # --- micro vers Core --------------------------------------------------
 
@@ -248,8 +264,9 @@ class ClientAudio:
         _journal.info("interruption détectée (%.1f dBFS sur 300 ms)", niveau)
         pre_roulement = list(self._pre_roulement)
         self._couper()
-        await self._peripherique.vider()
+        # Le Core d'abord : il arrête la synthèse et Claude pendant que le son se vide.
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
+        await self._peripherique.vider()
         self._ouvrir_capture()
         # Le pré-roulement est capturé comme le reste : envoyé, et compté par
         # l'endpointeur, qui sait ainsi que la parole a déjà commencé.
@@ -263,6 +280,7 @@ class ClientAudio:
         self._id_coupe = max(self._id_coupe, self._id_courant)
         self._id_courant = 0
         self._fin_lecture = 0.0
+        self._core_parle = False
         self._pre_roulement.clear()
         self._fenetre_energie.reinitialiser()
         # Une réponse coupée n'est pas une réponse entendue : l'écoute est déjà
@@ -276,6 +294,7 @@ class ClientAudio:
         if isinstance(msg, Dire):
             if msg.id_enonce <= self._id_coupe:
                 return  # phrase en vol d'une réponse coupée : on l'ignore
+            self._core_parle = True
             if msg.id_enonce != self._id_courant:
                 # Nouvel énoncé seulement : remettre le compteur à zéro à chaque
                 # phrase effacerait la parole que l'utilisateur a déjà accumulée.
@@ -290,10 +309,14 @@ class ClientAudio:
         elif isinstance(msg, Erreur):
             _journal.warning("erreur signalée par le Core [%s] : %s", msg.code, msg.message)
         elif isinstance(msg, Etat):
-            # « repos » dit que le Core a fini d'ENVOYER, pas que le son est joué : il
-            # n'arme ni ne désarme le barge-in, que seule l'horloge de lecture tranche.
-            # Il arme en revanche la relance, qui attendra que le son se taise. Sans ce
-            # signal, un blanc entre deux phrases relancerait l'écoute en pleine réponse.
+            # « repos » dit que le Core a fini d'ENVOYER, pas que le son est joué : le
+            # barge-in reste armé tant que l'horloge de lecture court. Mais tout état autre
+            # que « parole » (repos, réflexion d'une recherche web…) dit que le Core ne
+            # parle plus : le blanc qui suit n'est plus gardé. « repos » arme aussi la
+            # relance, qui attendra que le son se taise ; sans ce signal, un blanc entre
+            # deux phrases relancerait l'écoute en pleine réponse.
+            if msg.valeur != "parole":
+                self._core_parle = False
             self._relance_due = (
                 msg.valeur == "repos" and self._reponse_jouee and self._relance_s > 0
             )
