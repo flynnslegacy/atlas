@@ -1,5 +1,7 @@
 // Doublures minimales du DOM et du stockage du navigateur, pour node --test.
 
+import { fauxCanevas } from "./faux_canevas.mjs";
+
 export function fauxElement(tag) {
   const classes = new Set();
   const ecouteurs = {};
@@ -37,7 +39,17 @@ export function fauxElement(tag) {
 }
 
 export function fauxDocument() {
-  return { createElement: (tag) => fauxElement(tag) };
+  const canevas = [];
+  return {
+    canevas,
+    createElement(tag) {
+      const element = fauxElement(tag);
+      if (tag !== "canvas") return element;
+      const faux = fauxCanevas(160, 160);
+      canevas.push(faux);
+      return Object.assign(element, faux.canvas);
+    },
+  };
 }
 
 export function fauxStockage(initial = {}) {
