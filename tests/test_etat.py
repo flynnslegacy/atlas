@@ -15,6 +15,7 @@ def test_l_etat_de_depart_est_le_repos():
         ("reflexion", "parole"),
         ("parole", "repos"),
         ("parole", "ecoute"),
+        ("parole", "reflexion"),
         ("ecoute", "repos"),
         ("repos", "reflexion"),
     ],

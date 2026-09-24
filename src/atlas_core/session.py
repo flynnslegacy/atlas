@@ -22,9 +22,10 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from .cerveau import Cerveau
+from .cerveau import Cerveau, ErreurCerveau, Recherche
 from .diffuseur import Diffuseur
 from .etat import MachineEtat, Valeur
+from .mise_en_voix import est_hallucination, nettoyer
 from .niveaux import INTERVALLE_S, CalendrierNiveaux, Planifier, niveau
 from .phrases import DecoupeurPhrases
 from .protocole import (
@@ -47,6 +48,8 @@ _journal = logging.getLogger(__name__)
 
 EnvoyerJson = Callable[[MessageCore], Awaitable[None]]
 EnvoyerBinaire = Callable[[bytes], Awaitable[None]]
+
+PHRASE_ATTENTE = "Je regarde ça."  # dite une fois par question, quand Claude cherche sur le web
 
 
 async def sans_destinataire(_message: object) -> None:
@@ -91,7 +94,14 @@ class Session:
         self._etat_pages: Valeur = "repos"  # le dernier état publié aux pages
         self._voix_coupee = False  # le muet, posé jusqu'à la fin du tour même si redésactivé
         # Les phrases dont le sous-titre attend que leur voix commence à jouer.
-        self._textes_en_attente: list[Reponse] = []
+        self._textes_en_attente: list[Reponse | Erreur] = []
+        # La réponse en cours : son énoncé, le rang de sa dernière phrase, la phrase d'attente.
+        self._identifiant = 0
+        self._rang = 0
+        self._attente_dite = False
+        # « reflexion » envoyé au client depuis un rappel du calendrier (qui ne peut pas
+        # attendre) : tout état suivant attend qu'il soit parti, pour garder l'ordre.
+        self._envoi_differe: asyncio.Task | None = None
 
     # --- entrées ---------------------------------------------------------
 
@@ -286,7 +296,7 @@ class Session:
         self._textes_en_attente.clear()
         self._niveaux.annuler()
 
-    def _programmer_texte(self, reponse: Reponse) -> None:
+    def _programmer_texte(self, reponse: Reponse | Erreur) -> None:
         """Le sous-titre suit la voix : la phrase paraît quand son premier morceau joue,
         c'est-à-dire quand tout ce qui a été envoyé avant elle aura été entendu."""
         self._textes_en_attente.append(reponse)
@@ -313,7 +323,9 @@ class Session:
             texte = await self._transcription.transcrire(pcm)
             transcription_ms = _ms(self._horloge() - debut)
             await self._au_client(Transcription(texte=texte, finale=True))
-            if not texte.strip():
+            if est_hallucination(texte):
+                # Rien entendu, ou une phrase fantôme de Whisper (« Merci. ») : Claude
+                # n'est pas dérangé pour si peu.
                 self._machine.aller_vers("repos")
                 await self._etat("repos")
                 return
@@ -337,26 +349,35 @@ class Session:
         self._voix_coupee = False
         self._diffuseur.publier(Question(texte=texte, source=source))
         self._premiere_voix_ms = None
+        self._identifiant = self._id_enonce + 1
+        self._rang = 0
+        self._attente_dite = False
         reflexion_ms: int | None = None
         debut = self._horloge()
-        identifiant = self._id_enonce + 1
-        rang = 0
+        erreur: ErreurCerveau | None = None
 
         decoupeur = DecoupeurPhrases()
-        async with contextlib.aclosing(self._cerveau.repondre(texte)) as fragments:
-            async for fragment in fragments:
-                if reflexion_ms is None:
-                    reflexion_ms = _ms(self._horloge() - debut)
-                for phrase in decoupeur.ajouter(fragment):
-                    if rang == 0:
-                        await self._entrer_en_parole(identifiant)
-                    rang += 1
-                    await self._dire(identifiant, rang, phrase)
+        try:
+            async with contextlib.aclosing(self._cerveau.repondre(texte)) as fragments:
+                async for fragment in fragments:
+                    if reflexion_ms is None:
+                        reflexion_ms = _ms(self._horloge() - debut)
+                    if isinstance(fragment, Recherche):
+                        await self._chercher()
+                        continue
+                    for phrase in decoupeur.ajouter(fragment):
+                        await self._phrase(phrase)
+        except ErreurCerveau as e:
+            erreur = e
         for phrase in decoupeur.vider():
-            if rang == 0:
-                await self._entrer_en_parole(identifiant)
-            rang += 1
-            await self._dire(identifiant, rang, phrase)
+            await self._phrase(phrase)
+        if erreur is not None:
+            # Ce que Claude avait commencé à dire est dit ; puis l'erreur, à voix haute et
+            # en rouge pour les pages.
+            _journal.warning("le cerveau n'a pas pu répondre : %s", erreur)
+            message = Erreur(code="cerveau", message=str(erreur))
+            await self._au_client(message)
+            await self._phrase(str(erreur), affichage=message)
 
         self._diffuseur.publier(
             Latences(
@@ -365,19 +386,59 @@ class Session:
                 premiere_voix_ms=self._premiere_voix_ms,
             )
         )
-        if rang == 0:
+        if self._rang == 0:
             # Le cerveau n'a produit aucune phrase : « reflexion » va droit au repos.
             self._machine.aller_vers("repos")
             await self._etat("repos")
             return
         self._machine.aller_vers("repos")
+        await self._finir_envoi_differe()
         await self._au_client(Etat(valeur="repos"))
         # La synthèse va environ deux fois plus vite que la lecture : les pages restent
         # en « parole » tant qu'Atlas parle encore, pas seulement tant qu'on lui envoie.
         self._niveaux.apres_lecture(lambda: self._publier_etat("repos"))
 
+    async def _phrase(self, phrase: str, affichage: Reponse | Erreur | None = None) -> None:
+        """Dit (et affiche) la phrase suivante de la réponse, rendue prononçable."""
+        phrase = nettoyer(phrase)
+        if not phrase:
+            return
+        # Le rang avance d'abord : un retour en réflexion programmé après la phrase
+        # d'attente voit ainsi que la réponse a repris.
+        self._rang += 1
+        if self._machine.valeur != "parole":
+            await self._entrer_en_parole(self._identifiant)
+        await self._dire(self._identifiant, self._rang, phrase, affichage)
+
+    async def _chercher(self) -> None:
+        """Claude cherche sur le web : « Je regarde ça. », une fois par question ; puis,
+        quand ce qui a été dit a fini de jouer, l'orbe repasse en réflexion jusqu'à la
+        réponse (machine, client et pages)."""
+        if not self._attente_dite:
+            self._attente_dite = True
+            await self._phrase(PHRASE_ATTENTE)
+        if self._machine.valeur != "parole":
+            return
+        rang = self._rang
+
+        def revenir_en_reflexion() -> None:
+            if self._rang != rang or self._machine.valeur != "parole":
+                return  # la réponse a repris entre-temps, ou le tour est fini
+            self._machine.aller_vers("reflexion")
+            self._publier_etat("reflexion")
+            self._envoi_differe = asyncio.get_running_loop().create_task(
+                self._au_client(Etat(valeur="reflexion"))
+            )
+
+        self._niveaux.apres_lecture(revenir_en_reflexion)
+
+    async def _finir_envoi_differe(self) -> None:
+        envoi, self._envoi_differe = self._envoi_differe, None
+        if envoi is not None:
+            await envoi
+
     async def _entrer_en_parole(self, identifiant: int) -> None:
-        """La première phrase de la réponse : « reflexion » dure jusque-là, pas au-delà."""
+        """La réponse prend (ou reprend) la parole : « reflexion » dure jusque-là."""
         self._id_enonce = identifiant
         self._machine.aller_vers("parole")
         await self._etat("parole")
@@ -401,10 +462,12 @@ class Session:
             self._machine.aller_vers("repos")
             await self._etat("repos")
 
-    async def _dire(self, identifiant: int, rang: int, phrase: str) -> None:
-        reponse = Reponse(texte=phrase)
+    async def _dire(
+        self, identifiant: int, rang: int, phrase: str, affichage: Reponse | Erreur | None = None
+    ) -> None:
+        affichage = affichage if affichage is not None else Reponse(texte=phrase)
         if not self._voix_active():
-            self._diffuseur.publier(reponse)
+            self._diffuseur.publier(affichage)
             return
         await self._au_client(Dire(id_enonce=identifiant, rang=rang, texte=phrase))
         n = 0
@@ -416,7 +479,7 @@ class Session:
                 if n == 1:
                     # Programmé avant d'ajouter ce premier morceau au calendrier : il
                     # commencera à jouer quand tout ce qui précède aura été entendu.
-                    self._programmer_texte(reponse)
+                    self._programmer_texte(affichage)
                 if self._premiere_voix_ms is None:
                     self._premiere_voix_ms = _ms(self._horloge() - self._t_fin)
                 await self._audio_au_client(encoder_audio_sortant(identifiant, bloc))
@@ -426,7 +489,7 @@ class Session:
                 # partie, mais rien ne doit plus bouger l'orbe en son nom.
         if n == 0:
             # Muet avant le premier morceau, ou synthèse muette : le texte part tel quel.
-            self._diffuseur.publier(reponse)
+            self._diffuseur.publier(affichage)
             if self._voix_active() and phrase.strip():
                 # Sans cela, une synthèse muette (voix absente…) rend Atlas silencieux
                 # sans que rien, nulle part, ne dise pourquoi.
@@ -440,6 +503,7 @@ class Session:
     async def _etat(self, valeur: Valeur) -> None:
         # Aux pages d'abord : un client audio injoignable ne doit pas leur masquer l'état.
         self._publier_etat(valeur)
+        await self._finir_envoi_differe()
         await self._au_client(Etat(valeur=valeur))
 
     def _publier_etat(self, valeur: Valeur) -> None:
