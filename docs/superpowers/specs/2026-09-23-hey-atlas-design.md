@@ -125,7 +125,8 @@ Ces faits ont été vérifiés dans le code d'openWakeWord le 23 septembre 2026.
 - **`rir_paths` et `background_paths`** doivent exister. On utilise les réponses impulsionnelles MIT (270 fichiers, 8,4 Mo) et les bruits de bureau de David, plus un fond générique : ESC-50, 2 000 sons d'environnement de 5 s, sous licence non commerciale comme ACAV100M. L'ancien lien AudioSet du notebook ne répond plus.
 - **Faux positifs par heure affichés par `train.py` :** ils sont calculés sur un jeu de validation anglais (185 Mo, environ 11 h), avec une durée codée en dur. Ce chiffre ne sert que d'indication ; seules comptent les mesures de la §7.
 - **Disque :** environ 50 Go. **Mémoire :** 16 Go ou plus. David a confirmé avoir de la marge sur les deux.
-- **Durée :** environ une journée pour le premier passage, puis 1 à 3 heures par itération.
+- **Durée :** mesurée le 24 septembre 2026 sur la RTX 4070 Ti, 50 000 pas prennent 6 min 30, plus quelques minutes d'enrichissement sur le processeur. Une itération tient donc en moins d'une demi-heure.
+- **Poids des négatifs : 600, et non les 1 500 d'openWakeWord.** À 1 500, le modèle répond « non » à tout (rappel nul, même sur les positifs d'entraînement) : nos négatifs proches, dits par les mêmes voix que les positifs, pèsent trop. Pourtant, un petit réseau entraîné à part sépare ces mêmes traits à 99 % : les données ne sont pas en cause. Mesuré à 50 000 pas sur les prises de David mises de côté : les poids 100 et 300 reconnaissent 87 à 91 % au seuil 0,5, mais se réveillent sur ses bruits de bureau (scores 0,94 et 0,83). Le poids 600 reconnaît 87 % (82 % à 3 m), sans aucun faux réveil ni réveil sur « Atlas » seul, avec un score maximal de 0,012 sur ses bruits et sa parole.
 
 Avant la vraie journée de calcul, le conteneur fait un **essai à blanc** : quelques centaines d'extraits et quelques centaines de pas d'entraînement, pour vérifier que toute la chaîne produit un `.onnx` chargeable par openwakeword 0.6.
 

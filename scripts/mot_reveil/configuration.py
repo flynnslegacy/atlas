@@ -44,7 +44,9 @@ def configuration(
         "model_type": "dnn",
         "layer_size": 32,
         "steps": pas,
-        "max_negative_weight": 1500,
+        # 1 500 (openWakeWord) écrase tous nos positifs : nos négatifs proches, dits par les mêmes
+        # voix, pèsent trop. 600 est validé sur les prises de David (24 septembre 2026).
+        "max_negative_weight": 600,
         "target_false_positives_per_hour": 0.2,
         "false_positive_validation_data_path": str(donnees / "validation_set_features.npy"),
     }

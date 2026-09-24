@@ -187,3 +187,24 @@ def test_preparer_purge_les_traits_orphelins(tmp_path):
     assert not chemin_traits.exists()
     config = json.loads((tmp_path / "entrainement" / "hey_atlas.yml").read_text())
     assert "negatifs_david" not in config["feature_data_files"]
+
+
+def test_preparer_efface_les_traits_d_une_preparation_precedente(tmp_path):
+    """Sinon un --train_model lancé seul réutiliserait en silence les traits de l'essai d'avant."""
+    _travail(tmp_path)
+    racine = tmp_path / "entrainement" / "hey_atlas"
+    racine.mkdir(parents=True)
+    perime = racine / "positive_features_train.npy"
+    np.save(perime, np.zeros((3, 16, 96), np.float32))
+    bilan = preparer(tmp_path, _extraire)
+    assert not perime.exists()
+    assert not any(cle.endswith(".npy") for cle in bilan)  # le bilan ne compte que les dossiers
+
+
+def test_le_poids_des_negatifs_est_celui_valide_sur_la_voix_de_david(tmp_path):
+    """1 500, la valeur d'openWakeWord, écrase tous les positifs sur nos négatifs proches
+    (« Atlas » seul, « Hélas »…) : rappel nul. Mesuré le 24 septembre 2026, à 50 000 pas, sur
+    les prises de David mises de côté : 100 et 300 se réveillent sur ses bruits de bureau
+    (scores 0,94 et 0,83) ; 600 reconnaît 87 % au seuil 0,5 sans aucun faux réveil (max 0,012)."""
+    config = configuration(tmp_path, {"ACAV100M_sample": "a.npy"}, 1000)
+    assert config["max_negative_weight"] == 600

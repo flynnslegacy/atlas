@@ -278,7 +278,9 @@ docker run --rm -it $TRAVAIL atlas-mot-reveil python -m scripts.mot_reveil.prepa
 docker run --rm -it $GPU --shm-size=32g $TRAVAIL atlas-mot-reveil bash scripts/mot_reveil/entrainer.sh
 ```
 
-Ça prend plusieurs heures sur le GPU.
+L'enrichissement prend quelques minutes sur le processeur, et l'entraînement
+lui-même moins de dix minutes sur le GPU (50 000 pas en 6 min 30 sur une RTX
+4070 Ti).
 
 ## 10. Rapatrier le modèle et l'évaluer
 

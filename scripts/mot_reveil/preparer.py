@@ -43,6 +43,10 @@ def preparer(
     for sous in ("positive_train", "positive_test", "negative_train", "negative_test"):
         shutil.rmtree(racine / sous, ignore_errors=True)
         (racine / sous).mkdir(parents=True)
+    # Les traits d'une préparation précédente ne correspondent plus aux extraits : un
+    # --train_model lancé sans --augment_clips les réutiliserait en silence.
+    for traits in racine.glob("*_features_*.npy"):
+        traits.unlink()
 
     # 1. Synthèse gardée par Whisper : un extrait sur dix va au test.
     for sorte, prefixe in (("positifs", "positive"), ("negatifs", "negative")):
@@ -121,7 +125,11 @@ def preparer(
         configuration(travail, traits, PAS_ESSAI if essai else PAS, fonds=fonds_dispo),
         travail / "entrainement" / "hey_atlas.yml",
     )
-    bilan = {sous.name: len(list(sous.glob("*.wav"))) for sous in sorted(racine.iterdir())}
+    bilan = {
+        sous.name: len(list(sous.glob("*.wav")))
+        for sous in sorted(racine.iterdir())
+        if sous.is_dir()
+    }
     bilan["david_positifs"] = comptes_david["positifs"]
     bilan["david_atlas_seul"] = comptes_david["atlas_seul"]
     bilan["david_fenetres_2s"] = fenetres_2s
