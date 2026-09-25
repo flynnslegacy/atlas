@@ -139,9 +139,10 @@ dépendances `audio` et des modèles (§7.3).
   - `ATLAS_VOIX_MARGE_S` : la latence de sortie du navigateur, là où le client du Mac prend 0,15 s ;
   - `ATLAS_VOIX_BARGEIN_DBFS` : la porte d'énergie du barge-in, l'écho résiduel n'étant pas celui du binaire Swift.
   Valeurs par défaut, d'après le spike S4 : 0,2 s et −40 dBFS.
-- **Le démarrage de l'annuleur** (spike S4) : pendant la première seconde et demie de son joué après l'ouverture de
-  `/ws/voix` ou un message `reprise`, la coupure à la voix est ignorée. L'annuleur d'iOS laisse passer l'écho entier
-  pendant ses 0,7 premières secondes, une seule fois.
+- **Le démarrage de l'annuleur** (spike S4) : pendant les dix premières secondes de voix d'Atlas jouée après
+  l'ouverture de `/ws/voix` ou un message `reprise`, la coupure à la voix est ignorée (toucher l'orbe coupe
+  toujours). L'annuleur laisse passer l'écho le temps de s'installer, une seule fois : 0,7 s sur iOS, 7 à 10 s dans
+  Chrome sur macOS.
 - **La régie** garde toutes les sessions audio (et non plus seulement la dernière). Une question tapée va à la session
   de sa page si elle en a une, sinon à la session audio la plus récente, sinon à la session écrite. Le muet fait taire
   toutes les sessions audio.
@@ -222,7 +223,8 @@ petit serveur sur le M5 vers lequel pointe le « Proxy Host », mesure :
 **Repli** si l'écho passe malgré tout sur un appareil : pas de coupure à la voix sur celui-là. Le micro se tait
 pendant qu'Atlas parle, et on touche l'orbe pour le couper ; l'annulation d'écho, elle, reste active.
 
-**Verdict (25 septembre 2026) :** approche validée sur l'iPhone ; valeurs et ajustements reportés aux §4, §5 et §6.
+**Verdict (25 septembre 2026) :** approche validée sur l'iPhone et sur le Mac (Chrome) ; valeurs et ajustements
+reportés aux §4, §5 et §6.
 L'iPad reste à vérifier à l'essai sur le matériel. Voir `docs/superpowers/spikes/2026-09-25-s4-voix-navigateur.md`.
 
 ## 9. Les tests

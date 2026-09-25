@@ -138,10 +138,26 @@ plus de 45 dB.
 
 ### Le Mac (Chrome)
 
-Mesure invalide : le micro n'a livré que des zéros, du début à la fin, y compris quand David parlait. Chrome avait
-l'autorisation du site, mais macOS lui envoyait du silence (autorisation « Micro » de Confidentialité et sécurité, ou
-mauvais micro choisi dans Chrome). Seul enseignement : sur le Mac, Chrome continue de capter quand l'onglet est caché.
-Le Mac garde de toute façon son client audio Python.
+Un premier passage est invalide : le micro n'a livré que des zéros, du début à la fin (Chrome avait l'autorisation du
+site, mais macOS lui envoyait du silence). David a corrigé le réglage et refait l'essai, Chrome 153 sur macOS,
+volume à 50 % :
+
+| Mesure | Résultat |
+|---|---|
+| Bruit de fond | −59 dBFS |
+| Écho résiduel, par tranches de 5 s (médiane) | −25, −39, puis −66 dBFS et stable |
+| Même voix, l'annuleur installé | −73,9 dBFS en médiane, −59,8 au maximum |
+| Atténuation, même voix avec et sans annulation | 34 dB au démarrage, 43 dB l'annuleur installé |
+| Voix de David | −19,8 dBFS |
+| Faux barge-in pendant l'installation de l'annuleur | **un épisode**, de 2,1 à 6,9 s (l'analyse le compte 17 fois : elle redéclenche toutes les 0,3 s tant qu'il dure) |
+| Faux barge-in, l'annuleur installé | **0** |
+| Vraies coupures | **3 sur 3**, en 0,92 à 1,04 s |
+| « Hey Atlas » | **3 sur 3** |
+| Latence aller-retour | 77 à 107 ms |
+| Onglet caché | Chrome continue de capter (50 blocs/s) |
+
+**L'annuleur de Chrome sur macOS met 7 à 10 s à s'installer**, contre 0,7 s pour celui d'iOS ; une seule fois lui
+aussi. Sans annulation, la voix d'Atlas n'a pas baissé sur le Mac : l'atténuation mesurée y est valable.
 
 ### L'iPad
 
@@ -166,8 +182,10 @@ résultats, à confirmer à l'essai sur le matériel, verrou d'écran compris.
 
 Les ajustements de la spec :
 
-1. **Le démarrage de l'annuleur** : pendant la première seconde et demie de son joué après l'ouverture du micro (ou
-   sa reprise après une interruption), la coupure à la voix est ignorée.
+1. **Le démarrage de l'annuleur** : pendant les dix premières secondes de voix d'Atlas jouée après l'ouverture du
+   micro (ou sa reprise après une interruption), la coupure à la voix est ignorée ; toucher l'orbe coupe toujours.
+   Dix secondes couvrent l'annuleur de Chrome sur macOS (7 à 10 s) comme celui d'iOS (0,7 s) : un seul réglage
+   partout, choisi par David plutôt qu'un réglage par appareil.
 2. **L'annulation d'écho reste toujours active.** Le repli, si l'écho passait sur un appareil, supprime la coupure à
    la voix, jamais l'annulation d'écho : sans elle, iOS baisse la voix d'Atlas.
 3. **Au retour sur la page, le son repart seul** : la page garde `/ws/voix` ouverte pendant une interruption, la
@@ -179,6 +197,7 @@ Les ajustements de la spec :
   bloc, et se révèle être un démarrage unique, pas un défaut de fond.
 - **Demander à David ce qu'il entendait** a évité une fausse conclusion : sans son « très faible », le chiffre
   d'atténuation aurait été pris au sérieux.
-- **Vérifier les captures brutes avant de conclure** : le Mac « réussissait » (zéro faux barge-in) parce que son
-  micro était muet.
+- **Vérifier les captures brutes avant de conclure** : le premier passage du Mac « réussissait » (zéro faux
+  barge-in) parce que son micro était muet.
+- **Mesurer plus d'un navigateur** : l'iPhone seul aurait fixé l'amorçage à 1,5 s, trop court pour Chrome sur macOS.
 
