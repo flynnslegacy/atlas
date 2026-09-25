@@ -174,6 +174,10 @@ class CerveauClaude:
                     # finir chez Claude avant la question suivante, sans retenir la session.
                     self._menage = asyncio.create_task(self._vider_le_tour(self._client))
                 if self._outils is not None and self._client is not None:
+                    # Une réponse coupée par une autre question a pu programmer la sienne :
+                    # une seule échéance à la fois. (Le verrou est tenu : elle ne résume pas.)
+                    if self._echeance is not None:
+                        self._echeance.cancel()
                     self._echeance = asyncio.create_task(self._a_l_echeance())
 
     async def fermer(self) -> None:

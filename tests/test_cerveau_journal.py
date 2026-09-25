@@ -161,6 +161,33 @@ async def test_une_question_avant_l_echeance_la_repousse(outils):
     await _jusqu_a(lambda: client.deconnexions == 1, "la conversation ne s'est pas fermée")
 
 
+async def test_deux_questions_qui_se_croisent_ne_laissent_qu_une_echeance(outils):
+    minuterie = Minuterie()
+    client = FauxClientClaude(
+        [debut_texte(), delta("Première "), BLOQUE, delta("x"), fin()],
+        reponse("Seconde."),
+        resume("Deux questions."),
+    )
+    cerveau = _cerveau(outils, client, minuterie=minuterie)
+    premiere: list = []
+
+    async def lire_la_premiere() -> None:
+        async for fragment in cerveau.repondre("une"):
+            premiere.append(fragment)
+
+    tache = asyncio.create_task(lire_la_premiere())
+    await _jusqu_a(lambda: premiere, "la première réponse ne commence pas")
+    assert await _tout(cerveau, "deux") == ["Seconde."]  # coupe la première
+    await tache
+    for rang in range(len(minuterie.delais) - 1):
+        minuterie.sonner(rang)  # l'échéance de la réponse coupée n'existe plus
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+    assert DEMANDE_RESUME not in client.questions
+    minuterie.sonner()
+    await _jusqu_a(lambda: client.deconnexions == 1, "la conversation ne s'est pas fermée")
+
+
 async def test_une_question_pendant_le_resume_l_attend_sans_le_couper(outils):
     minuterie, attente = Minuterie(), Attente()
     ancien = FauxClientClaude(
