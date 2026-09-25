@@ -83,6 +83,7 @@ SECRET_MIN = 8  # une clé du Core plus courte ne se cherche pas : trop de faux 
 RESULTATS_MAX = 20
 PREFIXE_NOTE = "Atlas : "
 PREFIXE_ANNULE = "Annulé : "
+PREFIXE_SUPPRESSION = "suppression de "
 PREFIXE_JOURNAL = "Journal : "
 # L'amorçage d'une conversation reste court, même quand la mémoire grossit.
 PROFIL_MAX = 4_000
@@ -103,6 +104,16 @@ class InfoDocument:
     titre: str
     resume: str
     modifie: dt.datetime
+
+
+@dataclass(frozen=True)
+class Defait:
+    """Ce qu'« annule » vient de défaire : la note avait créé, retouché ou supprimé ce
+    fichier (`nature` : « creation », « retouche » ou « suppression »)."""
+
+    chemin: str
+    titre: str
+    nature: str
 
 
 def _git(racine: Path, *arguments: str, entree: str | None = None) -> str:
@@ -323,9 +334,29 @@ class Memoire:
                         return trouvees
         return trouvees
 
-    def annuler(self) -> str:
-        """Défait la dernière écriture d'Atlas encore en place (`git revert`) ; rend son
-        titre. Ni le journal, ni les commits de David ne s'annulent."""
+    def titre_de(self, chemin: str) -> str:
+        """Le titre de la fiche ou du document qu'une suppression retirerait ; sinon
+        `ErreurMemoire` (ni le journal, ni un fichier absent ne se suppriment)."""
+        cible = self._cible(chemin, ecriture=True)
+        if not cible.is_file():
+            raise ErreurMemoire(f"{chemin} n'existe pas.")
+        return _titre_et_resume(_lire_texte(cible))[0] or chemin
+
+    def supprimer(self, chemin: str) -> str:
+        """Supprime une fiche ou un document, puis le commite ; rend son titre. Un fichier
+        retouché à la main depuis la dernière note reste à David."""
+        with self._verrou:
+            titre = self.titre_de(chemin)
+            if _git(self.racine, "status", "--porcelain", "--", chemin).strip():
+                raise ErreurMemoire(f"{chemin} a été retouché à la main : je n'y touche pas.")
+            _git(self.racine, "rm", "-q", "--", chemin)
+            message = f"{PREFIXE_NOTE}{PREFIXE_SUPPRESSION}{titre}"
+            _git(self.racine, "commit", "-q", "-m", message, "--", chemin)
+        return titre
+
+    def annuler(self) -> Defait:
+        """Défait la dernière écriture ou suppression d'Atlas encore en place, et dit ce
+        qu'elle avait fait. Ni le journal, ni les commits de David ne s'annulent."""
         with self._verrou:
             try:
                 historique = _git(self.racine, "log", "--format=%H%x1f%ae%x1f%s%x1f%b%x1e")
@@ -344,10 +375,14 @@ class Memoire:
                     return self._defaire(sha, sujet.removeprefix(PREFIXE_NOTE))
         raise ErreurMemoire("Il n'y a plus de note à retirer.")
 
-    def _defaire(self, sha: str, titre: str) -> str:
+    def _defaire(self, sha: str, titre: str) -> Defait:
         """Applique l'inverse de la note, tout ou rien, sur ses seuls fichiers : le travail
         de David, préparé ou non, n'est jamais touché."""
-        chemins = _git(self.racine, "show", "--name-only", "--format=", sha).split()
+        statut, chemin = _git(self.racine, "show", "--name-status", "--format=", sha).split()[:2]
+        nature = {"A": "creation", "D": "suppression"}.get(statut, "retouche")
+        if nature == "suppression":
+            titre = titre.removeprefix(PREFIXE_SUPPRESSION)
+        chemins = [chemin]
         refus = ErreurMemoire("Je ne peux pas retirer cette note : la fiche a été modifiée depuis.")
         if _git(self.racine, "status", "--porcelain", "--", *chemins).strip():
             raise refus  # une retouche de David sur la fiche, même pas encore commitée
@@ -359,7 +394,7 @@ class Memoire:
         _git(self.racine, "apply", "--index", entree=inverse)
         message = f"{PREFIXE_ANNULE}{titre}\n\nAnnule {sha}"
         _git(self.racine, "commit", "-q", "-m", message, "--", *chemins)
-        return titre
+        return Defait(chemin, titre, nature)
 
     # --- l'amorçage et le journal -----------------------------------------------------
 

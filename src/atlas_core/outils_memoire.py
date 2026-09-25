@@ -123,6 +123,6 @@ class OutilsMemoire:
     async def _annuler(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self.ecriture_permise:
             return _refus(PENDANT_LE_RESUME)
-        titre = await asyncio.to_thread(self.memoire.annuler)
+        defait = await asyncio.to_thread(self.memoire.annuler)
         self._annonces.append(Note(ANNONCE_RETRAIT))
-        return _texte(f"La note « {titre} » est retirée.")
+        return _texte(f"La note « {defait.titre} » est retirée.")
