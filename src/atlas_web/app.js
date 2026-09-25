@@ -1,6 +1,6 @@
 // Le démarrage de la page : relie la connexion, l'état, l'orbe, le fond et les panneaux.
 
-import { Connexion } from "./connexion.js";
+import { Connexion, identifiantDePage } from "./connexion.js";
 import { dimensionner, rgba } from "./dessin.js";
 import { LIBELLES, appliquerMessage, avancer, creerEtat, sceneDe } from "./etat.js";
 import { fonds } from "./fonds/index.js";
@@ -34,6 +34,7 @@ try {
   stockage = null; // stockage interdit : les choix ne seront pas mémorisés, la page marche quand même
 }
 let cleEnMemoire = null;
+const page = identifiantDePage();
 
 const etat = creerEtat();
 let statut = "connexion";
@@ -49,6 +50,7 @@ const sousTitres = { conteneur: $("sous-titres"), question: $("st-question"), re
 const connexion = new Connexion({
   url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/web`,
   lireCle: () => cleEnMemoire ?? lireStockage(stockage, CLE_STOCKAGE),
+  entree: () => ({ page }),
   surMessage(message) {
     appliquerMessage(etat, message, Date.now());
     if (message.type === "muet") $("muet").checked = message.actif;

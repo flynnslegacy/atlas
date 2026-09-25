@@ -6,6 +6,7 @@ import {
   DELAIS_RECONNEXION_MS,
   FERMETURE_CLE_ABSENTE,
   FERMETURE_NON_AUTORISE,
+  identifiantDePage,
 } from "../../src/atlas_web/connexion.js";
 
 class FauxWebSocket {
@@ -19,8 +20,8 @@ class FauxWebSocket {
     FauxWebSocket.crees.push(this);
   }
 
-  send(texte) {
-    this.envoyes.push(JSON.parse(texte));
+  send(donnees) {
+    this.envoyes.push(typeof donnees === "string" ? JSON.parse(donnees) : donnees);
   }
 
   close() {
@@ -38,26 +39,33 @@ class FauxWebSocket {
     this.onmessage?.({ data: JSON.stringify(message) });
   }
 
+  recevoirBinaire(donnees) {
+    this.onmessage?.({ data: donnees });
+  }
+
   couper(code) {
     this.readyState = 3;
     this.onclose?.({ code });
   }
 }
 
-function monter({ cle = "cle" } = {}) {
+function monter({ cle = "cle", entree } = {}) {
   FauxWebSocket.crees = [];
   const statuts = [];
   const messages = [];
+  const binaires = [];
   const planifies = [];
   const connexion = new Connexion({
     url: "ws://atlas.local:8080/ws/web",
     lireCle: () => cle,
+    entree,
     surMessage: (message) => messages.push(message),
+    surBinaire: (donnees) => binaires.push(donnees),
     surStatut: (statut) => statuts.push(statut),
     FabriqueWebSocket: FauxWebSocket,
     planifier: (rappel, delai) => planifies.push({ rappel, delai }),
   });
-  return { connexion, statuts, messages, planifies, derniere: () => FauxWebSocket.crees.at(-1) };
+  return { connexion, statuts, messages, binaires, planifies, derniere: () => FauxWebSocket.crees.at(-1) };
 }
 
 test("la clé part dans le premier message, puis la page est en ligne", () => {
@@ -161,4 +169,52 @@ test("un message illisible est ignoré", () => {
   ws.ouvrir();
   ws.onmessage({ data: "pas du json" });
   assert.deepEqual(m.messages, []);
+});
+
+test("l'entrée porte aussi ce que la page y ajoute, relu à chaque connexion", () => {
+  let heyAtlas = true;
+  const m = monter({ entree: () => ({ page: "p1", hey_atlas: heyAtlas }) });
+  m.connexion.demarrer();
+  m.derniere().ouvrir();
+  assert.deepEqual(m.derniere().envoyes, [{ type: "authentification", cle: "cle", page: "p1", hey_atlas: true }]);
+  heyAtlas = false;
+  m.derniere().couper(1006);
+  m.planifies.at(-1).rappel();
+  m.derniere().ouvrir();
+  assert.equal(m.derniere().envoyes[0].hey_atlas, false);
+});
+
+test("le son reçu va à surBinaire, une fois en ligne seulement", () => {
+  const m = monter();
+  m.connexion.demarrer();
+  const ws = m.derniere();
+  assert.equal(ws.binaryType, "arraybuffer");
+  ws.ouvrir();
+  const avant = new ArrayBuffer(640);
+  ws.recevoirBinaire(avant);
+  ws.recevoir({ type: "pret" });
+  const apres = new ArrayBuffer(640);
+  ws.recevoirBinaire(apres);
+  assert.deepEqual(m.binaires, [apres]);
+  assert.deepEqual(m.messages, [{ type: "pret" }]);
+});
+
+test("envoyerBinaire ne part qu'une fois en ligne", () => {
+  const m = monter();
+  m.connexion.demarrer();
+  const ws = m.derniere();
+  const bloc = new ArrayBuffer(640);
+  ws.ouvrir();
+  assert.equal(m.connexion.envoyerBinaire(bloc), false);
+  ws.recevoir({ type: "pret" });
+  assert.equal(m.connexion.envoyerBinaire(bloc), true);
+  assert.equal(ws.envoyes.at(-1), bloc);
+});
+
+test("l'identifiant de page est tiré au hasard, dans le format que le Core accepte", () => {
+  const a = identifiantDePage();
+  assert.match(a, /^[0-9a-f]{24}$/);
+  assert.notEqual(identifiantDePage(), a);
+  const fixe = { getRandomValues: (octets) => octets.fill(0xab) };
+  assert.equal(identifiantDePage(fixe), "ab".repeat(12));
 });

@@ -90,10 +90,11 @@ function fauxDocumentDeLaPage() {
 
 // Charge app.js dans un faux navigateur, avec un fond dont le dessin lève à chaque image.
 // Rend la file des rappels que le vrai navigateur aurait donnés à requestAnimationFrame.
-async function chargerPage() {
+async function chargerPage({ stockage = fauxStockage(), FabriqueWebSocket } = {}) {
   const file = [];
   globalThis.document = fauxDocumentDeLaPage();
-  globalThis.window = { localStorage: fauxStockage(), matchMedia: () => ({ matches: false }) };
+  globalThis.window = { localStorage: stockage, matchMedia: () => ({ matches: false }) };
+  globalThis.WebSocket = FabriqueWebSocket;
   globalThis.location = { protocol: "http:", host: "atlas.test" };
   globalThis.requestAnimationFrame = (rappel) => {
     file.push(rappel);
@@ -128,4 +129,25 @@ test("la boucle d'animation survit à un dessin qui lève, sans inonder la conso
   } finally {
     console.error = erreurOriginale;
   }
+});
+
+test("la page s'annonce sur /ws/web avec son identifiant", async () => {
+  const ouvertes = [];
+  class FauxWebSocket {
+    constructor(url) {
+      this.url = url;
+      this.envoyes = [];
+      ouvertes.push(this);
+    }
+
+    send(texte) {
+      this.envoyes.push(JSON.parse(texte));
+    }
+  }
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const [ws] = ouvertes;
+  assert.equal(ws.url, "ws://atlas.test/ws/web");
+  ws.onopen();
+  assert.equal(ws.envoyes[0].cle, "cle");
+  assert.match(ws.envoyes[0].page, /^[0-9a-f]{24}$/);
 });
