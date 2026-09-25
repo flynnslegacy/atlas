@@ -303,6 +303,23 @@ test("au retour sur la page, un micro mort demande un toucher, même son context
   assert.equal(m.voix.statut, "a_reactiver");
 });
 
+test("si le micro ne peut pas se rouvrir, la page le dit et s'éteint", async () => {
+  const m = monter();
+  await enLigne(m);
+  const audio = m.audios[0];
+  audio.microVivant = false;
+  audio.rappels.surEtat("micro_coupe");
+  audio.reprendre = async () => {
+    throw Object.assign(new Error("Permission refusée"), { name: "NotAllowedError" });
+  };
+  await m.voix.reactiver();
+  assert.equal(m.voix.statut, "micro_refuse");
+  assert.match(m.voix.derniereErreur, /NotAllowedError/);
+  assert.equal(m.voix.allumee, false);
+  assert.equal(audio.fermee, true);
+  assert.equal(m.ws().fermee, true);
+});
+
 test("au retour sur la page, un son reparti seul ne demande rien", async () => {
   const m = monter();
   await enLigne(m);

@@ -76,10 +76,7 @@ export class Voix {
   }
 
   eteindre() {
-    this._voulue = false;
-    this._connexion.arreter();
-    this._fermerAudio();
-    this._changer("eteinte");
+    this._arreter("eteinte");
   }
 
   toucherOrbe() {
@@ -105,7 +102,14 @@ export class Voix {
 
   // Le toucher qui rouvre le son quand iOS ne l'a pas relancé seul.
   async reactiver() {
-    await this._audio?.reprendre();
+    if (!this._audio) return;
+    try {
+      await this._audio.reprendre();
+    } catch (e) {
+      // L'autorisation retirée, ou le micro pris par une autre app : la page le dit.
+      this.derniereErreur = `${e.name} : ${e.message}`;
+      this._arreter("micro_refuse");
+    }
   }
 
   _surMessage(message) {
@@ -144,6 +148,13 @@ export class Voix {
     // repart : un toucher le rouvre.
     if (!this._audio.microVivant) return "a_reactiver";
     return this._interrompue ? "interrompue" : "active";
+  }
+
+  _arreter(statut) {
+    this._voulue = false;
+    this._connexion.arreter();
+    this._fermerAudio();
+    this._changer(statut);
   }
 
   _fermerAudio() {
