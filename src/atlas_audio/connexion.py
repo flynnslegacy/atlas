@@ -47,8 +47,11 @@ async def servir_connexion(ws, client: ClientConnecte) -> None:
     des secondes de son déjà en file.
 
     Si le périphérique audio meurt (capture ou lecture), la connexion s'arrête avec
-    `PeripheriqueEnPanne` plutôt que de tourner sourde et muette en se reconnectant sans
-    fin ; une annulation de cette coroutine, elle, relève une simple `CancelledError`."""
+    `PeripheriqueEnPanne` — levée à la frontière du périphérique (`client._frontiere_peripherique`),
+    pas devinée ici d'après la tâche fautive : la capture fait aussi des envois réseau, et
+    une coupure du Core en plein envoi (`ConnectionClosed`) doit se reconnecter comme les
+    autres, pas arrêter le programme. Une annulation de cette coroutine, elle, relève une
+    simple `CancelledError`."""
     file: asyncio.Queue[bytes | MessageCore] = asyncio.Queue()
     capture = asyncio.create_task(client.boucle_capture())
     lecture = asyncio.create_task(_traiter_la_file(client, file))
@@ -58,14 +61,13 @@ async def servir_connexion(ws, client: ClientConnecte) -> None:
         while True:
             fait, en_cours = await asyncio.wait(en_cours, return_when=asyncio.FIRST_COMPLETED)
             for tache in fait:
-                if tache is flux or tache.cancelled():
+                if tache.cancelled():
                     continue
                 erreur = tache.exception()
                 if erreur is not None:
-                    raise PeripheriqueEnPanne("le périphérique audio est mort") from erreur
+                    raise erreur  # déjà PeripheriqueEnPanne si la cause était le périphérique
             if flux in fait:
-                break
-        flux.result()  # relève une erreur du flux Core (sinon fin normale : rien à faire)
+                break  # le flux du Core s'est terminé normalement : rien à relever
     finally:
         for tache in (capture, lecture, flux):
             tache.cancel()
@@ -118,18 +120,15 @@ def _demarrer_absence(
 
 async def _arreter_absence(absence: asyncio.Task | None) -> None:
     """Annule la tâche qui occupe le micro pendant l'absence du Core, et relève sa panne
-    si elle en a une : un périphérique mort pendant l'absence est aussi fatal que pendant
-    le service (sinon un micro mort passerait inaperçu tant que le Core reste injoignable).
-    """
+    si elle en a une (déjà `PeripheriqueEnPanne`, levée à la frontière du périphérique
+    par `client._vider_le_micro`) : un périphérique mort pendant l'absence est aussi
+    fatal que pendant le service, sinon un micro mort passerait inaperçu tant que le Core
+    reste injoignable."""
     if absence is None:
         return
     absence.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await absence
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        raise PeripheriqueEnPanne("le périphérique audio est mort") from e
 
 
 async def boucle_de_connexion(

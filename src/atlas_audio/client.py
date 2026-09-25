@@ -38,7 +38,7 @@ from atlas_core.protocole import (
 )
 
 from .aec import ouvrir_peripherique
-from .connexion import boucle_de_connexion, servir_connexion
+from .connexion import PeripheriqueEnPanne, boucle_de_connexion, servir_connexion
 from .reveilleur import PredicteurOpenWakeWord, ReveilleurMotCle, ReveilleurTouche
 from .vad import DetecteurVoix, Endpointeur, FenetreEnergie
 
@@ -129,6 +129,21 @@ class Transport(Protocol):
     async def envoyer_binaire(self, trame: bytes) -> None: ...
 
 
+async def _frontiere_peripherique(appel: Awaitable):
+    """Enveloppe un appel au périphérique audio (`lire_bloc`, `jouer`, `vider`) : toute
+    panne à cette frontière devient `PeripheriqueEnPanne`. C'est la CAUSE qui distingue
+    une panne du périphérique d'une coupure réseau, pas la tâche qui l'a levée — la même
+    tâche de capture fait à la fois de la lecture micro (le périphérique) et des envois au
+    Core (le réseau) ; un `ws.send` qui échoue parce que le Core est parti n'est jamais
+    une panne du périphérique, et ne doit pas empêcher la reconnexion."""
+    try:
+        return await appel
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        raise PeripheriqueEnPanne("le périphérique audio est mort") from e
+
+
 class ClientAudio:
     def __init__(
         self,
@@ -199,12 +214,13 @@ class ClientAudio:
     async def boucle_capture(self) -> None:
         # Une annulation (extérieure, ou levée par un faux périphérique de test à court de
         # blocs) termine la capture sans bruit. Une vraie panne du périphérique — le
-        # binaire Swift qui meurt lève `IncompleteReadError` — doit au contraire remonter :
-        # `connexion.servir_connexion` la transforme en arrêt de la connexion, plutôt que
-        # de laisser le client tourner sourd indéfiniment.
+        # binaire Swift qui meurt lève `IncompleteReadError` — doit au contraire remonter,
+        # via `_frontiere_peripherique`, en `PeripheriqueEnPanne` : `connexion.py` arrête
+        # alors la connexion plutôt que de laisser le client tourner sourd indéfiniment.
+        # Les envois à `_traiter_bloc` (le Core), eux, restent une coupure réseau ordinaire.
         with contextlib.suppress(asyncio.CancelledError):
             while True:
-                bloc = await self._peripherique.lire_bloc()
+                bloc = await _frontiere_peripherique(self._peripherique.lire_bloc())
                 await self._traiter_bloc(bloc)
 
     async def _traiter_bloc(self, bloc: bytes) -> None:
@@ -279,7 +295,7 @@ class ClientAudio:
         self._couper()
         # Le Core d'abord : il arrête la synthèse et Claude pendant que le son se vide.
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
-        await self._peripherique.vider()
+        await _frontiere_peripherique(self._peripherique.vider())
         self._ouvrir_capture()
         # Le pré-roulement est capturé comme le reste : envoyé, et compté par
         # l'endpointeur, qui sait ainsi que la parole a déjà commencé.
@@ -321,7 +337,7 @@ class ClientAudio:
                 self._fenetre_energie.reinitialiser()
         elif isinstance(msg, StopAudio):
             self._couper(msg.id_enonce)
-            await self._peripherique.vider()
+            await _frontiere_peripherique(self._peripherique.vider())
         elif isinstance(msg, Erreur):
             _journal.warning("erreur signalée par le Core [%s] : %s", msg.code, msg.message)
         elif isinstance(msg, Etat):
@@ -353,7 +369,7 @@ class ClientAudio:
             if avance <= AVANCE_MAX_S + DUREE_BLOC_S / 2:
                 break
             await self._attendre(avance - AVANCE_MAX_S)
-        await self._peripherique.jouer(pcm)
+        await _frontiere_peripherique(self._peripherique.jouer(pcm))
         if self._a_jouer(identifiant):
             # Sinon, coupée pendant l'écriture : le vidage l'a suivie, l'horloge n'avance pas.
             self._fin_lecture = max(self._horloge(), self._fin_lecture) + DUREE_BLOC_S
@@ -385,7 +401,7 @@ async def _vider_le_micro(peripherique) -> None:
     rebranchement ; sounddevice sature sa file et son rappel crie `QueueFull` en boucle)
     jusqu'à ce que la connexion revienne."""
     while True:
-        await peripherique.lire_bloc()
+        await _frontiere_peripherique(peripherique.lire_bloc())
 
 
 async def principal() -> None:
