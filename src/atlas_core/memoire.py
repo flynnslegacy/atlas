@@ -1,9 +1,10 @@
 """La mémoire d'Atlas : un dépôt git local de fichiers Markdown.
 
 Des fiches — le profil de David, l'entreprise, les projets, les personnes — qu'Atlas tient
-de lui-même, et un journal que le Core écrit seul. Tout passe par ici : chaque écriture est
-vérifiée (chemin, format, secrets), puis commitée sous l'auteur « Atlas ». Le dépôt n'a
-aucun distant et n'est jamais poussé : rien ne quitte la machine.
+de lui-même, les documents qu'il écrit à la demande de David, et un journal que le Core
+écrit seul. Tout passe par ici : chaque écriture est vérifiée (chemin, format, secrets),
+puis commitée sous l'auteur « Atlas ». Le dépôt n'a aucun distant et n'est jamais poussé :
+rien ne quitte la machine.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ import re
 import subprocess
 import threading
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .consignes import date_en_lettres, heure_en_chiffres
@@ -52,11 +54,14 @@ _VARIABLES_LOCALES_GIT = frozenset(
 DOSSIERS_FICHES = ("entreprise", "projets", "personnes")
 _NOM = r"[a-z0-9]+(?:-[a-z0-9]+)*"
 _FICHE = re.compile(rf"(?:profil|(?:{'|'.join(DOSSIERS_FICHES)})/(?P<nom>{_NOM}))\.md")
+DOSSIER_DOCUMENTS = "documents"
+_DOCUMENT = re.compile(rf"{DOSSIER_DOCUMENTS}/(?P<nom>{_NOM})\.md")
 _JOURNAL = re.compile(r"journal/\d{4}-\d{2}-\d{2}\.md")
 NOM_MAX = 60
 TITRE_MAX = 100
 RESUME_MAX = 200
 FICHE_MAX = 20_000
+DOCUMENT_MAX = 50_000  # une dizaine de pages
 # Ce qui ressemble à un secret n'entre jamais dans la mémoire (spec parente §13).
 _SECRETS = [
     re.compile(motif)
@@ -88,6 +93,16 @@ JOURS_DE_JOURNAL = 7
 
 class ErreurMemoire(Exception):
     """L'écriture ou la lecture est refusée. Le message, en français, va à Claude."""
+
+
+@dataclass(frozen=True)
+class InfoDocument:
+    """Un document, tel que le panneau « Documents » de la page le liste."""
+
+    chemin: str
+    titre: str
+    resume: str
+    modifie: dt.datetime
 
 
 def _git(racine: Path, *arguments: str, entree: str | None = None) -> str:
@@ -137,11 +152,24 @@ def _tronquer(texte: str, taille: int) -> str:
     return texte if len(texte) <= taille else texte[:taille].rstrip() + " […]"
 
 
-def verifier_fiche(contenu: str) -> str:
-    """Une fiche : « # Titre », une ligne vide, une phrase de résumé, puis le reste.
-    Rend le titre."""
-    if len(contenu) > FICHE_MAX:
-        raise ErreurMemoire(f"Une fiche fait au plus {FICHE_MAX} caractères.")
+def _titre_et_resume(texte: str) -> tuple[str, str]:
+    """Le titre (la première ligne) et la phrase de résumé, vide si le fichier a été retouché
+    à la main hors du format."""
+    debut = texte.split("\n", 3)
+    titre = debut[0].lstrip("#").strip()
+    au_format = len(debut) > 2 and not debut[1].strip() and debut[2].strip()
+    resume = debut[2].strip() if au_format and not debut[2].startswith("#") else ""
+    return titre, resume
+
+
+def verifier_fiche(contenu: str, nature: str = "fiche") -> str:
+    """Une fiche, ou un document : « # Titre », une ligne vide, une phrase de résumé, puis
+    le reste. Rend le titre."""
+    une, taille = (
+        ("Un document", DOCUMENT_MAX) if nature == "document" else ("Une fiche", FICHE_MAX)
+    )
+    if len(contenu) > taille:
+        raise ErreurMemoire(f"{une} fait au plus {taille} caractères.")
     lignes = contenu.split("\n")
     forme = (
         len(lignes) >= 3
@@ -152,11 +180,11 @@ def verifier_fiche(contenu: str) -> str:
     )
     if not forme:
         raise ErreurMemoire(
-            "Une fiche commence par « # Titre », une ligne vide, puis une phrase de résumé."
+            f"{une} commence par « # Titre », une ligne vide, puis une phrase de résumé."
         )
     titre = lignes[0][2:].strip()
     if not titre or len(titre) > TITRE_MAX:
-        raise ErreurMemoire(f"Le titre d'une fiche fait de 1 à {TITRE_MAX} caractères.")
+        raise ErreurMemoire(f"Le titre fait de 1 à {TITRE_MAX} caractères.")
     if len(lignes[2].strip()) > RESUME_MAX:
         raise ErreurMemoire(f"La phrase de résumé fait au plus {RESUME_MAX} caractères.")
     return titre
@@ -189,11 +217,12 @@ class Memoire:
 
     def _cible(self, chemin: str, ecriture: bool) -> Path:
         """Le fichier désigné, s'il est permis ; sinon `ErreurMemoire`."""
-        fiche = _FICHE.fullmatch(chemin)
+        fiche = _FICHE.fullmatch(chemin) or _DOCUMENT.fullmatch(chemin)
         if not (fiche or (not ecriture and _JOURNAL.fullmatch(chemin))):
             raise ErreurMemoire(
                 f"« {chemin} » n'est pas une fiche : profil.md, ou entreprise/, projets/ ou "
-                "personnes/ suivi d'un nom en minuscules, chiffres et tirets, en .md."
+                "personnes/ suivi d'un nom en minuscules, chiffres et tirets, en .md ; ni un "
+                "document : documents/ suivi d'un tel nom."
             )
         if fiche and fiche["nom"] and len(fiche["nom"]) > NOM_MAX:
             raise ErreurMemoire(f"Un nom de fiche fait au plus {NOM_MAX} caractères.")
@@ -227,26 +256,46 @@ class Memoire:
     def ecrire(self, chemin: str, contenu: str) -> str | None:
         """Crée ou remplace une fiche entière, puis la commite. Rend son titre, ou None si
         elle était déjà ainsi (rien à commiter, rien à annoncer)."""
+        if _DOCUMENT.fullmatch(chemin):
+            raise ErreurMemoire("Un document s'écrit avec document_ecrire, pas comme une fiche.")
+        ecrit = self._ecrire(chemin, contenu, verifier_fiche)
+        return ecrit[0] if ecrit else None
+
+    def ecrire_document(self, nom: str, contenu: str) -> tuple[str, bool] | None:
+        """Crée ou remplace `documents/<nom>.md` en entier, puis le commite. Rend son titre
+        et s'il vient d'être créé, ou None s'il était déjà ainsi."""
+        chemin = f"{DOSSIER_DOCUMENTS}/{nom}.md"
+        if not _DOCUMENT.fullmatch(chemin) or len(nom) > NOM_MAX:
+            raise ErreurMemoire(
+                f"« {nom} » n'est pas un nom de document : des minuscules, des chiffres et des "
+                f"tirets, {NOM_MAX} caractères au plus."
+            )
+        return self._ecrire(chemin, contenu, lambda texte: verifier_fiche(texte, "document"))
+
+    def _ecrire(
+        self, chemin: str, contenu: str, verifier: Callable[[str], str]
+    ) -> tuple[str, bool] | None:
         cible = self._cible(chemin, ecriture=True)
         contenu = contenu.strip("\n") + "\n"
-        titre = verifier_fiche(contenu)
+        titre = verifier(contenu)
         self.verifier_secrets(contenu)
         with self._verrou:
             self._assurer_le_depot()
-            if cible.is_file() and _lire_texte(cible) == contenu:
+            existe = cible.is_file()
+            if existe and _lire_texte(cible) == contenu:
                 return None
             cible.parent.mkdir(parents=True, exist_ok=True)
             cible.write_text(contenu, encoding="utf-8")
             # Le seul fichier écrit : les retouches de David ailleurs restent les siennes.
             _git(self.racine, "add", "--", chemin)
             _git(self.racine, "commit", "-q", "-m", f"{PREFIXE_NOTE}{titre}", "--", chemin)
-        return titre
+        return titre, not existe
 
     def _fichiers(self, avec_journal: bool) -> list[str]:
-        """Les fiches (le profil, puis chaque dossier par ordre alphabétique), puis le
-        journal du plus récent au plus ancien ; seulement ce qui est permis."""
+        """Les fiches (le profil, puis chaque dossier par ordre alphabétique), les documents,
+        puis le journal du plus récent au plus ancien ; seulement ce qui est permis."""
         candidats = ["profil.md"]
-        for dossier in DOSSIERS_FICHES:
+        for dossier in (*DOSSIERS_FICHES, DOSSIER_DOCUMENTS):
             noms = (p.name for p in (self.racine / dossier).glob("*.md"))
             candidats += sorted(f"{dossier}/{nom}" for nom in noms)
         if avec_journal:
@@ -315,20 +364,27 @@ class Memoire:
     # --- l'amorçage et le journal -----------------------------------------------------
 
     def sommaire(self) -> list[str]:
-        """Une ligne par fiche hors profil : son chemin et sa phrase de résumé (son titre,
-        si la fiche a été retouchée à la main hors du format)."""
+        """Une ligne par fiche hors profil, puis par document : son chemin et sa phrase de
+        résumé (son titre, s'il a été retouché à la main hors du format)."""
         lignes = []
         for chemin in self._fichiers(avec_journal=False):
             if chemin == "profil.md":
                 continue
-            debut = _lire_texte(self.racine / chemin).split("\n", 3)
-            au_format = len(debut) > 2 and not debut[1].strip() and debut[2].strip()
-            if au_format and not debut[2].startswith("#"):
-                resume = debut[2].strip()
-            else:
-                resume = debut[0].lstrip("#").strip()
-            lignes.append(f"- {chemin} : {resume}")
+            titre, resume = _titre_et_resume(_lire_texte(self.racine / chemin))
+            lignes.append(f"- {chemin} : {resume or titre}")
         return lignes
+
+    def documents(self) -> list[InfoDocument]:
+        """Les documents, du plus récemment modifié au plus ancien."""
+        infos = []
+        for chemin in self._fichiers(avec_journal=False):
+            if not chemin.startswith(f"{DOSSIER_DOCUMENTS}/"):
+                continue
+            fichier = self.racine / chemin
+            titre, resume = _titre_et_resume(_lire_texte(fichier))
+            modifie = dt.datetime.fromtimestamp(fichier.stat().st_mtime)
+            infos.append(InfoDocument(chemin, titre, resume, modifie))
+        return sorted(infos, key=lambda info: info.modifie, reverse=True)
 
     def amorcage(self, aujourd_hui: dt.date) -> str:
         """Le bloc qui précède la première question d'une conversation : le profil, le
