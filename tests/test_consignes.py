@@ -2,7 +2,15 @@ import datetime as dt
 
 import pytest
 
-from atlas_core.consignes import CONSIGNES, date_en_lettres, heure_en_chiffres, ligne_de_date
+from atlas_core.consignes import (
+    CONSIGNES,
+    CONSIGNES_AVEC_MEMOIRE,
+    DEMANDE_RESUME,
+    RIEN,
+    date_en_lettres,
+    heure_en_chiffres,
+    ligne_de_date,
+)
 
 
 @pytest.mark.parametrize(
@@ -39,5 +47,42 @@ def test_les_consignes_tiennent_les_decisions_de_la_spec():
 
 
 def test_les_consignes_ne_revelent_rien_de_prive():
-    for interdit in ("@", "http", "192.168"):
-        assert interdit not in CONSIGNES.lower(), interdit
+    for consignes in (CONSIGNES, CONSIGNES_AVEC_MEMOIRE, DEMANDE_RESUME):
+        for interdit in ("@", "http", "192.168"):
+            assert interdit not in consignes.lower(), interdit
+
+
+def test_sans_memoire_claude_ne_parle_pas_de_memoire():
+    assert "mémoire" not in CONSIGNES.lower()
+    assert "Tu ne peux rien faire d'autre que réfléchir et chercher sur le web." in CONSIGNES
+
+
+def test_avec_la_memoire_les_consignes_gardent_tout_et_disent_comment_la_tenir():
+    texte = CONSIGNES_AVEC_MEMOIRE.lower()
+    for attendu in (
+        "tutoies",
+        "deux à quatre phrases",
+        "cite le site par son nom",
+        "ne prétends jamais",
+        "[mémoire d'atlas]",
+        "memoire_lire",
+        "memoire_chercher",
+        "memoire_ecrire",
+        "memoire_annuler",
+        "« # titre », une ligne vide, puis une phrase de résumé",
+        "relis une fiche avant de la modifier",
+        "date de naissance approximative",
+        "une date plutôt que « jeudi »",
+        "n'annonce pas que tu notes",
+        "ne note jamais de mot de passe",
+        "comme son profil l'indique",
+        "réfléchir, chercher sur le web et tenir ta mémoire",
+    ):
+        assert attendu in texte, attendu
+
+
+def test_la_demande_de_resume_ne_fait_rien_ecrire_et_admet_rien():
+    assert DEMANDE_RESUME.startswith("[Fin de la conversation]")
+    assert "n'écris rien dans ta mémoire" in DEMANDE_RESUME
+    assert "Ne garde pas ce que David t'a demandé d'oublier" in DEMANDE_RESUME
+    assert DEMANDE_RESUME.endswith(f"réponds seulement : {RIEN}.")

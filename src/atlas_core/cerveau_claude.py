@@ -37,7 +37,8 @@ from claude_agent_sdk import (
 )
 
 from .cerveau import RECHERCHE, ErreurCerveau, Recherche
-from .consignes import CONSIGNES, ligne_de_date
+from .consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE, ligne_de_date
+from .outils_memoire import SERVEUR, OutilsMemoire
 
 _journal = logging.getLogger(__name__)
 
@@ -58,15 +59,18 @@ _ERREURS_ASSISTANT = {
 }
 
 
-def options_cerveau(modele: str, dossier: Path) -> ClaudeAgentOptions:
-    """Claude enfermé dans son rôle : la recherche web pour seul outil, aucun réglage ni
-    `CLAUDE.md` de la machine, aucun serveur MCP, un dossier de travail vide."""
+def options_cerveau(
+    modele: str, dossier: Path, outils: OutilsMemoire | None = None
+) -> ClaudeAgentOptions:
+    """Claude enfermé dans son rôle : la recherche web, et les outils de sa mémoire s'il en
+    a une ; aucun réglage ni `CLAUDE.md` de la machine, aucun autre serveur MCP, un
+    dossier de travail vide."""
     return ClaudeAgentOptions(
         tools=[OUTIL_RECHERCHE],
-        allowed_tools=[OUTIL_RECHERCHE],
-        system_prompt=CONSIGNES,
+        allowed_tools=[OUTIL_RECHERCHE, *(outils.noms if outils else [])],
+        system_prompt=CONSIGNES_AVEC_MEMOIRE if outils else CONSIGNES,
         setting_sources=[],
-        mcp_servers={},
+        mcp_servers={SERVEUR: outils.serveur()} if outils else {},
         strict_mcp_config=True,
         include_partial_messages=True,
         model=modele,
