@@ -189,6 +189,33 @@ async def test_hey_atlas_pendant_la_recherche_abandonne_la_reponse():
     await s.fermer()
 
 
+async def test_barge_in_juste_apres_le_retour_en_reflexion_mene_a_l_ecoute():
+    # Le calendrier de lecture du client le garde armé un peu après la fin réelle du son
+    # (marge de sortie + réseau) : une interruption peut donc arriver juste après que le
+    # Core soit passé en réflexion pour la recherche. Le client, lui, capture déjà : le
+    # Core doit finir en écoute, sinon l'audio et la fin d'énoncé qui suivent sont jetés
+    # (`sur_audio` et `_fin_enonce` exigent tous deux l'état « ecoute »).
+    c, d, plan = Collecteur(), DiffuseurEspion(), FauxPlanificateur()
+    resultats = asyncio.Event()
+    cerveau = CerveauScript(RECHERCHE, resultats, "Il pleut. ")
+    s = _session(c, d, cerveau, planifier=plan)
+    await s.sur_saisie("Il pleut à Paris ?")
+    await _attendre(lambda: _dits(c) == [PHRASE_ATTENTE])
+    plan.jouer()  # la phrase d'attente a fini de jouer : le Core passe en réflexion
+    await _attendre(lambda: c.etats()[-1] == "reflexion")
+
+    await s.sur_message(Interruption(horodatage=0.0))  # barge-in : le client capture déjà
+
+    assert c.etats()[-1] == "ecoute"
+    assert cerveau.ferme, "la réponse en cours est interrompue"
+
+    # L'audio et la fin d'énoncé qui suivent ne doivent pas être jetés.
+    await s.sur_audio(b"\x00" * 640)
+    await s.sur_message(FinEnonce(duree_ms=20))
+    await _attendre(lambda: len(cerveau.questions) == 2, "la question suivante doit partir")
+    await s.fermer()
+
+
 async def test_couper_la_phrase_d_attente_annule_le_retour_en_reflexion():
     c, d, plan = Collecteur(), DiffuseurEspion(), FauxPlanificateur()
     s = _session(c, d, CerveauScript(RECHERCHE, asyncio.Event()), planifier=plan)
@@ -289,6 +316,36 @@ async def test_une_erreur_longue_n_est_dite_qu_en_une_phrase_de_250_caracteres_a
     assert len(dits[0]) <= 250
     assert c.de(Erreur) == [Erreur(code="cerveau", message=longue)]
     assert d.de(Erreur) == [Erreur(code="cerveau", message=longue)]
+    await s.fermer()
+
+
+async def test_une_erreur_vide_est_quand_meme_affichee_aux_pages():
+    # Le texte de l'erreur, une fois découpé, peut ne rien laisser du tout (chaîne
+    # vide) : sans repli, les pages ne recevraient jamais l'erreur, qu'elles n'obtiennent
+    # que par `_phrase` (son paramètre `affichage`), pas par `_au_client` (le client audio).
+    c, d, plan = Collecteur(), DiffuseurEspion(), FauxPlanificateur()
+    s = _session(c, d, CerveauScript(ErreurCerveau("")), planifier=plan)
+    await s.sur_saisie("Raconte.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+
+    assert not _dits(c), "rien à dire : le texte de l'erreur est vide"
+    assert c.de(Erreur) == [Erreur(code="cerveau", message="")]
+    assert d.de(Erreur) == [Erreur(code="cerveau", message="")]
+    await s.fermer()
+
+
+async def test_une_erreur_reduite_a_rien_par_le_nettoyage_est_quand_meme_affichee():
+    # « ** » n'est pas vide pour le découpeur, mais `nettoyer` (qui retire les
+    # astérisques) le réduit à rien : `_phrase` ne dirait donc jamais rien, et sans
+    # repli, l'erreur n'atteindrait jamais les pages non plus.
+    c, d, plan = Collecteur(), DiffuseurEspion(), FauxPlanificateur()
+    s = _session(c, d, CerveauScript(ErreurCerveau("**")), planifier=plan)
+    await s.sur_saisie("Raconte.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+
+    assert not _dits(c), "rien à dire : le nettoyage a tout retiré"
+    assert c.de(Erreur) == [Erreur(code="cerveau", message="**")]
+    assert d.de(Erreur) == [Erreur(code="cerveau", message="**")]
     await s.fermer()
 
 

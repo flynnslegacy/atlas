@@ -186,7 +186,7 @@ class Session:
 
     async def _reveiller(self) -> None:
         if self._machine.valeur in ("parole", "reflexion"):
-            await self._interrompre()
+            await self._interrompre(jusqu_a_ecoute=False)
         # Un repos différé, des niveaux ou des sous-titres de la réponse précédente ne
         # doivent pas continuer d'arriver pendant la nouvelle écoute.
         self._arreter_calendrier(garder_le_texte=False)
@@ -215,7 +215,20 @@ class Session:
         self._machine.aller_vers("repos")
         await self._etat("repos")
 
-    async def _interrompre(self) -> None:
+    async def _interrompre(self, *, jusqu_a_ecoute: bool = True) -> None:
+        """Le client vient d'envoyer `Interruption` : il capture déjà (barge-in), quel
+        que soit l'état où cela nous surprend — en pleine parole, en réflexion (une
+        recherche web ou une transcription en cours), ou juste après la fin d'un tour.
+        Sans l'écoute retrouvée, l'audio et le `FinEnonce` qui suivent seraient jetés
+        (`sur_audio` et `_fin_enonce` exigent tous deux l'état « ecoute »). Le calendrier
+        de lecture du client le garde armé un peu après la fin réelle du son (marge de
+        sortie + réseau) : l'interruption peut donc arriver alors que le Core est déjà
+        passé en réflexion pour une recherche.
+
+        `jusqu_a_ecoute=False` (depuis `_reveiller`) s'arrête à « repos » pour la
+        réflexion : c'est alors `_reveiller`, qui reprend la main juste après, qui finit
+        lui-même le chemin jusqu'à « ecoute » — sans ce drapeau, « ecoute » partirait
+        deux fois."""
         await self._annuler_tache()
         await self._couper_la_voix()
         if self._machine.valeur == "parole":
@@ -224,7 +237,12 @@ class Session:
             await self._etat("ecoute")
         elif self._machine.valeur == "reflexion":
             self._machine.aller_vers("repos")
-            await self._etat("repos")
+            if jusqu_a_ecoute:
+                self._machine.aller_vers("ecoute")
+                self._tampon.clear()
+                await self._etat("ecoute")
+            else:
+                await self._etat("repos")
         elif self._machine.valeur == "repos":
             # Le tour s'est déjà terminé quand l'interruption arrive (on a coupé
             # juste à la fin de la phrase) : sans cette branche, le Core reste au
@@ -382,15 +400,20 @@ class Session:
             # en rouge pour les pages.
             _journal.warning("le cerveau n'a pas pu répondre : %s", erreur)
             message = Erreur(code="cerveau", message=str(erreur))
-            await self._au_client(message)
+            await self._au_client(message)  # le client audio ; les pages, elles, via `_phrase`
             # Seule la première phrase est dite (250 caractères au plus, comme tout
             # texte) : une erreur plus longue resterait sinon sous la coupe de la
-            # synthèse, ou la dépasserait franchement. Les pages ont déjà le message
-            # complet, ci-dessus.
+            # synthèse, ou la dépasserait franchement.
             decoupeur_erreur = DecoupeurPhrases()
             phrases_erreur = decoupeur_erreur.ajouter(str(erreur)) + decoupeur_erreur.vider()
-            if phrases_erreur:
+            premiere_phrase = nettoyer(phrases_erreur[0]) if phrases_erreur else ""
+            if premiere_phrase:
                 await self._phrase(phrases_erreur[0], affichage=message)
+            else:
+                # Rien à dire (texte vide, ou réduit à rien par `nettoyer`) : `_phrase`
+                # ne publierait alors jamais rien pour les pages, qui resteraient donc
+                # sans l'erreur qu'elles doivent pourtant afficher en rouge.
+                self._diffuseur.publier(message)
 
         self._diffuseur.publier(
             Latences(
