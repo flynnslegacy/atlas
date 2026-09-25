@@ -169,3 +169,18 @@ def test_le_cerveau_est_ferme_a_l_arret_du_core(monkeypatch):
     with TestClient(hub.app):
         assert not CerveauEspion.ferme
     assert CerveauEspion.ferme
+
+
+async def test_le_client_http_se_ferme_meme_si_le_cerveau_leve_une_exception(monkeypatch):
+    class CerveauQuiExplose(CerveauBouchon):
+        async def fermer(self) -> None:
+            raise RuntimeError("boum")
+
+    monkeypatch.setattr(hub, "creer_cerveau", lambda config: CerveauQuiExplose())
+
+    with pytest.raises(RuntimeError, match="boum"):
+        async with hub._cycle_de_vie(hub.app):
+            pass
+
+    assert hub._http is None, "le client HTTP doit se fermer même si le cerveau plante"
+    assert hub._cerveau is None

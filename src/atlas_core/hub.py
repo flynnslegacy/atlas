@@ -62,10 +62,14 @@ async def _cycle_de_vie(app: FastAPI):
     try:
         yield
     finally:
-        await _cerveau.fermer()
-        _cerveau = None
-        await _http.aclose()
-        _http = None
+        # Le cerveau dans son propre `try` : s'il lève (ou est annulé), le client HTTP se
+        # ferme quand même, dans le `finally` qui l'entoure.
+        try:
+            await _cerveau.fermer()
+        finally:
+            _cerveau = None
+            await _http.aclose()
+            _http = None
 
 
 app = FastAPI(title="atlas-core", lifespan=_cycle_de_vie)
