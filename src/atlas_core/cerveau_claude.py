@@ -214,10 +214,15 @@ class CerveauClaude:
         if client is not None and self._outils is not None and debut and fin:
             self._resume_en_cours = True
             self._outils.ecriture_permise = False
+            # Une question qui a coupé la dernière réponse puis renoncé avant d'avoir la
+            # parole laisse la marque de l'interruption : le résumé, lui, se lit en entier.
+            self._interrompu = False
             try:
                 async with asyncio.timeout(delai):
                     resume = await self._demander_le_resume(client)
-                if resume and resume.rstrip(".").upper() != RIEN:
+                if not resume:
+                    _journal.warning("résumé de la conversation vide : rien n'est écrit")
+                elif resume.rstrip(".").upper() != RIEN:
                     memoire = self._outils.memoire
                     await asyncio.to_thread(memoire.ajouter_au_journal, debut, fin, resume)
             except Exception as e:  # noqa: BLE001 — délai, Claude, dépôt : le résumé est perdu

@@ -188,6 +188,39 @@ async def test_deux_questions_qui_se_croisent_ne_laissent_qu_une_echeance(outils
     await _jusqu_a(lambda: client.deconnexions == 1, "la conversation ne s'est pas fermée")
 
 
+async def test_une_question_qui_coupe_puis_renonce_ne_fait_pas_perdre_le_resume(outils):
+    minuterie = Minuterie()
+    client = FauxClientClaude(
+        [debut_texte(), delta("Première "), BLOQUE, delta("x"), fin()],
+        resume("Une question coupée."),
+    )
+    client.interruption_sans_effet = True  # Claude tarde à finir le tour coupé
+    cerveau = _cerveau(outils, client, minuterie=minuterie)
+    premiere: list = []
+
+    async def lire_la_premiere() -> None:
+        async for fragment in cerveau.repondre("une"):
+            premiere.append(fragment)
+
+    tache = asyncio.create_task(lire_la_premiere())
+    await _jusqu_a(lambda: premiere, "la première réponse ne commence pas")
+    seconde = asyncio.create_task(_tout(cerveau, "deux"))  # coupe la première…
+    await _jusqu_a(lambda: client.interruptions == 1, "la seconde ne coupe pas la première")
+    seconde.cancel()  # … puis renonce en attendant la parole (sa page s'est fermée)
+    with pytest.raises(asyncio.CancelledError):
+        await seconde
+    client.interruption_sans_effet = False
+    await client.interrupt()  # Claude finit enfin le tour coupé
+    await asyncio.wait_for(tache, timeout=2)
+    assert premiere == ["Première "]
+    for _ in range(5):
+        await asyncio.sleep(0)
+    minuterie.sonner()
+    await _jusqu_a(lambda: client.deconnexions == 1, "la conversation ne s'est pas fermée")
+    assert (outils.memoire.racine / JOURNAL).exists(), "le résumé s'est perdu"
+    assert "Une question coupée." in outils.memoire.lire(JOURNAL)
+
+
 async def test_une_question_pendant_le_resume_l_attend_sans_le_couper(outils):
     minuterie, attente = Minuterie(), Attente()
     ancien = FauxClientClaude(
@@ -249,6 +282,17 @@ async def test_un_resume_trop_long_est_abandonne(outils, monkeypatch, caplog):
     assert "résumé de la conversation perdu (TimeoutError)" in caplog.text
     assert not (outils.memoire.racine / "journal").exists()
     assert await _tout(cerveau, "Tu es là ?") == ["Oui."]
+
+
+async def test_un_resume_vide_se_signale(outils, caplog):
+    minuterie = Minuterie()
+    client = FauxClientClaude(reponse("Midi."), [fin()])
+    cerveau = _cerveau(outils, client, minuterie=minuterie)
+    await _tout(cerveau, "Quelle heure est-il ?")
+    minuterie.sonner()
+    await _jusqu_a(lambda: client.deconnexions == 1, "la conversation ne s'est pas fermée")
+    assert "résumé de la conversation vide : rien n'est écrit" in caplog.text
+    assert not (outils.memoire.racine / "journal").exists()
 
 
 async def test_une_panne_de_claude_pendant_le_resume_ne_fait_pas_dire_fil_perdu(outils, caplog):
