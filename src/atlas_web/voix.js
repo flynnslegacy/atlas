@@ -124,6 +124,7 @@ export class Voix {
   }
 
   _surEtatAudio(etat) {
+    if (!this._audio) return; // son fermé par la page elle-même, ou pas encore ouvert
     if (etat !== "running") {
       this._interrompue = true;
       // Un micro coupé (appel, casque débranché…) ne revient jamais seul : un toucher le rouvre.
@@ -204,7 +205,10 @@ export async function ouvrirAudioNavigateur({ surBloc, surEtat }, nav = globalTh
     const muet = contexte.createGain();
     muet.gain.value = 0;
     capture.connect(muet).connect(contexte.destination);
-    contexte.addEventListener("statechange", () => surEtat(contexte.state));
+    contexte.addEventListener("statechange", () => {
+      // Sa fermeture vient de la page elle-même : ce n'est pas une interruption.
+      if (contexte.state !== "closed") surEtat(contexte.state);
+    });
     await contexte.resume();
     const ouvrirMicro = async () => {
       flux = await nav.navigator.mediaDevices.getUserMedia({

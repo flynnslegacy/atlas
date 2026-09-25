@@ -230,9 +230,11 @@ test("le micro, l'orbe et « Hey Atlas » de la page passent par /ws/voix", asyn
   assert.equal(stockage.getItem("atlas.hey_atlas"), "0");
 
   $("micro").declencher("click");
+  await tourner(); // le contexte fermé le signale après coup
   assert.equal($("micro").attributs["aria-pressed"], "false");
   assert.equal($("parler").hidden, true);
   assert.equal(trace.contextes[0].fermee, true);
+  assert.equal($("message-voix").hidden, true, $("message-voix").textContent); // pas « Micro en pause »
 });
 
 test("sans HTTPS, le bouton Micro dit pourquoi il ne s'allume pas", async () => {

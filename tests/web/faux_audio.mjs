@@ -20,23 +20,37 @@ export function fauxNavigateurAudio({ micro = "accorde", securisee = true } = {}
       return cible;
     }
   }
+  // Comme un vrai contexte : `statechange` à chaque changement d'état, fermeture comprise,
+  // émis après coup (le navigateur le met en file) et non pendant l'appel.
   class AudioContext {
     constructor() {
       this.state = "suspended";
       this.destination = new Noeud();
       this.fermee = false;
       this.audioWorklet = { addModule: async (url) => trace.modules.push(String(url)) };
+      this.ecouteurs = [];
       trace.contextes.push(this);
     }
 
-    addEventListener() {}
+    addEventListener(type, rappel) {
+      if (type === "statechange") this.ecouteurs.push(rappel);
+    }
+
+    changerEtat(etat) {
+      if (this.state === etat) return;
+      this.state = etat;
+      queueMicrotask(() => {
+        for (const rappel of this.ecouteurs) rappel();
+      });
+    }
 
     async resume() {
-      this.state = "running";
+      this.changerEtat("running");
     }
 
     close() {
       this.fermee = true;
+      this.changerEtat("closed");
     }
 
     createGain() {

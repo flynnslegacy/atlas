@@ -270,6 +270,28 @@ test("au retour sur la page, un son reparti seul ne demande rien", async () => {
   assert.equal(m.voix.statut, "active");
 });
 
+test("éteinte, la fermeture du son n'est pas prise pour une interruption", async () => {
+  const m = monter();
+  await enLigne(m);
+  m.voix.eteindre();
+  m.audios[0].rappels.surEtat("closed"); // le contexte fermé le signale après coup
+  assert.equal(m.voix.statut, "eteinte");
+});
+
+test("micro refusé, son message reste malgré la fermeture du contexte", async () => {
+  let rappels;
+  const refus = Object.assign(new Error("Permission refusée"), { name: "NotAllowedError" });
+  const m = monter({
+    ouvrirAudio: async (r) => {
+      rappels = r;
+      throw refus;
+    },
+  });
+  await m.voix.allumer();
+  rappels.surEtat("closed");
+  assert.equal(m.voix.statut, "micro_refuse");
+});
+
 test("éteindre ferme le micro et la connexion", async () => {
   const m = monter();
   await enLigne(m);
@@ -396,12 +418,21 @@ test("un micro qui se coupe le signale, et reprendre le rouvre", async () => {
   const etats = [];
   const audio = await ouvrirAudioNavigateur({ surBloc() {}, surEtat: (etat) => etats.push(etat) }, nav);
   trace.pistes[0].terminer();
-  assert.deepEqual(etats, ["micro_coupe"]);
+  assert.deepEqual(etats, ["running", "micro_coupe"]);
   await audio.reprendre();
   assert.equal(trace.pistes.length, 2);
-  assert.deepEqual(etats, ["micro_coupe", "running"]);
+  assert.deepEqual(etats, ["running", "micro_coupe", "running"]);
   await audio.reprendre();
   assert.equal(trace.pistes.length, 2); // micro vivant : rien à rouvrir
+});
+
+test("la fermeture du contexte par la page n'est pas signalée comme un état", async () => {
+  const { nav } = fauxNavigateurAudio();
+  const etats = [];
+  const audio = await ouvrirAudioNavigateur({ surBloc() {}, surEtat: (etat) => etats.push(etat) }, nav);
+  audio.fermer();
+  await new Promise((resoudre) => setImmediate(resoudre)); // l'événement arrive après coup
+  assert.deepEqual(etats, ["running"]);
 });
 
 test("micro refusé : le contexte audio se referme et l'erreur remonte", async () => {
