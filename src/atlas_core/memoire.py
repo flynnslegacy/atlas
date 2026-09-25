@@ -26,6 +26,28 @@ _journal = logging.getLogger(__name__)
 GIT = "git"
 AUTEUR_NOM = "Atlas"
 AUTEUR_COURRIEL = "atlas@atlas.local"
+# Les variables par lesquelles git désigne un autre dépôt, un autre index ou d'autres
+# réglages (`git rev-parse --local-env-vars`) : héritées de l'environnement (le Core lancé
+# depuis un crochet git, par exemple), elles détourneraient les notes ailleurs.
+_VARIABLES_LOCALES_GIT = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+    }
+)
 
 DOSSIERS_FICHES = ("entreprise", "projets", "personnes")
 _NOM = r"[a-z0-9]+(?:-[a-z0-9]+)*"
@@ -92,7 +114,8 @@ def _git(racine: Path, *arguments: str, entree: str | None = None) -> str:
         "GIT_COMMITTER_NAME": AUTEUR_NOM,
         "GIT_COMMITTER_EMAIL": AUTEUR_COURRIEL,
     }
-    environnement = {**os.environ, **identite}
+    heritees = {k: v for k, v in os.environ.items() if k not in _VARIABLES_LOCALES_GIT}
+    environnement = {**heritees, **identite}
     return subprocess.run(
         commande, input=entree, capture_output=True, text=True, check=True, env=environnement
     ).stdout

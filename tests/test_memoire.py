@@ -245,6 +245,27 @@ def test_une_identite_git_imposee_par_l_environnement_ne_signe_pas_les_notes(mem
     )
 
 
+def test_un_depot_git_nomme_par_l_environnement_ne_detourne_pas_les_notes(tmp_path, monkeypatch):
+    # Le Core lancé depuis un crochet git, par exemple : git y exporte GIT_DIR et consorts.
+    ailleurs = tmp_path / "ailleurs"
+    subprocess.run(["git", "init", "-q", str(ailleurs)], check=True)
+    with monkeypatch.context() as environnement:
+        environnement.setenv("GIT_DIR", str(ailleurs / ".git"))
+        environnement.setenv("GIT_WORK_TREE", str(ailleurs))
+        environnement.setenv("GIT_INDEX_FILE", str(ailleurs / ".git" / "index"))
+        memoire = Memoire.ouvrir(tmp_path / "memoire")
+        assert memoire is not None
+        assert memoire.ecrire("personnes/paul-durand.md", FICHE) == "Paul Durand"
+    assert git(memoire, "show", "--name-only", "--format=", "HEAD").split() == [
+        "personnes/paul-durand.md"
+    ]
+    autre = subprocess.run(
+        ["git", "-C", str(ailleurs), "rev-parse", "--verify", "-q", "HEAD"], capture_output=True
+    )
+    assert autre.returncode != 0, "une note est partie dans un autre dépôt"
+    assert not (ailleurs / "personnes").exists()
+
+
 def test_un_verrou_laisse_par_un_arret_brutal_est_retire_au_demarrage(memoire, caplog):
     verrou = memoire.racine / ".git" / "index.lock"
     verrou.write_text("")
