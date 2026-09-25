@@ -1,9 +1,9 @@
 """La régie : ce que partagent toutes les connexions du Core.
 
 Le diffuseur des pages, le mode muet, et les sessions qui reçoivent les questions
-tapées : celle de la page qui l'a tapée si son micro est allumé, sinon la plus récente
-des sessions audio (le client du Mac ou une page), pour qu'Atlas réponde à voix haute,
-ou à défaut une session sans voix.
+tapées : celle de la page qui l'a tapée si son micro est allumé, pour qu'Atlas réponde à
+voix haute sur cette page, sinon une session sans voix. Une page sans micro reçoit sa
+réponse par écrit : un autre appareil la dirait peut-être dans une autre pièce.
 """
 
 from __future__ import annotations
@@ -52,8 +52,6 @@ class Regie:
             for p, session in reversed(self._sessions):
                 if p == page:
                     return session
-        if self._sessions:
-            return self._sessions[-1][1]
         if self._session_ecrite is None:
             self._session_ecrite = self._fabrique_session_ecrite()
         return self._session_ecrite
