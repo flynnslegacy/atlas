@@ -81,14 +81,23 @@ class Recherche:
 RECHERCHE = Recherche()
 
 
+@dataclass(frozen=True)
+class Note:
+    """Dans le flux d'une réponse : Atlas vient d'écrire dans sa mémoire ; `annonce` est la
+    phrase à dire (« Je le note dans la fiche Paul Durand. »)."""
+
+    annonce: str
+
+
 class ErreurCerveau(Exception):
     """Le cerveau n'a pas pu répondre. Le message est en français, prêt à être dit."""
 
 
 class Cerveau(Protocol):
-    def repondre(self, texte: str) -> AsyncIterator[str | Recherche]:
-        """Rend la réponse en fragments de texte, au fil de l'eau, et signale une recherche
-        sur le web par `RECHERCHE`. Lève `ErreurCerveau` si la réponse est impossible.
+    def repondre(self, texte: str) -> AsyncIterator[str | Recherche | Note]:
+        """Rend la réponse en fragments de texte, au fil de l'eau ; signale une recherche
+        sur le web par `RECHERCHE`, et une écriture dans la mémoire par une `Note`. Lève
+        `ErreurCerveau` si la réponse est impossible.
 
         Fermer le flux avant la fin (`aclose`) abandonne la réponse."""
         ...
