@@ -174,6 +174,13 @@ def test_le_refus_du_format_dit_a_claude_comment_faire(memoire):
         "mot de passe : hunter2",
         "Password=azerty",
         "Le mdp est azerty123",
+        # Les formes naturelles, qualifiées, que Claude écrirait :
+        "Mot de passe Gmail : hunter2",
+        "Le mot de passe du wifi : Soleil2024",
+        "Le mot de passe de sa boîte mail est hunter2",
+        "MDP Netflix = azerty",
+        "Password for NAS: hunter2",
+        "Code wifi : 1234-5678",
         SECRET_DU_CORE,
     ],
 )

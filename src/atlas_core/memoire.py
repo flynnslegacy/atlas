@@ -46,7 +46,10 @@ _SECRETS = [
         r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
         r"\bAIza[0-9A-Za-z_-]{35}",
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
-        r"(?i)\b(?:mot de passe|mdp|password|passwd)\b\s*(?::|=|est\b)\s*\S+",
+        # « Mot de passe Gmail : … », « le mot de passe du wifi est … », « code PIN = … » :
+        # un court qualificatif peut séparer le mot-clé de sa valeur.
+        r"(?i)\b(?:mot de passe|mdp|password|passwd|code (?:pin|wi-?fi|secret))\b"
+        r"[^\n:=.]{0,30}?(?::|=|\best\b)\s*\S+",
     )
 ]
 SECRET_MIN = 8  # une clé du Core plus courte ne se cherche pas : trop de faux refus
