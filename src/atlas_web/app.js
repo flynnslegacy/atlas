@@ -1,4 +1,4 @@
-// Le démarrage de la page : relie la connexion, l'état, l'orbe, le fond et les panneaux.
+// Le démarrage de la page : relie la connexion, la voix, l'état, l'orbe, le fond et les panneaux.
 
 import { Connexion, identifiantDePage } from "./connexion.js";
 import { dimensionner, rgba } from "./dessin.js";
@@ -9,9 +9,11 @@ import { orbes } from "./orbes/index.js";
 import { ouvrirGalerie } from "./parametres.js";
 import { ecrireStockage, lireStockage } from "./registre.js";
 import { afficherSousTitres } from "./sous_titres.js";
+import { Voix } from "./voix.js";
 
 const $ = (id) => document.getElementById(id);
 const CLE_STOCKAGE = "atlas.cle";
+const CLE_HEY_ATLAS = "atlas.hey_atlas";
 const SEUIL_GLISSEMENT_PX = 60;
 const TOUCHENT_HISTORIQUE = new Set(["question", "reponse", "erreur", "latences", "historique"]);
 const STATUTS = {
@@ -25,6 +27,16 @@ const MESSAGES_CLE = {
   cle_requise: "Entre la clé d'accès d'Atlas : la valeur de ATLAS_WEB_CLE dans le .env du Core.",
   cle_refusee: "Le Core a refusé cette clé. Vérifie ATLAS_WEB_CLE dans son .env.",
   cle_absente: "Le Core n'a pas de clé : ajoute ATLAS_WEB_CLE dans son .env, redémarre-le, puis entre-la ici.",
+};
+const MESSAGES_VOIX = {
+  ouverture: "Ouverture du micro…",
+  https_requis: "Le micro ne s'ouvre qu'à l'adresse HTTPS d'Atlas.",
+  connexion: "Connexion de la voix…",
+  hors_ligne: "Voix hors ligne — nouvelle tentative…",
+  cle_requise: "Entre d'abord la clé d'accès d'Atlas.",
+  cle_refusee: "Le Core a refusé la clé.",
+  interrompue: "Micro en pause : écran verrouillé ou autre app.",
+  a_reactiver: "Touche ici pour réactiver le micro.",
 };
 
 let stockage = null;
@@ -63,6 +75,48 @@ const connexion = new Connexion({
     etat.enLigne = nouveau === "en_ligne";
     if (nouveau in MESSAGES_CLE) demanderCle(MESSAGES_CLE[nouveau]);
   },
+});
+
+// --- La voix ----------------------------------------------------------------------
+
+const voix = new Voix({
+  url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/voix`,
+  lireCle: () => cleEnMemoire ?? lireStockage(stockage, CLE_STOCKAGE),
+  page,
+  heyAtlas: () => $("hey-atlas").checked,
+  surStatut: afficherVoix,
+});
+
+function messageVoix(statut) {
+  if (statut === "micro_refuse") {
+    return `Micro indisponible (${voix.derniereErreur}) : autorise-le pour ce site dans les réglages du navigateur.`;
+  }
+  // 4000 : la clé ou les modèles manquent sur le Core, qui l'a dit juste avant de fermer.
+  if (statut === "cle_absente") return voix.derniereErreur ?? "Le Core n'a pas de clé.";
+  return MESSAGES_VOIX[statut] ?? "";
+}
+
+function afficherVoix(statut) {
+  $("micro").setAttribute("aria-pressed", String(voix.allumee));
+  $("micro").classList.toggle("allume", voix.allumee);
+  $("parler").hidden = !voix.allumee;
+  const message = messageVoix(statut);
+  $("message-voix").textContent = message;
+  $("message-voix").hidden = !message;
+}
+
+$("micro").addEventListener("click", () => {
+  if (voix.allumee) voix.eteindre();
+  else voix.allumer();
+});
+$("parler").addEventListener("click", () => voix.toucherOrbe());
+$("message-voix").addEventListener("click", () => {
+  if (voix.statut === "a_reactiver") voix.reactiver();
+});
+$("hey-atlas").checked = lireStockage(stockage, CLE_HEY_ATLAS) === "1";
+$("hey-atlas").addEventListener("change", () => {
+  ecrireStockage(stockage, CLE_HEY_ATLAS, $("hey-atlas").checked ? "1" : "0");
+  voix.changerHeyAtlas($("hey-atlas").checked);
 });
 
 function demanderCle(message) {
@@ -209,6 +263,7 @@ function image(ms) {
 
 // Onglet caché : plus aucune image, ni de l'orbe ni du fond.
 document.addEventListener("visibilitychange", () => {
+  voix.surVisibilite(!document.hidden);
   if (document.hidden) {
     cancelAnimationFrame(idImage);
     idImage = null;

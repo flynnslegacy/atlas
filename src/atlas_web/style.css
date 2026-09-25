@@ -111,7 +111,47 @@ button {
   background: rgba(255, 255, 255, 0.06);
 }
 
-/* L'interrupteur « muet » : une case à cocher habillée. */
+/* Le micro allumé : la page écoute. */
+.icone.allume {
+  color: var(--accent);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+/* La voix : ce qu'elle a à dire (micro refusé, en pause…), sous la barre. */
+#message-voix {
+  position: fixed;
+  top: calc(max(12px, env(safe-area-inset-top)) + 52px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 8px 16px;
+  border-radius: 16px;
+  background: var(--verre);
+  font-size: 14px;
+  color: var(--texte-doux);
+  text-align: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* L'orbe à toucher, micro allumé : un bouton rond et transparent, posé sur son cœur. */
+#parler {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  width: min(40vh, 60vw);
+  height: min(40vh, 60vw);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#parler:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* Les interrupteurs « muet » et « Hey Atlas » : une case à cocher habillée. */
 .interrupteur {
   display: flex;
   align-items: center;
