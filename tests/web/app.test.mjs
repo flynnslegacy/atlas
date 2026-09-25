@@ -270,4 +270,5 @@ test("au retour sur la page, un son resté coupé se rouvre d'un toucher", async
   $("message-voix").declencher("click");
   await tourner();
   assert.equal(contexte.state, "running");
+  assert.equal($("message-voix").hidden, true, $("message-voix").textContent);
 });

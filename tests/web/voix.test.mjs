@@ -51,6 +51,7 @@ class FauxAudio {
     this.vidages = 0;
     this.reprises = 0;
     this.fermee = false;
+    this.microVivant = true;
   }
 
   jouer(pcm) {
@@ -63,6 +64,7 @@ class FauxAudio {
 
   async reprendre() {
     this.reprises += 1;
+    this.microVivant = true;
   }
 
   fermer() {
@@ -253,6 +255,7 @@ test("un micro coupé (appel, casque débranché) se rouvre d'un toucher", async
   const m = monter();
   await enLigne(m);
   const { surEtat } = m.audios[0].rappels;
+  m.audios[0].microVivant = false;
   surEtat("micro_coupe");
   assert.equal(m.voix.statut, "a_reactiver");
   await m.voix.reactiver();
@@ -260,6 +263,44 @@ test("un micro coupé (appel, casque débranché) se rouvre d'un toucher", async
   surEtat("running");
   assert.equal(m.voix.statut, "active");
   assert.deepEqual(m.ws().envoyes.at(-1), { type: "reprise" });
+});
+
+test("après un appel, un son reparti seul ne suffit pas : le micro mort demande un toucher", async () => {
+  const m = monter();
+  await enLigne(m);
+  const audio = m.audios[0];
+  const { surEtat } = audio.rappels;
+  surEtat("interrupted"); // l'appel interrompt le son…
+  audio.microVivant = false;
+  surEtat("micro_coupe"); // … et termine la piste du micro
+  surEtat("running"); // iOS relance le son tout seul
+  assert.equal(m.voix.statut, "a_reactiver");
+  assert.deepEqual(m.ws().envoyes.slice(1), []); // pas de reprise : le Core n'entendrait que du silence
+  await m.voix.reactiver();
+  surEtat("running");
+  assert.equal(m.voix.statut, "active");
+  assert.deepEqual(m.ws().envoyes.slice(1), [{ type: "reprise" }]);
+});
+
+test("rebranchée pendant que le micro est coupé, la page demande toujours un toucher", async () => {
+  const m = monter();
+  await enLigne(m);
+  m.audios[0].microVivant = false;
+  m.audios[0].rappels.surEtat("micro_coupe");
+  m.ws().couper(1006);
+  m.planifies.at(-1).rappel();
+  m.ws().ouvrir();
+  m.ws().recevoir({ type: "pret" });
+  assert.equal(m.voix.statut, "a_reactiver");
+});
+
+test("au retour sur la page, un micro mort demande un toucher, même son contexte en marche", async () => {
+  const m = monter();
+  await enLigne(m);
+  m.audios[0].microVivant = false; // sa fin n'a pas été signalée
+  m.voix.surVisibilite(true);
+  m.planifies.at(-1).rappel();
+  assert.equal(m.voix.statut, "a_reactiver");
 });
 
 test("au retour sur la page, un son reparti seul ne demande rien", async () => {
@@ -417,9 +458,12 @@ test("un micro qui se coupe le signale, et reprendre le rouvre", async () => {
   const { trace, nav } = fauxNavigateurAudio();
   const etats = [];
   const audio = await ouvrirAudioNavigateur({ surBloc() {}, surEtat: (etat) => etats.push(etat) }, nav);
+  assert.equal(audio.microVivant, true);
   trace.pistes[0].terminer();
   assert.deepEqual(etats, ["running", "micro_coupe"]);
+  assert.equal(audio.microVivant, false);
   await audio.reprendre();
+  assert.equal(audio.microVivant, true);
   assert.equal(trace.pistes.length, 2);
   assert.deepEqual(etats, ["running", "micro_coupe", "running"]);
   await audio.reprendre();

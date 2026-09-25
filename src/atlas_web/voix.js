@@ -97,7 +97,9 @@ export class Voix {
     if (!visible || !this._audio) return;
     if (this._heyAtlas()) this._verrou.surVisible();
     this._planifier(() => {
-      if (this._audio && this._audio.etat !== "running") this._changer("a_reactiver");
+      if (!this._audio || (this._audio.etat === "running" && this._audio.microVivant)) return;
+      this._interrompue = true; // le toucher qui le rouvrira le signalera au Core
+      this._changer("a_reactiver");
     }, DELAI_REPRISE_MS);
   }
 
@@ -113,7 +115,7 @@ export class Voix {
 
   _surStatutConnexion(statut) {
     if (statut === "en_ligne") {
-      this._changer(this._interrompue ? "interrompue" : "active");
+      this._changer(this._statutAudio());
       return;
     }
     if (FINS.has(statut)) {
@@ -125,10 +127,9 @@ export class Voix {
 
   _surEtatAudio(etat) {
     if (!this._audio) return; // son fermé par la page elle-même, ou pas encore ouvert
-    if (etat !== "running") {
+    if (etat !== "running" || !this._audio.microVivant) {
       this._interrompue = true;
-      // Un micro coupé (appel, casque débranché…) ne revient jamais seul : un toucher le rouvre.
-      this._changer(etat === "micro_coupe" ? "a_reactiver" : "interrompue");
+      this._changer(this._statutAudio());
       return;
     }
     if (!this._interrompue) return;
@@ -136,6 +137,13 @@ export class Voix {
     // Le Core laisse à l'annuleur d'écho le temps de se réinstaller.
     this._connexion.envoyer({ type: "reprise" });
     this._changer("active");
+  }
+
+  _statutAudio() {
+    // Un micro coupé (appel, casque débranché…) ne revient jamais seul, même quand le son
+    // repart : un toucher le rouvre.
+    if (!this._audio.microVivant) return "a_reactiver";
+    return this._interrompue ? "interrompue" : "active";
   }
 
   _fermerAudio() {
@@ -218,15 +226,19 @@ export async function ouvrirAudioNavigateur({ surBloc, surEtat }, nav = globalTh
       for (const piste of flux.getAudioTracks()) piste.addEventListener("ended", () => surEtat("micro_coupe"));
     };
     await ouvrirMicro();
+    const microVivant = () => flux.getAudioTracks().some((piste) => piste.readyState === "live");
     return {
       get etat() {
         return contexte.state;
+      },
+      get microVivant() {
+        return microVivant();
       },
       jouer: (pcm) => lecture.port.postMessage(pcm, [pcm]),
       vider: () => lecture.port.postMessage("vider"),
       async reprendre() {
         await contexte.resume();
-        if (flux.getAudioTracks().every((piste) => piste.readyState === "ended")) await ouvrirMicro();
+        if (!microVivant()) await ouvrirMicro();
         surEtat(contexte.state); // un micro rouvert ne change pas l'état du contexte
       },
       fermer() {
