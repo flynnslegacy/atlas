@@ -9,6 +9,9 @@ Une question à la fois. Une réponse abandonnée en route (interruption, questi
 réveil) laisse un tour ouvert chez Claude : une tâche de ménage l'interrompt et en vide
 les derniers messages, et la question suivante attend ce ménage avant de partir. La
 session, elle, n'attend rien : sa voix se tait tout de suite.
+
+Avec la mémoire, chaque conversation commence par ce qu'Atlas sait déjà, et finit, passé
+le délai d'oubli, par un résumé au journal.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ import datetime as dt
 import logging
 import shutil
 import time
-from collections.abc import AsyncIterator, Callable, MutableMapping
+from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -37,13 +40,15 @@ from claude_agent_sdk import (
 )
 
 from .cerveau import RECHERCHE, ErreurCerveau, Note, Recherche
-from .consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE, ligne_de_date
+from .consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE, DEMANDE_RESUME, RIEN, ligne_de_date
 from .outils_memoire import SERVEUR, OutilsMemoire
 
 _journal = logging.getLogger(__name__)
 
 OUTIL_RECHERCHE = "WebSearch"  # le seul outil de Claude en 2a (pas de WebFetch : spec D3)
 DELAI_MENAGE_S = 15.0
+DELAI_RESUME_S = 60.0  # le résumé d'une conversation, à l'échéance de l'oubli
+DELAI_RESUME_ARRET_S = 20.0  # le même, à l'arrêt du Core
 PHRASE_FIL_PERDU = "Je reprends de zéro, j'ai perdu le fil."
 
 ABSENT = "Claude Code n'est pas installé sur cette machine."
@@ -119,10 +124,16 @@ class CerveauClaude:
         horloge: Callable[[], float] = time.monotonic,
         maintenant: Callable[[], dt.datetime] = dt.datetime.now,
         outils: OutilsMemoire | None = None,
+        attendre: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._fabrique = fabrique
         self._outils = outils
+        self._attendre = attendre
         self._client_amorce: ClientClaude | None = None  # sa conversation a reçu la mémoire
+        self._echeance: asyncio.Task | None = None  # le résumé qui attend le délai d'oubli
+        self._resume_en_cours = False
+        self._debut_conversation: dt.datetime | None = None  # sa première question
+        self._fin_conversation: dt.datetime | None = None  # la fin de son dernier échange
         self._oubli_s = oubli_s
         self._horloge = horloge
         self._maintenant = maintenant
@@ -135,8 +146,12 @@ class CerveauClaude:
         self._menage: asyncio.Task | None = None
 
     async def repondre(self, texte: str) -> AsyncIterator[str | Recherche | Note]:
-        if self._verrou.locked():
+        if self._echeance is not None and not self._resume_en_cours:
+            self._echeance.cancel()  # la conversation continue
+            self._echeance = None
+        if self._verrou.locked() and not self._resume_en_cours:
             # Une question à la fois : celle-ci, d'où qu'elle vienne, coupe celle en cours.
+            # Un résumé en cours, lui, se finit : elle l'attend.
             await self._interrompre_le_tour()
         async with self._verrou:
             await self._attendre_le_menage()
@@ -144,6 +159,7 @@ class CerveauClaude:
             question = f"{ligne_de_date(self._maintenant())}\n{texte}"
             try:
                 client = await self._poser(question)
+                self._debut_conversation = self._debut_conversation or self._maintenant()
                 if self._fil_perdu:
                     self._fil_perdu = False
                     yield PHRASE_FIL_PERDU + " "
@@ -152,17 +168,70 @@ class CerveauClaude:
                         yield fragment
             finally:
                 self._dernier_echange = self._horloge()
+                self._fin_conversation = self._maintenant()
                 if self._tour_ouvert and self._client is not None:
                     # Réponse lâchée en route (ou coupée par une erreur) : le tour doit
                     # finir chez Claude avant la question suivante, sans retenir la session.
                     self._menage = asyncio.create_task(self._vider_le_tour(self._client))
+                if self._outils is not None and self._client is not None:
+                    self._echeance = asyncio.create_task(self._a_l_echeance())
 
     async def fermer(self) -> None:
+        echeance, self._echeance = self._echeance, None
+        if echeance is not None:
+            if not self._resume_en_cours:
+                echeance.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await echeance  # un résumé en cours se finit (son délai le borne)
         menage, self._menage = self._menage, None
         if menage is not None:
             with contextlib.suppress(Exception):
                 await menage
+        if not self._verrou.locked():
+            await self._clore_la_conversation(DELAI_RESUME_ARRET_S)
         await self._jeter_le_client()
+
+    # --- la fin d'une conversation -------------------------------------------------
+
+    async def _a_l_echeance(self) -> None:
+        try:
+            await self._attendre(self._oubli_s)
+            async with self._verrou:
+                await self._attendre_le_menage()
+                await self._clore_la_conversation(DELAI_RESUME_S)
+        finally:
+            if self._echeance is asyncio.current_task():
+                self._echeance = None
+
+    async def _clore_la_conversation(self, delai: float) -> None:
+        """Résume la conversation au journal, sans rien en dire, puis la ferme. Sans
+        mémoire, ou sans rien à résumer, elle se ferme simplement."""
+        client, debut, fin = self._client, self._debut_conversation, self._fin_conversation
+        if client is not None and self._outils is not None and debut and fin:
+            self._resume_en_cours = True
+            self._outils.ecriture_permise = False
+            try:
+                async with asyncio.timeout(delai):
+                    resume = await self._demander_le_resume(client)
+                if resume and resume.rstrip(".").upper() != RIEN:
+                    memoire = self._outils.memoire
+                    await asyncio.to_thread(memoire.ajouter_au_journal, debut, fin, resume)
+            except Exception as e:  # noqa: BLE001 — délai, Claude, dépôt : le résumé est perdu
+                _journal.warning("résumé de la conversation perdu (%s)", type(e).__name__)
+            finally:
+                self._outils.ecriture_permise = True
+                self._resume_en_cours = False
+        self._fil_perdu = False  # la conversation se ferme : rien n'est perdu à dire
+        await self._jeter_le_client()
+
+    async def _demander_le_resume(self, client: ClientClaude) -> str:
+        await self._envoyer(client, DEMANDE_RESUME)
+        morceaux: list[str] = []
+        async with contextlib.aclosing(self._lire_le_tour(client)) as fragments:
+            async for fragment in fragments:
+                if isinstance(fragment, str):
+                    morceaux.append(fragment)
+        return "".join(morceaux).strip()
 
     # --- le client SDK -------------------------------------------------------
 
@@ -212,8 +281,7 @@ class CerveauClaude:
         if dernier is not None and self._horloge() - dernier >= self._oubli_s:
             # L'oubli est voulu : la conversation repart de zéro sans rien en dire.
             _journal.info("longtemps sans échange : nouvelle conversation")
-            self._fil_perdu = False
-            await self._jeter_le_client()
+            await self._clore_la_conversation(DELAI_RESUME_S)
         if self._client is None:
             client = self._fabrique()
             try:
@@ -228,6 +296,7 @@ class CerveauClaude:
     async def _jeter_le_client(self) -> None:
         client, self._client = self._client, None
         self._tour_ouvert = False
+        self._debut_conversation = self._fin_conversation = None
         if client is not None:
             with contextlib.suppress(Exception):
                 await client.disconnect()
@@ -284,7 +353,9 @@ class CerveauClaude:
                     # Une écriture dans la mémoire s'annonce à sa place dans la réponse. Une
                     # réponse coupée garde ses annonces pour le début de la suivante : une
                     # écriture ne passe jamais en silence.
-                    if self._outils is not None and not self._interrompu:
+                    # Le résumé non plus ne les annonce pas : elles attendent la réponse suivante.
+                    annoncer = not (self._interrompu or self._resume_en_cours)
+                    if self._outils is not None and annoncer:
                         for note in self._outils.prendre_les_annonces():
                             yield note
         except ErreurCerveau:
