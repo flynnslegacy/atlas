@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Modèle du service launchd du Core d'Atlas, sur le néo. Ne pas l'installer tel quel :
+  installer_service.sh y remplace les repères (dossier du dépôt, dossier personnel,
+  utilisateur), puis le dépose dans /Library/LaunchDaemons. Le Core démarre avec le néo,
+  sans session ouverte, et launchd le relance s'il tombe. `make run-core` charge le .env
+  du dépôt.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>fr.atlas.core</string>
+    <key>UserName</key>
+    <string>__UTILISATEUR__</string>
+    <key>WorkingDirectory</key>
+    <string>__DOSSIER__</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/make</string>
+        <string>run-core</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__MAISON__</string>
+        <key>PATH</key>
+        <string>__MAISON__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__DOSSIER__/donnees/logs/core.log</string>
+    <key>StandardErrorPath</key>
+    <string>__DOSSIER__/donnees/logs/core.log</string>
+</dict>
+</plist>
