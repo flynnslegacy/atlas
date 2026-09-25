@@ -213,6 +213,14 @@ généré listant le seul serveur MCP d'Atlas. Les variables d'environnement `AN
 sont purgées avant le lancement, afin de garantir que le CLI utilise bien la session
 d'abonnement et non une clé API — emprunté à ethanplusai, et vérifié par un test.
 
+**Amendé le 24/09/2026 (phase 2a).** Le Brain passe par le SDK Agent de Claude
+(`claude-agent-sdk`), qui pilote ce même CLI en `stream-json`, connecté à l'abonnement de
+David. En 2a, Claude n'a que la recherche web, aucun serveur MCP et aucun réglage de la
+machine ; le serveur MCP d'Atlas arrive en 2c. La rotation de contexte avec résumé
+ci-dessous arrive en 2b : d'ici là, le compactage automatique de Claude Code gère un
+contexte qui se remplit, et la conversation repart de zéro après
+`ATLAS_CERVEAU_OUBLI_MIN` minutes sans échange. Voir `2026-09-24-phase-2a-cerveau-design.md`.
+
 **Rotation de contexte.** Quand le contexte approche de sa limite, le Core fait produire
 au Brain un résumé de la session, l'écrit dans `journal/AAAA-MM-JJ.md`, tue le process et
 en relance un neuf amorcé avec ce résumé et le profil. La conversation continue sans que
@@ -269,13 +277,17 @@ Client vers Core :
 
 | Message | Contenu |
 |---|---|
-| `hello` | `{client, sample_rate, caps: ["aec","vad","wakeword"]}` |
+| `hello` | `{client, sample_rate, caps: ["aec","vad","wakeword"], key}` |
 | `wake` | `{confidence, ts}` |
 | *(binaire)* | trames PCM pendant la capture |
 | `utterance_end` | `{duration_ms}` |
 | `barge_in` | `{ts}` — David a repris la parole pendant la lecture |
 | `abandon` | `{}` — l'écoute s'est close sans parole : rien à transcrire |
 | `confirm_response` | `{request_id, accepted: bool}` |
+
+**Amendé le 24/09/2026 (phase 2a).** `hello` porte la clé du client audio
+(`ATLAS_AUDIO_CLE`) et doit être le premier message, dans les 5 s : sinon le Core ferme
+la connexion (4401). Sans clé configurée, le Core refuse tout client audio (4000).
 
 Core vers client :
 
@@ -427,6 +439,9 @@ corriger de façon fiable. La source de vérité reste les fichiers Markdown d'A
 - Communication entre machines en **WSS et HTTPS**, derrière le reverse proxy Unraid
   existant, sous le domaine déjà en place.
 - **Vérification de l'origine** sur toutes les routes qui modifient un état.
+- **`/ws/audio` protégé par une clé** (amendé le 24/09/2026, phase 2a) : `ATLAS_AUDIO_CLE`,
+  dans le `hello` du client audio, comparée en temps constant. Les navigateurs restent
+  refusés avant même l'acceptation.
 - Les services GPU (`atlas-stt`, `atlas-tts`, Ollama) ne sont **pas exposés à
   l'extérieur** : ils ne sont joignables que depuis le LAN.
 - Secrets en variables d'environnement, jamais dans le dépôt. Un `.env.example` documente
@@ -479,6 +494,9 @@ dans la même phase.
 Markdown et index, serveur MCP local, permissions.
 *Critère de réussite :* la conversation « réflexion vers document » tient de bout en bout,
 et le document produit se relit sans retouche.
+**Amendé le 24/09/2026.** La phase 2 est découpée en trois étapes, chacune avec sa spec,
+son plan et sa fusion : 2a, le cerveau branché (`2026-09-24-phase-2a-cerveau-design.md`) ;
+2b, la mémoire ; 2c, outils et permissions.
 
 **Phase 3 — Les outils.** Registre d'outils, routeur d'intention, Ollama, supervision n8n,
 point quotidien, déclenchement vocal, diagnostic.

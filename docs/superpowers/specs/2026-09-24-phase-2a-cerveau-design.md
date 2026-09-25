@@ -142,7 +142,7 @@ cherche sur le web, rien d'autre. S'il ne sait pas, il le dit. S'il s'appuie sur
 
 ### 6.2 L'heure et la date
 
-Chaque question part précédée d'une ligne de contexte, par exemple `[mercredi 24 septembre 2026, 21 h 50]`. Claude
+Chaque question part précédée d'une ligne de contexte, par exemple `[jeudi 24 septembre 2026, 21 h 50]`. Claude
 connaît ainsi l'heure et la date.
 
 ### 6.3 Les hallucinations de Whisper
