@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from atlas_core.consignes import CONSIGNES, ligne_de_date
+from atlas_core.consignes import CONSIGNES, date_en_lettres, heure_en_chiffres, ligne_de_date
 
 
 @pytest.mark.parametrize(
@@ -16,6 +16,12 @@ from atlas_core.consignes import CONSIGNES, ligne_de_date
 )
 def test_la_ligne_de_date_est_en_francais(moment, attendu):
     assert ligne_de_date(moment) == attendu
+
+
+def test_la_date_et_l_heure_s_ecrivent_comme_dans_la_ligne_de_date():
+    assert date_en_lettres(dt.date(2026, 6, 1)) == "1er juin 2026"
+    assert date_en_lettres(dt.date(2026, 9, 25)) == "25 septembre 2026"
+    assert heure_en_chiffres(dt.datetime(2026, 9, 25, 9, 5)) == "9 h 05"
 
 
 def test_les_consignes_tiennent_les_decisions_de_la_spec():

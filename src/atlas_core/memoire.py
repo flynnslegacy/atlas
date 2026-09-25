@@ -9,6 +9,7 @@ aucun distant et n'est jamais poussé : rien ne quitte la machine.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import logging
 import os
 import re
@@ -17,6 +18,8 @@ import threading
 import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
+
+from .consignes import date_en_lettres, heure_en_chiffres
 
 _journal = logging.getLogger(__name__)
 
@@ -50,6 +53,12 @@ SECRET_MIN = 8  # une clé du Core plus courte ne se cherche pas : trop de faux 
 RESULTATS_MAX = 20
 PREFIXE_NOTE = "Atlas : "
 PREFIXE_ANNULE = "Annulé : "
+PREFIXE_JOURNAL = "Journal : "
+# L'amorçage d'une conversation reste court, même quand la mémoire grossit.
+PROFIL_MAX = 4_000
+SOMMAIRE_MAX = 150
+JOURNAL_MAX = 6_000
+JOURS_DE_JOURNAL = 7
 
 
 class ErreurMemoire(Exception):
@@ -95,6 +104,10 @@ def _plier(texte: str) -> str:
     """Sans majuscules ni accents : « Élise » se trouve en cherchant « elise »."""
     decompose = unicodedata.normalize("NFD", texte.casefold())
     return "".join(c for c in decompose if not unicodedata.combining(c))
+
+
+def _tronquer(texte: str, taille: int) -> str:
+    return texte if len(texte) <= taille else texte[:taille].rstrip() + " […]"
 
 
 def verifier_fiche(contenu: str) -> str:
@@ -268,3 +281,80 @@ class Memoire:
                 "Je ne peux pas retirer cette note : la fiche a été modifiée depuis."
             ) from None
         return titre
+
+    # --- l'amorçage et le journal -----------------------------------------------------
+
+    def sommaire(self) -> list[str]:
+        """Une ligne par fiche hors profil : son chemin et sa phrase de résumé (son titre,
+        si la fiche a été retouchée à la main hors du format)."""
+        lignes = []
+        for chemin in self._fichiers(avec_journal=False):
+            if chemin == "profil.md":
+                continue
+            debut = _lire_texte(self.racine / chemin).split("\n", 3)
+            au_format = len(debut) > 2 and not debut[1].strip() and debut[2].strip()
+            if au_format and not debut[2].startswith("#"):
+                resume = debut[2].strip()
+            else:
+                resume = debut[0].lstrip("#").strip()
+            lignes.append(f"- {chemin} : {resume}")
+        return lignes
+
+    def amorcage(self, aujourd_hui: dt.date) -> str:
+        """Le bloc qui précède la première question d'une conversation : le profil, le
+        sommaire des fiches et le journal des derniers jours, chacun plafonné."""
+        profil = ""
+        with contextlib.suppress(ErreurMemoire):
+            profil = self.lire("profil.md").strip()
+        fiches = self.sommaire()
+        journal = self._journal_recent(aujourd_hui)
+        if not (profil or fiches or journal):
+            corps = "La mémoire est vide."
+        else:
+            if len(fiches) > SOMMAIRE_MAX:
+                reste = len(fiches) - SOMMAIRE_MAX
+                fiches = [*fiches[:SOMMAIRE_MAX], f"- … et {reste} autres fiches."]
+            corps = "\n\n".join(
+                [
+                    "Profil :\n" + (_tronquer(profil, PROFIL_MAX) or "pas encore de profil."),
+                    "Fiches :\n" + ("\n".join(fiches) or "aucune."),
+                    "Journal des sept derniers jours :\n" + (journal or "rien."),
+                ]
+            )
+        return f"[Mémoire d'Atlas]\n{corps}\n[Fin de la mémoire]"
+
+    def _journal_recent(self, aujourd_hui: dt.date) -> str:
+        """Les derniers jours du journal, du plus ancien au plus récent ; les plus récents
+        sont gardés en priorité quand le plafond est atteint."""
+        jours = []
+        for ecart in range(JOURS_DE_JOURNAL):
+            chemin = f"journal/{aujourd_hui - dt.timedelta(days=ecart):%Y-%m-%d}.md"
+            with contextlib.suppress(ErreurMemoire):
+                jours.append(self.lire(chemin).strip())
+        gardes: list[str] = []
+        taille = 0
+        for texte in jours:  # du plus récent au plus ancien
+            if taille + len(texte) > JOURNAL_MAX:
+                if not gardes:
+                    gardes.append("[…] " + texte[-JOURNAL_MAX:])
+                break
+            gardes.append(texte)
+            taille += len(texte)
+        return "\n\n".join(reversed(gardes))
+
+    def ajouter_au_journal(self, debut: dt.datetime, fin: dt.datetime, resume: str) -> None:
+        """Ajoute le résumé d'une conversation au journal du jour où elle s'est terminée,
+        puis le commite, en silence. Un résumé qui contient un secret est refusé."""
+        self.verifier_secrets(resume)
+        chemin = f"journal/{fin:%Y-%m-%d}.md"
+        cible = self._cible(chemin, ecriture=False)
+        with self._verrou:
+            self._assurer_le_depot()
+            cible.parent.mkdir(parents=True, exist_ok=True)
+            entete = "" if cible.exists() else f"# Journal du {date_en_lettres(fin)}\n"
+            heures = f"{heure_en_chiffres(debut)} – {heure_en_chiffres(fin)}"
+            with cible.open("a", encoding="utf-8") as fichier:
+                fichier.write(f"{entete}\n## {heures}\n\n{resume.strip()}\n")
+            _git(self.racine, "add", "--", chemin)
+            message = f"{PREFIXE_JOURNAL}{date_en_lettres(fin)}, {heure_en_chiffres(fin)}"
+            _git(self.racine, "commit", "-q", "-m", message, "--", chemin)

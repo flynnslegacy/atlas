@@ -53,10 +53,18 @@ _MOIS = (
 )
 
 
+def date_en_lettres(jour: dt.date) -> str:
+    """« 24 septembre 2026 », « 1er juin 2026 »."""
+    quantieme = "1er" if jour.day == 1 else str(jour.day)
+    return f"{quantieme} {_MOIS[jour.month - 1]} {jour.year}"
+
+
+def heure_en_chiffres(moment: dt.datetime) -> str:
+    """« 21 h 50 », « 9 h 05 »."""
+    return f"{moment.hour} h {moment.minute:02d}"
+
+
 def ligne_de_date(maintenant: dt.datetime) -> str:
     """« [jeudi 24 septembre 2026, 21 h 50] », « [lundi 1er juin 2026, 9 h 05] »."""
-    jour = "1er" if maintenant.day == 1 else str(maintenant.day)
-    return (
-        f"[{_JOURS[maintenant.weekday()]} {jour} {_MOIS[maintenant.month - 1]} "
-        f"{maintenant.year}, {maintenant.hour} h {maintenant.minute:02d}]"
-    )
+    jour = _JOURS[maintenant.weekday()]
+    return f"[{jour} {date_en_lettres(maintenant)}, {heure_en_chiffres(maintenant)}]"
