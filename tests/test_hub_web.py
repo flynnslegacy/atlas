@@ -17,18 +17,20 @@ class RegieEspionne:
         self.diffuseur = Diffuseur()
         self.saisies: list[str] = []
         self.muets: list[bool] = []
+        self.pages: list[str | None] = []
 
     def voix_active(self) -> bool:
         return True
 
-    def rattacher(self, session) -> None:
+    def rattacher(self, session, page: str | None = None) -> None:
         pass
 
     def detacher(self, session) -> None:
         pass
 
-    async def saisie(self, texte: str) -> None:
+    async def saisie(self, texte: str, page: str | None = None) -> None:
         self.saisies.append(texte)
+        self.pages.append(page)
 
     async def basculer_muet(self, actif: bool) -> None:
         self.muets.append(actif)
@@ -158,6 +160,6 @@ def test_le_client_audio_est_rattache_puis_detache_de_la_regie(monkeypatch):
         ws.send_text(Bonjour(client="test", cle="cle-audio").model_dump_json())
         ws.send_text('{"type":"nimporte_quoi"}')
         assert ws.receive_json()["code"] == "message_invalide"  # la boucle est atteinte
-        assert hub._regie._session_audio is fake
+        assert hub._regie._sessions == [(None, fake)]
         ws.close()
-    assert hub._regie._session_audio is None
+    assert hub._regie._sessions == []

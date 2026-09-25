@@ -83,3 +83,47 @@ async def test_le_muet_sans_client_audio_ne_plante_pas():
     regie, _ = _regie()
     await regie.basculer_muet(True)
     assert regie.muet is True
+
+
+async def test_une_question_tapee_va_a_la_session_de_sa_page():
+    regie, creees = _regie()
+    mac, ipad, iphone = SessionEspionne(), SessionEspionne(), SessionEspionne()
+    regie.rattacher(mac)
+    regie.rattacher(iphone, page="iphone")
+    regie.rattacher(ipad, page="ipad")
+    await regie.saisie("pour l'iPhone", page="iphone")
+    await regie.saisie("pour l'iPad", page="ipad")
+    assert iphone.saisies == ["pour l'iPhone"] and ipad.saisies == ["pour l'iPad"]
+    assert mac.saisies == [] and creees == []
+
+
+async def test_une_page_sans_micro_passe_a_la_session_audio_la_plus_recente():
+    regie, creees = _regie()
+    mac, ipad = SessionEspionne(), SessionEspionne()
+    regie.rattacher(mac)
+    regie.rattacher(ipad, page="ipad")
+    await regie.saisie("sans micro", page="iphone")
+    await regie.saisie("sans identifiant")
+    assert ipad.saisies == ["sans micro", "sans identifiant"] and mac.saisies == []
+    regie.detacher(ipad)
+    await regie.saisie("l'iPad est parti", page="ipad")
+    assert mac.saisies == ["l'iPad est parti"] and creees == []
+
+
+async def test_une_page_rebranchee_repond_par_sa_session_la_plus_recente():
+    regie, _ = _regie()
+    ancienne, nouvelle = SessionEspionne(), SessionEspionne()
+    regie.rattacher(ancienne, page="ipad")
+    regie.rattacher(nouvelle, page="ipad")  # l'ancienne connexion n'est pas encore détachée
+    await regie.saisie("bonjour", page="ipad")
+    assert nouvelle.saisies == ["bonjour"] and ancienne.saisies == []
+
+
+async def test_le_muet_fait_taire_toutes_les_sessions_audio():
+    regie, _ = _regie()
+    sessions = [SessionEspionne() for _ in range(3)]
+    regie.rattacher(sessions[0])
+    regie.rattacher(sessions[1], page="ipad")
+    regie.rattacher(sessions[2], page="iphone")
+    await regie.basculer_muet(True)
+    assert [s.taire_appels for s in sessions] == [1, 1, 1]
