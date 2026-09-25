@@ -1,4 +1,5 @@
-"""La session face au vrai cerveau : recherche web, erreurs dites, mise en voix, fantômes."""
+"""La session face au vrai cerveau : recherche web, notes annoncées, erreurs dites, mise en
+voix, fantômes."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -11,7 +12,7 @@ from test_session_web import (
     FauxPlanificateur,
 )
 
-from atlas_core.cerveau import RECHERCHE, ErreurCerveau
+from atlas_core.cerveau import RECHERCHE, ErreurCerveau, Note
 from atlas_core.protocole import Dire, Erreur, Etat, FinEnonce, Interruption, Reveil
 from atlas_core.protocole_web import Reponse
 from atlas_core.session import PHRASE_ATTENTE, Session
@@ -264,6 +265,40 @@ async def test_le_texte_avant_une_recherche_est_dit_avant_l_attente():
     resultats.set()
     await _attendre(lambda: c.etats()[-1:] == ["repos"])
     assert _dits(c) == ["Je vérifie.", PHRASE_ATTENTE, "Il pleut."]
+    await s.fermer()
+
+
+# --- les notes de la mémoire ------------------------------------------------------------
+
+PROFIL = Note("Je le note dans ton profil.")
+PAUL = Note("Je le note dans la fiche Paul Durand.")
+
+
+async def test_une_note_s_annonce_a_sa_place_dans_la_reponse():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, CerveauScript("D'accord.", PROFIL, " Autre chose ?"))
+    await s.sur_saisie("Appelle-moi Dieu.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+    assert _dits(c) == ["D'accord.", "Je le note dans ton profil.", "Autre chose ?"]
+    await s.fermer()
+
+
+async def test_deux_notes_font_deux_annonces():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, CerveauScript(PROFIL, PAUL, "C'est noté. "))
+    await s.sur_saisie("Note tout ça.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+    assert _dits(c) == [PROFIL.annonce, PAUL.annonce, "C'est noté."]
+    await s.fermer()
+
+
+async def test_sans_voix_une_note_ne_s_annonce_qu_en_texte():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, CerveauScript(PAUL, "Voilà. "), avec_voix=lambda: False)
+    await s.sur_saisie("Note Paul.")
+    await _attendre(lambda: [e.valeur for e in d.de(Etat)][-1:] == ["repos"])
+    assert _dits(c) == []
+    assert [r.texte for r in d.de(Reponse)] == [PAUL.annonce, "Voilà."]
     await s.fermer()
 
 
