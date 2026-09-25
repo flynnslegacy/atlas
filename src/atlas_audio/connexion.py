@@ -10,10 +10,16 @@ from contextlib import AbstractAsyncContextManager
 from typing import Protocol
 
 from pydantic import TypeAdapter, ValidationError
+from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from atlas_core.protocole import MessageCore, StopAudio
 
 _journal = logging.getLogger(__name__)
+
+# Ce qu'une coupure réseau ordinaire peut lever : le Core disparaît, redémarre, refuse la
+# poignée de main… Tout le reste (un bogue du mot de réveil ou du VAD, par exemple) est
+# journalisé avec sa trace, sinon il repasserait inaperçu toutes les secondes.
+_ERREURS_RESEAU = (OSError, TimeoutError, ConnectionClosed, InvalidHandshake, InvalidURI)
 
 # Entre deux tentatives de connexion au Core ; le dernier délai se répète.
 DELAIS_RECONNEXION_S = (1, 2, 4, 8, 16, 30)
@@ -171,8 +177,17 @@ async def boucle_de_connexion(
                 elif code == FERMETURE_CLE_ABSENTE:
                     acceptee = False
                     _journal.error("le Core n'a pas de clé : ajoute ATLAS_AUDIO_CLE dans son .env")
-                else:
+                elif isinstance(e, _ERREURS_RESEAU):
                     _journal.warning("Core injoignable ou connexion perdue (%s)", type(e).__name__)
+                else:
+                    # Pas une coupure réseau : la trace complète, sinon un bogue (mot de
+                    # réveil, VAD…) reviendrait toutes les secondes sans jamais se laisser
+                    # diagnostiquer.
+                    _journal.warning(
+                        "Core injoignable ou connexion perdue (%s)",
+                        type(e).__name__,
+                        exc_info=True,
+                    )
             if absence is None:
                 absence = _demarrer_absence(pendant_l_absence)
             if acceptee:

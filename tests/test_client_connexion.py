@@ -273,6 +273,24 @@ async def test_une_connexion_perdue_en_route_est_retentee():
     assert len(core.servies) == 2
 
 
+async def test_une_coupure_reseau_ne_journalise_pas_la_trace(caplog):
+    # Une coupure réseau attendue (le Core disparaît, redémarre…) revient toutes les
+    # secondes : la trace complète ne ferait qu'encombrer les journaux pour rien.
+    with caplog.at_level(logging.WARNING, logger="atlas_audio.connexion"):
+        await _delais(Core(_refus(1011)), 1)
+    (enregistrement,) = [r for r in caplog.records if "Core injoignable" in r.getMessage()]
+    assert enregistrement.exc_info is None
+
+
+async def test_une_erreur_inattendue_est_journalisee_avec_sa_trace(caplog):
+    # Un bogue du mot de réveil ou du VAD, par exemple : sans la trace, cette erreur se
+    # répéterait toutes les secondes sans qu'on sache jamais ce qui l'a déclenchée.
+    with caplog.at_level(logging.WARNING, logger="atlas_audio.connexion"):
+        await _delais(Core(RuntimeError("bogue du mot de réveil")), 1)
+    (enregistrement,) = [r for r in caplog.records if "Core injoignable" in r.getMessage()]
+    assert enregistrement.exc_info is not None
+
+
 # --- fix round 1 : l'ordre des messages, le périphérique mort, l'absence -------------
 
 
