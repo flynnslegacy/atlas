@@ -8,11 +8,13 @@ aucun distant et n'est jamais poussé : rien ne quitte la machine.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
 import subprocess
 import threading
+import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -45,6 +47,9 @@ _SECRETS = [
     )
 ]
 SECRET_MIN = 8  # une clé du Core plus courte ne se cherche pas : trop de faux refus
+RESULTATS_MAX = 20
+PREFIXE_NOTE = "Atlas : "
+PREFIXE_ANNULE = "Annulé : "
 
 
 class ErreurMemoire(Exception):
@@ -84,6 +89,12 @@ def _lire_texte(fichier: Path) -> str:
     """Un fichier retouché à la main dans un autre encodage se lit quand même : ses octets
     illisibles deviennent « � » au lieu de tout faire échouer."""
     return fichier.read_text(encoding="utf-8", errors="replace")
+
+
+def _plier(texte: str) -> str:
+    """Sans majuscules ni accents : « Élise » se trouve en cherchant « elise »."""
+    decompose = unicodedata.normalize("NFD", texte.casefold())
+    return "".join(c for c in decompose if not unicodedata.combining(c))
 
 
 def verifier_fiche(contenu: str) -> str:
@@ -188,5 +199,72 @@ class Memoire:
             cible.write_text(contenu, encoding="utf-8")
             # Le seul fichier écrit : les retouches de David ailleurs restent les siennes.
             _git(self.racine, "add", "--", chemin)
-            _git(self.racine, "commit", "-q", "-m", f"Atlas : {titre}", "--", chemin)
+            _git(self.racine, "commit", "-q", "-m", f"{PREFIXE_NOTE}{titre}", "--", chemin)
+        return titre
+
+    def _fichiers(self, avec_journal: bool) -> list[str]:
+        """Les fiches (le profil, puis chaque dossier par ordre alphabétique), puis le
+        journal du plus récent au plus ancien ; seulement ce qui est permis."""
+        candidats = ["profil.md"]
+        for dossier in DOSSIERS_FICHES:
+            noms = (p.name for p in (self.racine / dossier).glob("*.md"))
+            candidats += sorted(f"{dossier}/{nom}" for nom in noms)
+        if avec_journal:
+            noms = (p.name for p in (self.racine / "journal").glob("*.md"))
+            candidats += sorted((f"journal/{nom}" for nom in noms), reverse=True)
+        permis = []
+        for chemin in candidats:
+            with contextlib.suppress(ErreurMemoire):
+                if self._cible(chemin, ecriture=False).is_file():
+                    permis.append(chemin)
+        return permis
+
+    def chercher(self, texte: str) -> list[str]:
+        """Les lignes qui contiennent le texte, chacune précédée de son fichier : les fiches
+        d'abord, puis le journal du plus récent au plus ancien. Vingt au plus."""
+        cle = _plier(texte.strip())
+        if not cle:
+            raise ErreurMemoire("Rien à chercher.")
+        trouvees: list[str] = []
+        for chemin in self._fichiers(avec_journal=True):
+            for ligne in _lire_texte(self.racine / chemin).splitlines():
+                if cle in _plier(ligne):
+                    trouvees.append(f"{chemin} : {ligne.strip()}")
+                    if len(trouvees) == RESULTATS_MAX:
+                        return trouvees
+        return trouvees
+
+    def annuler(self) -> str:
+        """Défait la dernière écriture d'Atlas encore en place (`git revert`) ; rend son
+        titre. Ni le journal, ni les commits de David ne s'annulent."""
+        with self._verrou:
+            try:
+                historique = _git(self.racine, "log", "--format=%H%x1f%ae%x1f%s%x1f%b%x1e")
+            except subprocess.CalledProcessError:
+                historique = ""  # aucun commit encore
+            annulees: set[str] = set()
+            for entree in historique.split("\x1e"):
+                if not entree.strip():
+                    continue
+                sha, courriel, sujet, corps = entree.strip("\n").split("\x1f", 3)
+                if courriel != AUTEUR_COURRIEL:
+                    continue
+                if sujet.startswith(PREFIXE_ANNULE):
+                    annulees.update(re.findall(r"Annule ([0-9a-f]{40})", corps))
+                elif sujet.startswith(PREFIXE_NOTE) and sha not in annulees:
+                    return self._defaire(sha, sujet.removeprefix(PREFIXE_NOTE))
+        raise ErreurMemoire("Il n'y a plus de note à retirer.")
+
+    def _defaire(self, sha: str, titre: str) -> str:
+        chemins = _git(self.racine, "show", "--name-only", "--format=", sha).split()
+        try:
+            _git(self.racine, "revert", "--no-commit", sha)
+            message = f"{PREFIXE_ANNULE}{titre}\n\nAnnule {sha}"
+            _git(self.racine, "commit", "-q", "-m", message, "--", *chemins)
+        except subprocess.CalledProcessError:
+            with contextlib.suppress(subprocess.CalledProcessError):
+                _git(self.racine, "revert", "--abort")
+            raise ErreurMemoire(
+                "Je ne peux pas retirer cette note : la fiche a été modifiée depuis."
+            ) from None
         return titre
