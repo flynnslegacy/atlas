@@ -55,3 +55,7 @@ async def test_il_assume_de_ne_pas_savoir():
 async def test_il_rend_plusieurs_fragments():
     fragments = [f async for f in CerveauBouchon().repondre("bonjour")]
     assert len(fragments) > 1, "le cerveau doit streamer, sinon on ne teste pas le découpage"
+
+
+async def test_le_bouchon_se_ferme_sans_rien_faire():
+    await CerveauBouchon().fermer()

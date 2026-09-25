@@ -103,6 +103,7 @@ def _client(
     horloge=None,
     seuil_bargein_dbfs: float = -40.0,
     relance_s: float = 0.0,
+    attendre=None,
 ):
     return ClientAudio(
         transport=transport,
@@ -114,6 +115,7 @@ def _client(
         horloge=horloge or FausseHorloge(),
         seuil_bargein_dbfs=seuil_bargein_dbfs,
         relance_s=relance_s,
+        attendre=attendre,
     )
 
 

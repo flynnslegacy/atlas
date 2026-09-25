@@ -20,6 +20,12 @@ def test_decoder_un_message_bonjour():
     assert "aec" in msg.capacites
 
 
+def test_le_bonjour_porte_la_cle_du_client_audio():
+    msg = decoder_message('{"type":"bonjour","client":"m5","cle":"secret"}')
+    assert msg.cle == "secret"
+    assert decoder_message('{"type":"bonjour","client":"m5"}').cle == ""
+
+
 def test_decoder_un_abandon():
     assert decoder_message('{"type":"abandon"}') == Abandon()
 

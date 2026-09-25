@@ -10,7 +10,9 @@ _PERMISES: dict[Valeur, set[Valeur]] = {
     "repos": {"ecoute", "reflexion"},  # « reflexion » : une question tapée, sans écoute
     "ecoute": {"reflexion", "repos"},
     "reflexion": {"parole", "repos"},
-    "parole": {"repos", "ecoute"},  # « ecoute » est le chemin de l'interruption
+    # « ecoute » est le chemin de l'interruption ; « reflexion », celui d'une recherche web
+    # qui commence après la phrase d'attente.
+    "parole": {"repos", "ecoute", "reflexion"},
 }
 
 

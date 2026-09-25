@@ -183,7 +183,7 @@ async def test_deux_tours_incrementent_l_identifiant():
     assert {decoder_audio_sortant(t)[0] for t in c.binaire} == {1, 2}
 
 
-async def test_une_interruption_pendant_la_reflexion_mene_au_repos():
+async def test_une_interruption_pendant_la_reflexion_mene_a_l_ecoute():
     c = Collecteur()
     s = Session(
         envoyer_json=c.envoyer_json,
@@ -197,11 +197,14 @@ async def test_une_interruption_pendant_la_reflexion_mene_au_repos():
     await s.sur_message(FinEnonce(duree_ms=20))
     await asyncio.sleep(0.05)  # la transcription est toujours en cours : on est en réflexion
 
-    # « reflexion → ecoute » n'existe pas dans la machine à états : si _interrompre
-    # visait ecoute ici, ceci lèverait TransitionInterdite au lieu de passer.
+    # `Interruption` (contrairement à `Reveil`, qui passe par `_reveiller`) veut dire que
+    # le client capture déjà : il faut donc finir en écoute, pas au repos, où l'audio et
+    # la fin d'énoncé qui suivraient seraient jetés. « reflexion → ecoute » n'existe pas
+    # d'un seul coup dans la machine à états : `_interrompre` y passe par « repos »,
+    # sans le publier, ce qui reste une transition permise à chaque étape.
     await s.sur_message(Interruption(horodatage=1.0))
 
-    assert [m for m in c.json if isinstance(m, Etat)][-1].valeur == "repos"
+    assert [m for m in c.json if isinstance(m, Etat)][-1].valeur == "ecoute"
     assert not [m for m in c.json if isinstance(m, Dire)]
     await s.fermer()
 
