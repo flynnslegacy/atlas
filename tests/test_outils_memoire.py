@@ -5,13 +5,8 @@ import pytest
 
 from atlas_core.cerveau import Note
 from atlas_core.memoire import Memoire
-from atlas_core.outils_memoire import (
-    ANNONCE_PROFIL,
-    ANNONCE_RETRAIT,
-    ECHEC,
-    PENDANT_LE_RESUME,
-    OutilsMemoire,
-)
+from atlas_core.outils import ECHEC, PENDANT_LE_RESUME, Niveau
+from atlas_core.outils_memoire import ANNONCE_PROFIL, ANNONCE_RETRAIT, OutilsMemoire
 
 PAUL = "# Paul Durand\n\nProspect ; rendez-vous le jeudi 2 octobre 2026.\n"
 
@@ -27,13 +22,16 @@ async def appeler(outils: OutilsMemoire, nom: str, **arguments) -> tuple[str, bo
     return resultat["content"][0]["text"], resultat.get("is_error", False)
 
 
-def test_claude_voit_quatre_outils_sur_le_serveur_atlas(outils):
-    assert outils.noms == [
-        "mcp__atlas__memoire_lire",
-        "mcp__atlas__memoire_chercher",
-        "mcp__atlas__memoire_ecrire",
-        "mcp__atlas__memoire_annuler",
+def test_claude_voit_six_outils_chacun_avec_son_niveau(outils):
+    assert [(o.nom, o.niveau) for o in outils.declarations] == [
+        ("memoire_lire", Niveau.N1),
+        ("memoire_chercher", Niveau.N1),
+        ("memoire_ecrire", Niveau.N2),
+        ("document_ecrire", Niveau.N2),
+        ("memoire_annuler", Niveau.N2),
+        ("memoire_supprimer", Niveau.N3),
     ]
+    assert outils.noms == [f"mcp__atlas__{o.nom}" for o in outils.declarations]
     serveur = outils.serveur()
     assert (serveur["type"], serveur["name"]) == ("sdk", "atlas")
 
@@ -149,4 +147,4 @@ async def test_une_panne_du_depot_revient_a_claude_et_se_note_au_journal(
         ECHEC,
         True,
     )
-    assert "un outil de la mémoire a échoué" in caplog.text
+    assert "l'outil memoire_ecrire a échoué" in caplog.text

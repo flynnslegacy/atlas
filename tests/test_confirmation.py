@@ -311,3 +311,23 @@ async def test_une_question_jamais_posee_qui_expire_ne_montre_rien_aux_pages(
     await _laisser_tourner()
     assert not confirmations.en_attente and temoin.fins == []
     assert len(confirmations.prendre_les_lignes()) == 1
+
+
+async def test_apres_ne_suit_qu_une_execution_reussie(confirmations, temoin):
+    apres: list[str] = []
+    for reponse, executer in (("oui", temoin.executer), ("non", temoin.executer)):
+        confirmations.mettre_en_attente(
+            Suppression("documents/a.md", "A", executer, apres=lambda: apres.append("vu"))
+        )
+        confirmations.poser()
+        await confirmations.trancher(reponse)
+
+    def echouer() -> None:
+        raise ErreurMemoire("non")
+
+    confirmations.mettre_en_attente(
+        Suppression("documents/a.md", "A", echouer, apres=lambda: apres.append("vu"))
+    )
+    confirmations.poser()
+    await confirmations.trancher("oui")
+    assert apres == ["vu"]

@@ -1,40 +1,33 @@
-"""Le serveur d'outils d'Atlas : les quatre outils de la mémoire, que Claude appelle.
+"""Les outils de la mémoire, que Claude appelle : lire, chercher, écrire une fiche, annuler,
+supprimer — et ceux des documents (outils_documents.py).
 
-Il tourne dans le Core, par le SDK de Claude (`create_sdk_mcp_server`). Chaque écriture
-passe par `Memoire`, qui la vérifie et la commite ; l'outil garde pour le cerveau la
-phrase qui l'annoncera (`Note`). La phase 2c y ajoutera ses outils et ses niveaux
-d'autorisation.
+Chacun déclare son niveau, et le serveur « atlas » (outils.py) applique la règle : lire et
+chercher sont N1, écrire et annuler N2 (faits, puis annoncés), supprimer N3 (le « oui » de
+David d'abord). Chaque écriture passe par `Memoire`, qui la vérifie et la commite.
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any
 
-from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
-from claude_agent_sdk.types import McpSdkServerConfig
+from .confirmation import Confirmations, Suppression
+from .memoire import DOSSIER_DOCUMENTS, Defait, Memoire
+from .outils import Fait, Niveau, Outil, ServeurAtlas
+from .outils_documents import outils_des_documents
 
-from .cerveau import Note
-from .memoire import ErreurMemoire, Memoire
-
-_journal = logging.getLogger(__name__)
-
-SERVEUR = "atlas"
 ANNONCE_PROFIL = "Je le note dans ton profil."
 ANNONCE_RETRAIT = "J'ai retiré ma dernière note."
-PENDANT_LE_RESUME = "La conversation se résume : rien ne s'écrit maintenant."
-ECHEC = "La mémoire n'a pas pu faire ça : une erreur est notée dans le journal du Core."
 
 LIRE = (
     "Lit un fichier de ta mémoire : profil.md, une fiche (entreprise/, projets/ ou "
-    "personnes/ suivi du nom) ou un jour du journal (journal/AAAA-MM-JJ.md). Lis une fiche "
-    "avant de la modifier."
+    "personnes/ suivi du nom), un document (documents/ suivi du nom) ou un jour du journal "
+    "(journal/AAAA-MM-JJ.md). Lis une fiche ou un document avant de le modifier."
 )
 CHERCHER = (
-    "Cherche un mot ou un nom dans tes fiches et ton journal, sans tenir compte des "
-    "majuscules ni des accents. Rend au plus vingt lignes, chacune avec son fichier."
+    "Cherche un mot ou un nom dans tes fiches, tes documents et ton journal, sans tenir "
+    "compte des majuscules ni des accents. Rend au plus vingt lignes, chacune avec son fichier."
 )
 ECRIRE = (
     "Crée ou remplace une fiche entière de ta mémoire : profil.md, ou entreprise/<nom>.md, "
@@ -43,86 +36,94 @@ ECRIRE = (
     "est libre. Atlas annonce l'écriture à David : ne l'annonce pas toi-même."
 )
 ANNULER = (
-    "Retire ta dernière note encore en place, quand David dit « annule », « oublie ça » ou "
-    "« ne note pas ça ». Rappeler cet outil remonte d'une note. Atlas le dit à David."
+    "Défait ta dernière note encore en place — une fiche écrite, un document écrit ou "
+    "retouché, une suppression —, quand David dit « annule », « oublie ça » ou « ne note pas "
+    "ça ». Rappeler cet outil remonte d'une note. Atlas le dit à David."
 )
-
-Gestionnaire = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+SUPPRIMER = (
+    "Supprime une fiche (profil.md, entreprise/, projets/ ou personnes/) ou un document "
+    "(documents/), quand David le demande. Rien n'est supprimé tout de suite : Atlas demande "
+    "à David de confirmer. N'ajoute rien après l'appel, et ne dis jamais que c'est fait."
+)
 
 
 def annonce_de(chemin: str, titre: str) -> str:
     return ANNONCE_PROFIL if chemin == "profil.md" else f"Je le note dans la fiche {titre}."
 
 
-def _texte(texte: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": texte}]}
+def _est_un_document(chemin: str) -> bool:
+    return chemin.startswith(f"{DOSSIER_DOCUMENTS}/")
 
 
-def _refus(texte: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": texte}], "is_error": True}
+def annonce_du_retrait(defait: Defait) -> str:
+    """Ce qu'Atlas dit après « annule », selon ce que la note avait fait."""
+    if defait.nature == "suppression":
+        if defait.chemin == "profil.md":
+            return "J'ai remis ton profil."
+        quoi = "le document" if _est_un_document(defait.chemin) else "la fiche"
+        return f"J'ai remis {quoi} {defait.titre}."
+    if _est_un_document(defait.chemin):
+        if defait.nature == "creation":
+            return f"J'ai retiré le document {defait.titre}."
+        return f"Le document {defait.titre} revient à sa version précédente."
+    return ANNONCE_RETRAIT
 
 
-def _protege(gestionnaire: Gestionnaire) -> Gestionnaire:
-    """Un refus de la mémoire revient à Claude, qui le dit à David ; une panne aussi,
-    notée en plus dans le journal du Core."""
+class OutilsMemoire(ServeurAtlas):
+    """Le serveur « atlas » et les outils de la mémoire. `sur_documents` prévient les pages
+    quand un document change ; `confirmations` tient l'action qui attend le « oui »."""
 
-    async def enveloppe(arguments: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return await gestionnaire(arguments)
-        except ErreurMemoire as e:
-            return _refus(str(e))
-        except Exception:
-            _journal.exception("un outil de la mémoire a échoué")
-            return _refus(ECHEC)
-
-    return enveloppe
-
-
-class OutilsMemoire:
-    def __init__(self, memoire: Memoire) -> None:
+    def __init__(
+        self,
+        memoire: Memoire,
+        confirmations: Confirmations | None = None,
+        sur_documents: Callable[[], None] | None = None,
+    ) -> None:
         self.memoire = memoire
-        self.ecriture_permise = True  # False pendant le résumé d'une conversation
-        self._annonces: list[Note] = []
-        self.outils: list[SdkMcpTool] = [
-            tool("memoire_lire", LIRE, {"chemin": str})(_protege(self._lire)),
-            tool("memoire_chercher", CHERCHER, {"texte": str})(_protege(self._chercher)),
-            tool("memoire_ecrire", ECRIRE, {"chemin": str, "contenu": str})(_protege(self._ecrire)),
-            tool("memoire_annuler", ANNULER, {})(_protege(self._annuler)),
-        ]
+        self.sur_documents = sur_documents or (lambda: None)
+        super().__init__(
+            [
+                Outil("memoire_lire", LIRE, {"chemin": str}, Niveau.N1, self._lire),
+                Outil("memoire_chercher", CHERCHER, {"texte": str}, Niveau.N1, self._chercher),
+                Outil(
+                    "memoire_ecrire",
+                    ECRIRE,
+                    {"chemin": str, "contenu": str},
+                    Niveau.N2,
+                    self._ecrire,
+                ),
+                *outils_des_documents(memoire, lambda: self.sur_documents()),
+                Outil("memoire_annuler", ANNULER, {}, Niveau.N2, self._annuler),
+                Outil("memoire_supprimer", SUPPRIMER, {"chemin": str}, Niveau.N3, self._supprimer),
+            ],
+            confirmations or Confirmations(),
+        )
 
-    @property
-    def noms(self) -> list[str]:
-        """Les noms sous lesquels Claude voit ces outils."""
-        return [f"mcp__{SERVEUR}__{outil.name}" for outil in self.outils]
+    async def _lire(self, arguments: dict[str, Any]) -> str:
+        return await asyncio.to_thread(self.memoire.lire, arguments["chemin"])
 
-    def serveur(self) -> McpSdkServerConfig:
-        return create_sdk_mcp_server(SERVEUR, tools=self.outils)
-
-    def prendre_les_annonces(self) -> list[Note]:
-        """Les écritures faites depuis le dernier appel, à annoncer dans l'ordre."""
-        annonces, self._annonces = self._annonces, []
-        return annonces
-
-    async def _lire(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        return _texte(await asyncio.to_thread(self.memoire.lire, arguments["chemin"]))
-
-    async def _chercher(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _chercher(self, arguments: dict[str, Any]) -> str:
         lignes = await asyncio.to_thread(self.memoire.chercher, arguments["texte"])
-        return _texte("\n".join(lignes) if lignes else "Rien trouvé.")
+        return "\n".join(lignes) if lignes else "Rien trouvé."
 
-    async def _ecrire(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        if not self.ecriture_permise:
-            return _refus(PENDANT_LE_RESUME)
+    async def _ecrire(self, arguments: dict[str, Any]) -> Fait:
         chemin = arguments["chemin"]
         titre = await asyncio.to_thread(self.memoire.ecrire, chemin, arguments["contenu"])
         if titre is None:
-            return _texte("La fiche était déjà ainsi : rien n'a changé.")
-        self._annonces.append(Note(annonce_de(chemin, titre)))
-        return _texte(f"C'est noté dans {chemin}.")
+            return Fait("La fiche était déjà ainsi : rien n'a changé.")
+        return Fait(f"C'est noté dans {chemin}.", annonce_de(chemin, titre))
 
-    async def _annuler(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        if not self.ecriture_permise:
-            return _refus(PENDANT_LE_RESUME)
+    async def _annuler(self, arguments: dict[str, Any]) -> Fait:
         defait = await asyncio.to_thread(self.memoire.annuler)
-        self._annonces.append(Note(ANNONCE_RETRAIT))
-        return _texte(f"La note « {defait.titre} » est retirée.")
+        annonce = annonce_du_retrait(defait)
+        if _est_un_document(defait.chemin):
+            self.sur_documents()
+        if annonce == ANNONCE_RETRAIT:
+            return Fait(f"La note « {defait.titre} » est retirée.", annonce)
+        return Fait(annonce, annonce)
+
+    async def _supprimer(self, arguments: dict[str, Any]) -> Suppression:
+        chemin = arguments["chemin"]
+        titre = await asyncio.to_thread(self.memoire.titre_de, chemin)
+        apres = (lambda: self.sur_documents()) if _est_un_document(chemin) else (lambda: None)
+        return Suppression(chemin, titre, lambda: self.memoire.supprimer(chemin), apres)

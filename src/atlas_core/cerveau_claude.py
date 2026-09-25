@@ -41,7 +41,8 @@ from claude_agent_sdk import (
 
 from .cerveau import RECHERCHE, ErreurCerveau, Note, Recherche
 from .consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE, DEMANDE_RESUME, RIEN, ligne_de_date
-from .outils_memoire import SERVEUR, OutilsMemoire
+from .outils import SERVEUR
+from .outils_memoire import OutilsMemoire
 
 _journal = logging.getLogger(__name__)
 

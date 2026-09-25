@@ -88,14 +88,20 @@ def lire_reponse(texte: str) -> str:
     return "autre"
 
 
+def _rien() -> None:
+    pass
+
+
 @dataclass(frozen=True)
 class Suppression:
     """Une suppression résolue — ce qu'elle retire — et la façon de la dire. `executer`
-    tourne hors de la boucle du Core, seulement après le « oui »."""
+    tourne hors de la boucle du Core, seulement après le « oui » ; `apres`, dans la boucle,
+    une fois l'exécution réussie (prévenir les pages, par exemple)."""
 
     chemin: str
     titre: str
     executer: Callable[[], object]
+    apres: Callable[[], None] = _rien
 
     @property
     def _nature(self) -> str:
@@ -209,6 +215,7 @@ class Confirmations:
             objet = action.objet[0].upper() + action.objet[1:]
             self._conclure(f"[{objet} a échoué.]", "La suppression a échoué.")
             return action.ratee, False
+        action.apres()
         self._conclure(f"[Confirmé par David : {action.bilan}.]", action.page_faite)
         return action.faite, False
 
