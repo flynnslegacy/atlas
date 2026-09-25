@@ -140,6 +140,9 @@ class FauxClientClaude:
                 continue
             if isinstance(message, BaseException):
                 raise message
+            if callable(message):
+                await message()  # un outil que Claude appelle : le SDK l'exécute
+                continue
             yield message
             if isinstance(message, ResultMessage):
                 return

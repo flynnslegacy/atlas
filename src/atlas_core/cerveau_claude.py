@@ -36,7 +36,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from .cerveau import RECHERCHE, ErreurCerveau, Recherche
+from .cerveau import RECHERCHE, ErreurCerveau, Note, Recherche
 from .consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE, ligne_de_date
 from .outils_memoire import SERVEUR, OutilsMemoire
 
@@ -118,8 +118,11 @@ class CerveauClaude:
         oubli_s: float = 30 * 60,
         horloge: Callable[[], float] = time.monotonic,
         maintenant: Callable[[], dt.datetime] = dt.datetime.now,
+        outils: OutilsMemoire | None = None,
     ) -> None:
         self._fabrique = fabrique
+        self._outils = outils
+        self._client_amorce: ClientClaude | None = None  # sa conversation a reçu la mémoire
         self._oubli_s = oubli_s
         self._horloge = horloge
         self._maintenant = maintenant
@@ -131,7 +134,7 @@ class CerveauClaude:
         self._fil_perdu = False  # la conversation a été perdue : la réponse suivante le dit
         self._menage: asyncio.Task | None = None
 
-    async def repondre(self, texte: str) -> AsyncIterator[str | Recherche]:
+    async def repondre(self, texte: str) -> AsyncIterator[str | Recherche | Note]:
         if self._verrou.locked():
             # Une question à la fois : celle-ci, d'où qu'elle vienne, coupe celle en cours.
             await self._interrompre_le_tour()
@@ -180,6 +183,11 @@ class CerveauClaude:
         return client
 
     async def _envoyer(self, client: ClientClaude, question: str) -> None:
+        amorcer = self._outils is not None and client is not self._client_amorce
+        if amorcer:
+            # La première question d'une conversation part avec ce qu'Atlas sait déjà.
+            amorcage = await self._amorcage()
+            question = f"{amorcage}\n{question}" if amorcage else question
         # Ouvert avant l'envoi : une question annulée pendant l'écriture laisse peut-être
         # un tour en route chez Claude, que le ménage doit alors refermer.
         self._tour_ouvert = True
@@ -188,6 +196,16 @@ class CerveauClaude:
         except Exception:
             self._tour_ouvert = False
             raise
+        if amorcer:
+            self._client_amorce = client
+
+    async def _amorcage(self) -> str:
+        try:
+            memoire = self._outils.memoire
+            return await asyncio.to_thread(memoire.amorcage, self._maintenant().date())
+        except Exception:  # noqa: BLE001 — une mémoire illisible n'empêche pas de répondre
+            _journal.exception("amorçage de la mémoire impossible")
+            return ""
 
     async def _client_pret(self) -> ClientClaude:
         dernier = self._dernier_echange
@@ -216,7 +234,7 @@ class CerveauClaude:
 
     # --- un tour de conversation ---------------------------------------------
 
-    async def _lire_le_tour(self, client: ClientClaude) -> AsyncIterator[str | Recherche]:
+    async def _lire_le_tour(self, client: ClientClaude) -> AsyncIterator[str | Recherche | Note]:
         recherches: set[str] = set()
         texte_rendu = False
         separer = False
@@ -263,6 +281,12 @@ class CerveauClaude:
                         self._tour_ouvert = False
                         if message.is_error and not self._interrompu:
                             raise ErreurCerveau(self._message_resultat(message))
+                    # Une écriture dans la mémoire s'annonce à sa place dans la réponse. Une
+                    # réponse coupée garde ses annonces pour le début de la suivante : une
+                    # écriture ne passe jamais en silence.
+                    if self._outils is not None and not self._interrompu:
+                        for note in self._outils.prendre_les_annonces():
+                            yield note
         except ErreurCerveau:
             raise
         except Exception as e:  # noqa: BLE001 — le SDK ne sait plus où il en est
