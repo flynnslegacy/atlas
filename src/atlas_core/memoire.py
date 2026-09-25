@@ -65,8 +65,9 @@ class ErreurMemoire(Exception):
     """L'écriture ou la lecture est refusée. Le message, en français, va à Claude."""
 
 
-def _git(racine: Path, *arguments: str) -> str:
-    """Lance git dans le dépôt, sans dépendre de la configuration git de la machine."""
+def _git(racine: Path, *arguments: str, entree: str | None = None) -> str:
+    """Lance git dans le dépôt, sans dépendre de la configuration git de la machine ;
+    `entree` est passée sur son entrée standard."""
     commande = [
         GIT,
         "-C",
@@ -90,7 +91,7 @@ def _git(racine: Path, *arguments: str) -> str:
     }
     environnement = {**os.environ, **identite}
     return subprocess.run(
-        commande, capture_output=True, text=True, check=True, env=environnement
+        commande, input=entree, capture_output=True, text=True, check=True, env=environnement
     ).stdout
 
 
@@ -269,17 +270,20 @@ class Memoire:
         raise ErreurMemoire("Il n'y a plus de note à retirer.")
 
     def _defaire(self, sha: str, titre: str) -> str:
+        """Applique l'inverse de la note, tout ou rien, sur ses seuls fichiers : le travail
+        de David, préparé ou non, n'est jamais touché."""
         chemins = _git(self.racine, "show", "--name-only", "--format=", sha).split()
+        refus = ErreurMemoire("Je ne peux pas retirer cette note : la fiche a été modifiée depuis.")
+        if _git(self.racine, "status", "--porcelain", "--", *chemins).strip():
+            raise refus  # une retouche de David sur la fiche, même pas encore commitée
+        inverse = _git(self.racine, "show", "--format=", "--patch", "-R", sha, "--", *chemins)
         try:
-            _git(self.racine, "revert", "--no-commit", sha)
-            message = f"{PREFIXE_ANNULE}{titre}\n\nAnnule {sha}"
-            _git(self.racine, "commit", "-q", "-m", message, "--", *chemins)
+            _git(self.racine, "apply", "--check", "--index", entree=inverse)
         except subprocess.CalledProcessError:
-            with contextlib.suppress(subprocess.CalledProcessError):
-                _git(self.racine, "revert", "--abort")
-            raise ErreurMemoire(
-                "Je ne peux pas retirer cette note : la fiche a été modifiée depuis."
-            ) from None
+            raise refus from None  # la fiche a changé depuis la note : rien n'est touché
+        _git(self.racine, "apply", "--index", entree=inverse)
+        message = f"{PREFIXE_ANNULE}{titre}\n\nAnnule {sha}"
+        _git(self.racine, "commit", "-q", "-m", message, "--", *chemins)
         return titre
 
     # --- l'amorçage et le journal -----------------------------------------------------

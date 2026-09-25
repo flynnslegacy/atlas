@@ -179,3 +179,34 @@ def test_chercher_passe_une_fiche_retouchee_dans_un_autre_encodage(memoire):
         "# René\n\nAmi de Paul.\n".encode("latin-1")
     )
     assert memoire.chercher("paul") == ["personnes/rene.md : Ami de Paul."]
+
+
+def test_un_annule_refuse_ne_touche_pas_au_travail_prepare_ailleurs(memoire):
+    memoire.ecrire("projets/site-web.md", "# Site web\n\nMaquette.\n")
+    memoire.ecrire("personnes/paul-durand.md", PAUL)
+    # David prépare ses propres changements, qu'il n'a pas encore commités…
+    (memoire.racine / "projets" / "site-web.md").write_text("# Site web\n\nMaquette validée.\n")
+    (memoire.racine / "idees.md").write_text("Des idées.\n")
+    git(memoire, "add", "projets/site-web.md", "idees.md")
+    # … et commite à part une retouche de la fiche de Paul : « annule » bute dessus.
+    (memoire.racine / "personnes" / "paul-durand.md").write_text(PAUL.replace("jeudi", "lundi"))
+    git(memoire, "add", "personnes/paul-durand.md")
+    git(memoire, "commit", "-q", "-m", "Paul", "--", "personnes/paul-durand.md", auteur="David|d@x")
+    with pytest.raises(ErreurMemoire, match="modifiée depuis"):
+        memoire.annuler()
+    assert memoire.lire("projets/site-web.md") == "# Site web\n\nMaquette validée.\n"
+    assert (memoire.racine / "idees.md").read_text() == "Des idées.\n"
+    assert sorted(git(memoire, "status", "--porcelain").splitlines()) == [
+        "A  idees.md",
+        "M  projets/site-web.md",
+    ]
+
+
+def test_une_retouche_preparee_de_la_fiche_bloque_l_annulation_sans_la_perdre(memoire):
+    memoire.ecrire("personnes/paul-durand.md", PAUL)
+    (memoire.racine / "personnes" / "paul-durand.md").write_text(PAUL + "\nNote à la main.\n")
+    git(memoire, "add", "personnes/paul-durand.md")
+    with pytest.raises(ErreurMemoire, match="modifiée depuis"):
+        memoire.annuler()
+    assert memoire.lire("personnes/paul-durand.md").endswith("Note à la main.\n")
+    assert git(memoire, "status", "--porcelain").strip() == "M  personnes/paul-durand.md"
