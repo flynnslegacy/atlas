@@ -18,15 +18,17 @@ class RegieEspionne:
         self.saisies: list[str] = []
         self.muets: list[bool] = []
         self.pages: list[str | None] = []
+        self.rattachees: list[tuple[str | None, object]] = []
+        self.detachees: list = []
 
     def voix_active(self) -> bool:
         return True
 
     def rattacher(self, session, page: str | None = None) -> None:
-        pass
+        self.rattachees.append((page, session))
 
     def detacher(self, session) -> None:
-        pass
+        self.detachees.append(session)
 
     async def saisie(self, texte: str, page: str | None = None) -> None:
         self.saisies.append(texte)
@@ -64,6 +66,18 @@ def test_saisie_et_muet_arrivent_a_la_regie(regie):
     assert erreur["type"] == "erreur" and erreur["code"] == "message_invalide"
     assert "entre 1 et 1000 caractères" in erreur["message"]
     assert regie.saisies == ["quelle heure est-il"] and regie.muets == [True]
+
+
+@pytest.mark.parametrize("page", [None, "ipad-1"])
+def test_une_question_tapee_porte_l_identifiant_de_sa_page(regie, page):
+    entree = {"type": "authentification", "cle": CLE} | ({"page": page} if page else {})
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        ws.send_json(entree)
+        [ws.receive_json() for _ in range(3)]
+        ws.send_json({"type": "saisie", "texte": "quelle heure est-il"})
+        ws.send_json({"type": "saisie", "texte": ""})  # sa réponse prouve que tout est traité
+        ws.receive_json()
+    assert regie.saisies == ["quelle heure est-il"] and regie.pages == [page]
 
 
 def test_une_mauvaise_cle_ferme_la_connexion(regie):

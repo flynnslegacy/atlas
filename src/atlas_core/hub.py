@@ -1,4 +1,5 @@
-"""Serveur du Core : route de santé, WebSocket audio, WebSocket et page web."""
+"""Serveur du Core : route de santé, WebSocket audio, WebSocket et page web, et la voix
+des pages."""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -13,20 +15,35 @@ from claude_agent_sdk import ClaudeSDKClient
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
+from atlas_audio.client import lire_reglages
+from atlas_audio.connexion import PeripheriqueEnPanne
+
 from .cerveau import Cerveau, CerveauBouchon
 from .cerveau_claude import CerveauClaude, options_cerveau, purger_cles_api
 from .config import Config
 from .diffuseur import Diffuseur
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
+from .protocole_voix import (
+    AuthentificationVoix,
+    HeyAtlas,
+    Parler,
+    Pret,
+    Reprise,
+    decoder_message_voix,
+    verifier_bloc_page,
+)
 from .protocole_web import Authentification, Muet, Saisie, decoder_message_page
 from .regie import Regie
 from .session import Session, sans_destinataire
 from .synthese import ClientSynthese
 from .transcription import ClientTranscription
+from .voix import charger_modeles, monter_page
 from .web import cle_valide, origine_autorisee, politique_securite
 
 _journal = logging.getLogger(__name__)
 _config = Config.depuis_environnement()
+# Les réglages du client audio du Mac, que le Core applique aussi aux pages.
+_reglages = lire_reglages()
 _http: httpx.AsyncClient | None = None
 _cerveau: Cerveau | None = None
 
@@ -37,6 +54,7 @@ DELAI_AUTHENTIFICATION_S = 5.0
 FERMETURE_CLE_ABSENTE = 4000
 FERMETURE_NON_AUTORISE = 4401
 FERMETURE_ORIGINE = 1008  # « policy violation », avant même d'accepter la connexion
+FERMETURE_PANNE = 1011  # « internal error » : la voix d'une page s'est arrêtée, elle se rebranche
 
 
 def creer_cerveau(config: Config) -> Cerveau:
@@ -204,11 +222,12 @@ async def _client_audio_authentifie(ws: WebSocket) -> bool | None:
     return isinstance(bonjour, Bonjour) and cle_valide(bonjour.cle, _config.audio_cle)
 
 
-@app.websocket("/ws/web")
-async def ws_web(ws: WebSocket) -> None:
+async def _ouvrir_page(ws: WebSocket) -> bool:
+    """Accepte la connexion d'une page de la bonne origine, si la clé des pages est
+    configurée ; sinon la ferme et rend False."""
     if not origine_autorisee(ws.headers.get("origin"), ws.headers.get("host")):
         await ws.close(code=FERMETURE_ORIGINE)
-        return
+        return False
     await ws.accept()
     if not _config.web_cle:
         message = (
@@ -217,20 +236,35 @@ async def ws_web(ws: WebSocket) -> None:
         )
         await ws.send_text(Erreur(code="cle_absente", message=message).model_dump_json())
         await ws.close(code=FERMETURE_CLE_ABSENTE)
-        return
+        return False
+    return True
 
+
+async def _page_authentifiee(ws: WebSocket, decoder, attendu: type):
+    """Le premier message de la page s'il arrive à temps, du type attendu, avec la clé
+    des pages ; sinon la connexion est fermée (4401) et None est rendu."""
     try:
         premier = await asyncio.wait_for(_recevoir_texte(ws), DELAI_AUTHENTIFICATION_S)
     except TimeoutError:
         premier = ""
     if premier is None:
-        return  # la page est déjà partie
+        return None  # la page est déjà partie
     try:
-        demande = decoder_message_page(premier)
+        demande = decoder(premier)
     except ValueError:
         demande = None
-    if not isinstance(demande, Authentification) or not cle_valide(demande.cle, _config.web_cle):
+    if not isinstance(demande, attendu) or not cle_valide(demande.cle, _config.web_cle):
         await ws.close(code=FERMETURE_NON_AUTORISE)
+        return None
+    return demande
+
+
+@app.websocket("/ws/web")
+async def ws_web(ws: WebSocket) -> None:
+    if not await _ouvrir_page(ws):
+        return
+    demande = await _page_authentifiee(ws, decoder_message_page, Authentification)
+    if demande is None:
         return
 
     async def envoyer(msg) -> None:
@@ -245,13 +279,88 @@ async def ws_web(ws: WebSocket) -> None:
                 abonnement.envoyer_prive(Erreur(code="message_invalide", message=str(e)))
                 continue
             if isinstance(msg, Saisie):
-                await _regie.saisie(msg.texte)
+                await _regie.saisie(msg.texte, demande.page)
             elif isinstance(msg, Muet):
                 await _regie.basculer_muet(msg.actif)
     except WebSocketDisconnect:
         pass
     finally:
         await abonnement.fermer()
+
+
+@app.websocket("/ws/voix")
+async def ws_voix(ws: WebSocket) -> None:
+    """La voix d'une page qui a allumé son micro : le Core écoute pour elle (voix.py)."""
+    if not await _ouvrir_page(ws):
+        return
+    demande = await _page_authentifiee(ws, decoder_message_voix, AuthentificationVoix)
+    if demande is None:
+        return
+
+    async def envoyer_json(msg) -> None:
+        await ws.send_text(msg.model_dump_json())
+
+    async def envoyer_binaire(pcm: bytes) -> None:
+        await ws.send_bytes(pcm)
+
+    try:
+        modeles = await asyncio.to_thread(charger_modeles, _reglages.seuil_reveil)
+    except FileNotFoundError as e:
+        await envoyer_json(Erreur(code="modeles_absents", message=str(e)))
+        await ws.close(code=FERMETURE_CLE_ABSENTE)
+        return
+    page = monter_page(
+        envoyer_json,
+        envoyer_binaire,
+        creer_session,
+        modeles,
+        replace(_reglages, bargein_dbfs=_config.voix_bargein_dbfs),
+        _config.voix_marge_s,
+        demande.hey_atlas,
+    )
+    await envoyer_json(Pret())
+    _regie.rattacher(page.session, demande.page)
+    service = asyncio.create_task(page.servir())
+    try:
+        while True:
+            if service.done():
+                # Le client de la page s'est arrêté. Une panne : la page se rebranche,
+                # plutôt que de parler dans le vide. Un envoi qui a échoué : elle est partie.
+                if not isinstance(service.exception(), PeripheriqueEnPanne):
+                    await ws.close(code=FERMETURE_PANNE)
+                break
+            recu = await ws.receive()
+            if recu["type"] == "websocket.disconnect":
+                break
+            if (binaire := recu.get("bytes")) is not None:
+                try:
+                    page.peripherique.recevoir(verifier_bloc_page(binaire))
+                except ValueError as e:
+                    await envoyer_json(Erreur(code="trame_invalide", message=str(e)))
+                continue
+            try:
+                msg = decoder_message_voix(recu.get("text") or "")
+            except ValueError as e:
+                await envoyer_json(Erreur(code="message_invalide", message=str(e)))
+                continue
+            if isinstance(msg, Parler):
+                page.client.demander_la_parole()
+            elif isinstance(msg, HeyAtlas):
+                page.reveilleur.actif = msg.actif
+            elif isinstance(msg, Reprise):
+                page.client.reamorcer()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        service.cancel()
+        await asyncio.wait([service])
+        erreur = None if service.cancelled() else service.exception()
+        if isinstance(erreur, PeripheriqueEnPanne):
+            _journal.info("la page est partie pendant qu'Atlas lui parlait")
+        elif erreur is not None:
+            _journal.error("la voix d'une page s'est arrêtée", exc_info=erreur)
+        _regie.detacher(page.session)
+        await page.session.fermer()
 
 
 # Toujours en dernier : monté sur « / », il capterait sinon les routes déclarées après lui.

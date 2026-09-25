@@ -25,6 +25,10 @@ class Config:
     cerveau_modele: str = MODELE_PAR_DEFAUT
     cerveau_oubli_min: float = 30.0  # au-delà, sans échange, la conversation repart de zéro
     audio_cle: str = ""  # vide : /ws/audio refuse tout client audio
+    # La voix des pages (spike S4) : la latence de sortie d'un navigateur, et la porte
+    # d'énergie de la coupure à la voix, l'écho résiduel n'étant pas celui du Mac.
+    voix_marge_s: float = 0.2
+    voix_bargein_dbfs: float = -40.0
 
     @staticmethod
     def depuis_environnement() -> Config:
@@ -38,6 +42,8 @@ class Config:
             cerveau_modele=os.environ.get("ATLAS_CERVEAU_MODELE", "").strip() or MODELE_PAR_DEFAUT,
             cerveau_oubli_min=_lire_oubli_min(),
             audio_cle=os.environ.get("ATLAS_AUDIO_CLE", "").strip(),
+            voix_marge_s=_lire_nombre("ATLAS_VOIX_MARGE_S", "0.2", 0.0, 2.0),
+            voix_bargein_dbfs=_lire_nombre("ATLAS_VOIX_BARGEIN_DBFS", "-40", -120.0, 0.0),
         )
 
 
@@ -61,4 +67,15 @@ def _lire_oubli_min() -> float:
         raise ValueError(
             f"ATLAS_CERVEAU_OUBLI_MIN invalide : {brute!r} doit être un nombre de minutes positif"
         )
+    return valeur
+
+
+def _lire_nombre(nom: str, defaut: str, mini: float, maxi: float) -> float:
+    brute = os.environ.get(nom, defaut)
+    try:
+        valeur = float(brute)
+    except ValueError as erreur:
+        raise ValueError(f"{nom} invalide : {brute!r} n'est pas un nombre") from erreur
+    if not math.isfinite(valeur) or not (mini <= valeur <= maxi):
+        raise ValueError(f"{nom} invalide : {brute!r} doit être entre {mini:g} et {maxi:g}")
     return valeur
