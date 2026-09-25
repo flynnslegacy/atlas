@@ -367,6 +367,10 @@ sommaire des fiches et cherche dans le texte ; l'index viendra quand la mémoire
 grossi. Le journal s'écrit sans annonce, à la fin de chaque conversation : c'est la seule
 exception à la règle d'écriture. Voir `2026-09-25-phase-2b-memoire-design.md`.
 
+**Amendé le 25/09/2026 (phase 2c).** Le dossier `documents/` reçoit les documents produits
+par la réflexion vocale, écrits à la demande de David ; ils se lisent dans un panneau de la
+page. Voir `2026-09-25-phase-2c-outils-design.md`.
+
 ---
 
 ## 9. Outils
@@ -390,6 +394,9 @@ utilisables depuis d'autres clients MCP.
 **Amendé le 25/09/2026 (phase 2b).** Le serveur MCP d'Atlas (« atlas ») tourne dans le Core
 lui-même, par le SDK de Claude, et non en stdio. Ses quatre premiers outils sont ceux de la
 mémoire ; la phase 2c y ajoute les autres et les niveaux d'autorisation.
+**Amendé le 25/09/2026 (phase 2c).** Une liste explicite d'outils par famille (mémoire,
+documents), chacun avec son niveau déclaré ; la découverte automatique « un fichier par
+outil » attendra que les outils soient plus nombreux.
 
 Familles d'outils en v1 : n8n, mémoire et documents, veille. Home Assistant et agenda/mail
 viennent après la v1.
@@ -410,6 +417,12 @@ jamais son propre niveau d'autorisation.**
 La reformulation N3 porte sur l'action résolue, pas sur la demande : « envoyer un mail à
 Paul Durand, objet Proposition commerciale » et non « envoyer le mail dont on parlait ».
 C'est ce qui permet à David d'attraper une erreur de compréhension avant qu'elle ne coûte.
+
+**Amendé le 25/09/2026 (phase 2c).** La question N3 est formulée par le Core à partir de
+l'action résolue, jamais par Claude ; la réponse vient de la voix, du clavier ou d'un bouton
+de la page, et elle est lue par le Core avant Claude ; trente secondes sans réponse valent
+non. La première action N3 est la suppression d'une fiche ou d'un document. Voir
+`2026-09-25-phase-2c-outils-design.md`.
 
 ---
 
@@ -519,6 +532,8 @@ son plan et sa fusion : 2a, le cerveau branché (`2026-09-24-phase-2a-cerveau-de
 **Amendé le 25/09/2026.** Une étape « la voix dans le navigateur »
 (`2026-09-25-voix-navigateur-design.md`) s'insère entre 2a et 2b : la page de l'iPhone ou
 de l'iPad écoute et répond à voix haute, pas seulement le M5.
+**Amendé le 25/09/2026 (phase 2c).** La phase 2c est décrite par
+`2026-09-25-phase-2c-outils-design.md` : les documents et les niveaux d'autorisation.
 
 **Phase 3 — Les outils.** Registre d'outils, routeur d'intention, Ollama, supervision n8n,
 point quotidien, déclenchement vocal, diagnostic.
