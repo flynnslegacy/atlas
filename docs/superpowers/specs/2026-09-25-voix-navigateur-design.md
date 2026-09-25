@@ -147,8 +147,9 @@ dépendances `audio` et des modèles (§7.3).
   toujours). L'annuleur laisse passer l'écho le temps de s'installer, une seule fois : 0,7 s sur iOS, 7 à 10 s dans
   Chrome sur macOS.
 - **La régie** garde toutes les sessions audio (et non plus seulement la dernière). Une question tapée va à la session
-  de sa page si elle en a une, sinon à la session audio la plus récente, sinon à la session écrite. Le muet fait taire
-  toutes les sessions audio.
+  de sa page si elle en a une (micro allumé) : Atlas répond à voix haute sur cette page. Sinon, elle va à la session
+  écrite : une page dont le micro est éteint reçoit sa réponse par écrit (§12). Le muet fait taire toutes les
+  sessions audio.
 - **Le calcul** (openWakeWord et Silero, quelques millisecondes toutes les 80 ms par page à l'écoute) tourne sur la
   boucle du Core ; c'est acceptable pour quelques appareils, et le spike S4 le mesure.
 
@@ -267,3 +268,10 @@ En écrivant et en vérifiant le code du plan (`docs/superpowers/plans/2026-09-2
   page n'écoute que « Hey Atlas ».
 - **Les calculs purs de l'audio vivent dans `voix_worklet.js`** (§3.2) : le module de l'AudioWorklet reste d'un seul
   tenant, sans import, et ses classes se testent quand même avec `node --test`.
+
+Après la fusion, choix de David (25 septembre 2026) :
+
+- **Une page dont le micro est éteint reçoit sa réponse par écrit**, plutôt que dite par l'appareil qui écoute le plus
+  récemment, peut-être dans une autre pièce. Le client audio du Mac ne dit donc plus les questions tapées : cela
+  remplace, pour la question tapée, ce que prévoyait `2026-09-24-interface-orbe-design.md` (§1, « réponse à voix haute
+  sur le Mac »).

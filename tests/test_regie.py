@@ -40,12 +40,12 @@ def test_la_voix_est_active_par_defaut():
     assert regie.muet is False and regie.voix_active() is True
 
 
-async def test_une_question_tapee_va_au_client_audio_connecte():
+async def test_le_client_audio_du_mac_ne_dit_pas_les_questions_tapees():
     regie, creees = _regie()
-    audio = SessionEspionne()
-    regie.rattacher(audio)
+    mac = SessionEspionne()
+    regie.rattacher(mac)
     await regie.saisie("quelle heure est-il")
-    assert audio.saisies == ["quelle heure est-il"] and creees == []
+    assert mac.saisies == [] and creees[0].saisies == ["quelle heure est-il"]
 
 
 async def test_sans_client_audio_une_seule_session_ecrite_est_creee():
@@ -55,15 +55,15 @@ async def test_sans_client_audio_une_seule_session_ecrite_est_creee():
     assert len(creees) == 1 and creees[0].saisies == ["un", "deux"]
 
 
-async def test_detacher_le_client_audio_renvoie_vers_la_session_ecrite():
+async def test_une_page_qui_eteint_son_micro_repond_ensuite_par_ecrit():
     regie, creees = _regie()
-    audio = SessionEspionne()
-    regie.rattacher(audio)
+    ipad = SessionEspionne()
+    regie.rattacher(ipad, page="ipad")
     regie.detacher(SessionEspionne())  # une autre session : sans effet
-    await regie.saisie("un")
-    regie.detacher(audio)
-    await regie.saisie("deux")
-    assert audio.saisies == ["un"] and creees[0].saisies == ["deux"]
+    await regie.saisie("un", page="ipad")
+    regie.detacher(ipad)
+    await regie.saisie("deux", page="ipad")
+    assert ipad.saisies == ["un"] and creees[0].saisies == ["deux"]
 
 
 async def test_le_muet_est_publie_et_fait_taire_le_client_audio():
@@ -97,17 +97,16 @@ async def test_une_question_tapee_va_a_la_session_de_sa_page():
     assert mac.saisies == [] and creees == []
 
 
-async def test_une_page_sans_micro_passe_a_la_session_audio_la_plus_recente():
+async def test_une_page_sans_micro_recoit_sa_reponse_par_ecrit():
+    # Un autre appareil la dirait peut-être dans une autre pièce (choix de David).
     regie, creees = _regie()
     mac, ipad = SessionEspionne(), SessionEspionne()
     regie.rattacher(mac)
     regie.rattacher(ipad, page="ipad")
     await regie.saisie("sans micro", page="iphone")
     await regie.saisie("sans identifiant")
-    assert ipad.saisies == ["sans micro", "sans identifiant"] and mac.saisies == []
-    regie.detacher(ipad)
-    await regie.saisie("l'iPad est parti", page="ipad")
-    assert mac.saisies == ["l'iPad est parti"] and creees == []
+    assert ipad.saisies == [] and mac.saisies == []
+    assert len(creees) == 1 and creees[0].saisies == ["sans micro", "sans identifiant"]
 
 
 async def test_une_page_rebranchee_repond_par_sa_session_la_plus_recente():
