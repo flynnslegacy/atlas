@@ -146,6 +146,11 @@ class CerveauClaude:
         self._fil_perdu = False  # la conversation a été perdue : la réponse suivante le dit
         self._menage: asyncio.Task | None = None
 
+    @property
+    def outils(self) -> OutilsMemoire | None:
+        """Les outils d'Atlas et sa mémoire ; None sans mémoire."""
+        return self._outils
+
     async def repondre(self, texte: str) -> AsyncIterator[str | Recherche | Note]:
         if self._echeance is not None and not self._resume_en_cours:
             self._echeance.cancel()  # la conversation continue

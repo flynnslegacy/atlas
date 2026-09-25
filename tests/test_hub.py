@@ -16,6 +16,7 @@ from atlas_core.protocole import (
     Reveil,
     encoder_audio_entrant,
 )
+from atlas_core.protocole_web import AttenteConfirmation, DocumentsChanges, FinConfirmation
 
 CLE_AUDIO = "cle-audio-de-test"
 
@@ -184,6 +185,30 @@ def test_la_memoire_refuse_les_cles_du_core(monkeypatch, tmp_path):
     ):
         with pytest.raises(memoire.ErreurMemoire, match="clé secrète"):
             outils.memoire.ecrire("profil.md", f"# Profil\n\nDavid.\n\n{secret}\n")
+
+
+def test_la_memoire_previent_les_pages(monkeypatch, tmp_path):
+    publies: list = []
+    monkeypatch.setattr(hub._regie.diffuseur, "publier", publies.append)
+    outils = hub.ouvrir_la_memoire(replace(hub._config, memoire_dossier=tmp_path / "memoire"))
+    outils.sur_documents()
+    outils.confirmations.sur_question("Je supprime ton profil. Tu confirmes ?")
+    outils.confirmations.sur_fin("Rien n'a été supprimé.")
+    assert publies == [
+        DocumentsChanges(),
+        AttenteConfirmation(texte="Je supprime ton profil. Tu confirmes ?"),
+        FinConfirmation(texte="Rien n'a été supprimé."),
+    ]
+
+
+def test_le_core_garde_les_outils_du_cerveau_le_temps_de_sa_vie(monkeypatch, tmp_path):
+    config = replace(hub._config, cerveau="claude", memoire_dossier=tmp_path / "memoire")
+    monkeypatch.setattr(hub, "_config", config)
+    monkeypatch.setattr(hub, "DOSSIER_CERVEAU", tmp_path / "cerveau")
+    with TestClient(hub.app):
+        assert hub._outils is hub._cerveau.outils
+        assert hub._outils.memoire.racine == tmp_path / "memoire"
+    assert hub._outils is None
 
 
 def test_sans_git_le_cerveau_marche_sans_memoire(monkeypatch, tmp_path):

@@ -15,6 +15,9 @@ TAILLE_MAX_CLE = 256
 # L'identifiant qu'une page tire au hasard à son ouverture, le même sur /ws/web et sur
 # /ws/voix : une question tapée trouve ainsi la voix de sa page.
 MOTIF_PAGE = r"^[A-Za-z0-9_-]{1,64}$"
+# Le panneau « Documents » ne lit que des documents : jamais une fiche ni le journal.
+MOTIF_DOCUMENT = r"^documents/[a-z0-9]+(?:-[a-z0-9]+)*\.md$"
+CHEMIN_DOCUMENT_MAX = len("documents/") + 60 + len(".md")  # un nom : 60 au plus (memoire.py)
 
 Source = Literal["voix", "clavier"]
 
@@ -66,6 +69,49 @@ class Historique(BaseModel):
     echanges: list[Echange]
 
 
+class ResumeDocument(BaseModel):
+    chemin: str
+    titre: str
+    resume: str
+    modifie: str  # « 25 septembre 2026, 21 h 14 »
+
+
+class ListeDocuments(BaseModel):
+    """Les documents, du plus récent au plus ancien ; `disponible` est faux sans mémoire."""
+
+    type: Literal["liste_documents"] = "liste_documents"
+    disponible: bool = True
+    documents: list[ResumeDocument] = []
+
+
+class Document(BaseModel):
+    type: Literal["document"] = "document"
+    chemin: str
+    titre: str = ""
+    contenu: str = ""
+    erreur: str | None = None
+
+
+class DocumentsChanges(BaseModel):
+    """À toutes les pages : un document a été écrit, supprimé ou remis."""
+
+    type: Literal["documents_changes"] = "documents_changes"
+
+
+class AttenteConfirmation(BaseModel):
+    """À toutes les pages : Atlas attend le « oui » de David ; `texte` est la question."""
+
+    type: Literal["confirmation"] = "confirmation"
+    texte: str
+
+
+class FinConfirmation(BaseModel):
+    """À toutes les pages : l'attente est finie ; `texte` dit comment."""
+
+    type: Literal["confirmation_finie"] = "confirmation_finie"
+    texte: str
+
+
 # --- page vers Core -----------------------------------------------------
 
 
@@ -88,7 +134,26 @@ class Saisie(BaseModel):
         return texte
 
 
-MessagePage = Annotated[Authentification | Saisie | Muet, Field(discriminator="type")]
+class DemandeDocuments(BaseModel):
+    type: Literal["documents"] = "documents"
+
+
+class LireDocument(BaseModel):
+    type: Literal["lire_document"] = "lire_document"
+    chemin: str = Field(pattern=MOTIF_DOCUMENT, max_length=CHEMIN_DOCUMENT_MAX)
+
+
+class Confirmer(BaseModel):
+    """Les boutons « Confirmer » et « Annuler » : comme taper « oui » ou « non »."""
+
+    type: Literal["confirmer"] = "confirmer"
+    oui: bool
+
+
+MessagePage = Annotated[
+    Authentification | Saisie | Muet | DemandeDocuments | LireDocument | Confirmer,
+    Field(discriminator="type"),
+]
 _adaptateur_page = TypeAdapter(MessagePage)
 
 
