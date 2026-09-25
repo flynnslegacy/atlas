@@ -4,6 +4,7 @@ messages réalistes (deltas de texte, appel à la recherche web, message de fin,
 import asyncio
 import dataclasses
 import datetime as dt
+import json
 
 import pytest
 from claude_agent_sdk import (
@@ -32,7 +33,9 @@ from atlas_core.cerveau_claude import (
     options_cerveau,
     purger_cles_api,
 )
-from atlas_core.consignes import CONSIGNES
+from atlas_core.consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE
+from atlas_core.memoire import Memoire
+from atlas_core.outils_memoire import OutilsMemoire
 
 MOMENT = dt.datetime(2026, 9, 24, 21, 50)
 
@@ -137,6 +140,9 @@ class FauxClientClaude:
                 continue
             if isinstance(message, BaseException):
                 raise message
+            if callable(message):
+                await message()  # un outil que Claude appelle : le SDK l'exécute
+                continue
             yield message
             if isinstance(message, ResultMessage):
                 return
@@ -468,6 +474,36 @@ def test_la_ligne_de_commande_du_cli_porte_ces_limites(tmp_path):
     assert "--include-partial-messages" in commande
     assert "--mcp-config" not in commande
     assert "WebFetch" not in " ".join(commande)
+
+
+def test_avec_la_memoire_claude_gagne_ses_quatre_outils_et_rien_d_autre(tmp_path):
+    outils = OutilsMemoire(Memoire.ouvrir(tmp_path / "memoire"))
+    options = options_cerveau("claude-sonnet-5", tmp_path, outils)
+    assert options.tools == ["WebSearch"]
+    assert options.allowed_tools == ["WebSearch", *outils.noms]
+    assert list(options.mcp_servers) == ["atlas"]
+    assert options.mcp_servers["atlas"]["type"] == "sdk"
+    assert options.system_prompt == CONSIGNES_AVEC_MEMOIRE
+    assert options.setting_sources == [] and options.strict_mcp_config is True
+
+
+def test_la_ligne_de_commande_avec_la_memoire_ne_porte_que_le_serveur_atlas(tmp_path):
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+    outils = OutilsMemoire(Memoire.ouvrir(tmp_path / "memoire"))
+    options = options_cerveau("claude-sonnet-5", tmp_path, outils)
+    options = dataclasses.replace(options, cli_path="claude")
+    commande = SubprocessCLITransport(prompt=None, options=options)._build_command()
+
+    def valeur(drapeau: str) -> str:
+        return commande[commande.index(drapeau) + 1]
+
+    assert valeur("--tools") == "WebSearch"
+    assert valeur("--allowedTools").split(",") == ["WebSearch", *outils.noms]
+    assert json.loads(valeur("--mcp-config")) == {
+        "mcpServers": {"atlas": {"type": "sdk", "name": "atlas"}}
+    }
+    assert "--strict-mcp-config" in commande
 
 
 def test_les_cles_d_api_sont_retirees_mais_pas_le_jeton_d_abonnement():

@@ -22,7 +22,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from .cerveau import Cerveau, ErreurCerveau, Recherche
+from .cerveau import Cerveau, ErreurCerveau, Note, Recherche
 from .diffuseur import Diffuseur
 from .etat import MachineEtat, Valeur
 from .mise_en_voix import est_hallucination, nettoyer
@@ -388,6 +388,12 @@ class Session:
                         for phrase in decoupeur.vider():
                             await self._phrase(phrase)
                         await self._chercher()
+                        continue
+                    if isinstance(fragment, Note):
+                        # Atlas vient d'écrire dans sa mémoire : il le dit à cet endroit.
+                        for phrase in decoupeur.vider():
+                            await self._phrase(phrase)
+                        await self._phrase(fragment.annonce)
                         continue
                     for phrase in decoupeur.ajouter(fragment):
                         await self._phrase(phrase)
