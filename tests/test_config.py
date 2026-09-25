@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from atlas_core.config import Config
+from atlas_core.config import MEMOIRE_PAR_DEFAUT, Config
 
 
 def test_la_cle_web_vient_de_l_environnement(monkeypatch):
@@ -91,3 +93,16 @@ def test_un_reglage_de_la_voix_des_pages_invalide_est_refuse(monkeypatch, nom, b
     monkeypatch.setenv(nom, brute)
     with pytest.raises(ValueError, match=nom):
         Config.depuis_environnement()
+
+
+def test_la_memoire_vit_par_defaut_dans_le_dossier_d_atlas(monkeypatch):
+    monkeypatch.delenv("ATLAS_MEMOIRE_DOSSIER", raising=False)
+    assert Config.depuis_environnement().memoire_dossier == MEMOIRE_PAR_DEFAUT
+    assert MEMOIRE_PAR_DEFAUT == Path.home() / ".atlas" / "memoire"
+    monkeypatch.setenv("ATLAS_MEMOIRE_DOSSIER", "  ")
+    assert Config.depuis_environnement().memoire_dossier == MEMOIRE_PAR_DEFAUT
+
+
+def test_le_dossier_de_la_memoire_se_regle_et_accepte_le_tilde(monkeypatch):
+    monkeypatch.setenv("ATLAS_MEMOIRE_DOSSIER", "~/atlas-memoire")
+    assert Config.depuis_environnement().memoire_dossier == Path.home() / "atlas-memoire"

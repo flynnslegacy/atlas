@@ -9,9 +9,11 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 CERVEAUX = ("claude", "bouchon")
 MODELE_PAR_DEFAUT = "claude-sonnet-5"
+MEMOIRE_PAR_DEFAUT = Path.home() / ".atlas" / "memoire"
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ class Config:
     # d'énergie de la coupure à la voix, l'écho résiduel n'étant pas celui du Mac.
     voix_marge_s: float = 0.2
     voix_bargein_dbfs: float = -40.0
+    memoire_dossier: Path = MEMOIRE_PAR_DEFAUT  # le dépôt git local de la mémoire, jamais poussé
 
     @staticmethod
     def depuis_environnement() -> Config:
@@ -44,6 +47,7 @@ class Config:
             audio_cle=os.environ.get("ATLAS_AUDIO_CLE", "").strip(),
             voix_marge_s=_lire_nombre("ATLAS_VOIX_MARGE_S", "0.2", 0.0, 2.0),
             voix_bargein_dbfs=_lire_nombre("ATLAS_VOIX_BARGEIN_DBFS", "-40", -120.0, 0.0),
+            memoire_dossier=_lire_dossier_memoire(),
         )
 
 
@@ -79,3 +83,8 @@ def _lire_nombre(nom: str, defaut: str, mini: float, maxi: float) -> float:
     if not math.isfinite(valeur) or not (mini <= valeur <= maxi):
         raise ValueError(f"{nom} invalide : {brute!r} doit être entre {mini:g} et {maxi:g}")
     return valeur
+
+
+def _lire_dossier_memoire() -> Path:
+    brute = os.environ.get("ATLAS_MEMOIRE_DOSSIER", "").strip()
+    return Path(brute).expanduser() if brute else MEMOIRE_PAR_DEFAUT

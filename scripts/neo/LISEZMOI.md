@@ -157,3 +157,21 @@ Sur l'iPhone, l'iPad ou le Mac : `https://atlas.example.com/`, avec la clé
 - Chaque appareil répond pour lui-même, et le client du M5 marche toujours à côté.
 - Les dix premières secondes de voix d'Atlas après l'allumage du micro, on ne le coupe
   qu'en touchant l'orbe : l'annulation d'écho du navigateur s'installe.
+
+## 11. La mémoire d'Atlas
+
+Atlas tient sa mémoire dans `~/.atlas/memoire` sur la machine du Core : son profil de toi,
+ses fiches (entreprise, projets, personnes) et le journal de vos conversations. C'est un
+dépôt git local, qui n'a aucun distant et n'est jamais poussé ; sa sauvegarde est celle de
+la machine. Tu peux lire et corriger les fichiers à la main.
+
+Pour passer du M5 au néo, Core arrêté des deux côtés, copie-la avant de démarrer le Core
+sur le néo :
+
+```bash
+# sur le M5
+rsync -a ~/.atlas/memoire/ neo.local:.atlas/memoire/
+```
+
+Sans `git` sur la machine, Atlas marche sans mémoire ; le journal du Core le dit au
+démarrage.

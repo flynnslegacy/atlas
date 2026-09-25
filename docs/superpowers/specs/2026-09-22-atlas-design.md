@@ -220,6 +220,10 @@ machine ; le serveur MCP d'Atlas arrive en 2c. La rotation de contexte avec rés
 ci-dessous arrive en 2b : d'ici là, le compactage automatique de Claude Code gère un
 contexte qui se remplit, et la conversation repart de zéro après
 `ATLAS_CERVEAU_OUBLI_MIN` minutes sans échange. Voir `2026-09-24-phase-2a-cerveau-design.md`.
+**Amendé le 25/09/2026 (phase 2b).** La rotation de contexte se fait à l'échéance de
+l'oubli : la conversation se résume dans le journal, puis la suivante repart amorcée avec
+le profil, le sommaire des fiches et le journal récent. Le compactage de Claude Code gère
+une conversation qui dure. Voir `2026-09-25-phase-2b-memoire-design.md`.
 
 **Rotation de contexte.** Quand le contexte approche de sa limite, le Core fait produire
 au Brain un résumé de la session, l'écrit dans `journal/AAAA-MM-JJ.md`, tue le process et
@@ -357,6 +361,12 @@ reconstructible à tout moment.
 annoncée à voix haute (« je note ça dans projets/x.md »). Les écritures mémoire sont de
 niveau N2 : il fait, et il annonce.
 
+**Amendé le 25/09/2026 (phase 2b).** Le dépôt est local, dans `~/.atlas/memoire` sur la
+machine du Core, et n'est jamais poussé. Pas d'index vectoriel en 2b : Atlas voit le
+sommaire des fiches et cherche dans le texte ; l'index viendra quand la mémoire aura
+grossi. Le journal s'écrit sans annonce, à la fin de chaque conversation : c'est la seule
+exception à la règle d'écriture. Voir `2026-09-25-phase-2b-memoire-design.md`.
+
 ---
 
 ## 9. Outils
@@ -377,6 +387,9 @@ def lancer_workflow(nom: str) -> str:
 Le Core expose ces outils au process Claude par **un serveur MCP local en stdio** — natif
 pour Claude Code, donc on ne réimplémente pas le tool-calling, et les mêmes outils restent
 utilisables depuis d'autres clients MCP.
+**Amendé le 25/09/2026 (phase 2b).** Le serveur MCP d'Atlas (« atlas ») tourne dans le Core
+lui-même, par le SDK de Claude, et non en stdio. Ses quatre premiers outils sont ceux de la
+mémoire ; la phase 2c y ajoute les autres et les niveaux d'autorisation.
 
 Familles d'outils en v1 : n8n, mémoire et documents, veille. Home Assistant et agenda/mail
 viennent après la v1.
@@ -502,7 +515,7 @@ Markdown et index, serveur MCP local, permissions.
 et le document produit se relit sans retouche.
 **Amendé le 24/09/2026.** La phase 2 est découpée en trois étapes, chacune avec sa spec,
 son plan et sa fusion : 2a, le cerveau branché (`2026-09-24-phase-2a-cerveau-design.md`) ;
-2b, la mémoire ; 2c, outils et permissions.
+2b, la mémoire (`2026-09-25-phase-2b-memoire-design.md`) ; 2c, outils et permissions.
 **Amendé le 25/09/2026.** Une étape « la voix dans le navigateur »
 (`2026-09-25-voix-navigateur-design.md`) s'insère entre 2a et 2b : la page de l'iPhone ou
 de l'iPad écoute et répond à voix haute, pas seulement le M5.

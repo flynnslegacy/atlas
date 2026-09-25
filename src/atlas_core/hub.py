@@ -22,6 +22,8 @@ from .cerveau import Cerveau, CerveauBouchon
 from .cerveau_claude import CerveauClaude, options_cerveau, purger_cles_api
 from .config import Config
 from .diffuseur import Diffuseur
+from .memoire import Memoire
+from .outils_memoire import OutilsMemoire
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
     AuthentificationVoix,
@@ -64,12 +66,22 @@ def creer_cerveau(config: Config) -> Cerveau:
     retirees = purger_cles_api(os.environ)
     if retirees:
         _journal.warning("retiré de l'environnement, pour Claude : %s", ", ".join(retirees))
+    outils = ouvrir_la_memoire(config)
 
     def fabrique() -> ClaudeSDKClient:
         DOSSIER_CERVEAU.mkdir(parents=True, exist_ok=True)
-        return ClaudeSDKClient(options=options_cerveau(config.cerveau_modele, DOSSIER_CERVEAU))
+        options = options_cerveau(config.cerveau_modele, DOSSIER_CERVEAU, outils)
+        return ClaudeSDKClient(options=options)
 
-    return CerveauClaude(fabrique, oubli_s=config.cerveau_oubli_min * 60)
+    return CerveauClaude(fabrique, oubli_s=config.cerveau_oubli_min * 60, outils=outils)
+
+
+def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
+    """La mémoire d'Atlas et ses outils ; None si elle ne s'ouvre pas (Atlas marche alors
+    sans). Les clés du Core sont des secrets qu'elle refuse d'écrire."""
+    secrets = [config.web_cle, config.audio_cle, os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")]
+    memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
+    return OutilsMemoire(memoire) if memoire is not None else None
 
 
 @asynccontextmanager

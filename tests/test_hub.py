@@ -1,12 +1,13 @@
 import json
 import os
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from atlas_core import hub
+from atlas_core import hub, memoire
 from atlas_core.cerveau import CerveauBouchon
 from atlas_core.cerveau_claude import CerveauClaude
 from atlas_core.protocole import (
@@ -129,7 +130,12 @@ def test_le_bouchon_se_choisit_par_la_configuration():
 def test_le_cerveau_claude_ne_demarre_rien_avant_la_premiere_question(monkeypatch, tmp_path):
     dossier = tmp_path / "cerveau"
     monkeypatch.setattr(hub, "DOSSIER_CERVEAU", dossier)
-    config = replace(hub._config, cerveau="claude", cerveau_modele="claude-sonnet-5")
+    config = replace(
+        hub._config,
+        cerveau="claude",
+        cerveau_modele="claude-sonnet-5",
+        memoire_dossier=tmp_path / "memoire",
+    )
 
     cerveau = hub.creer_cerveau(config)
 
@@ -140,10 +146,59 @@ def test_le_cerveau_claude_ne_demarre_rien_avant_la_premiere_question(monkeypatc
     assert client.options.cwd == dossier and client.options.model == "claude-sonnet-5"
 
 
-def test_les_cles_d_api_sont_retirees_de_l_environnement_du_core(monkeypatch):
+def test_les_cles_d_api_sont_retirees_de_l_environnement_du_core(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ne-doit-pas-servir")
-    hub.creer_cerveau(replace(hub._config, cerveau="claude"))
+    hub.creer_cerveau(replace(hub._config, cerveau="claude", memoire_dossier=tmp_path / "m"))
     assert "ANTHROPIC_API_KEY" not in os.environ
+
+
+def test_les_tests_n_ouvrent_jamais_la_vraie_memoire():
+    assert hub._config.memoire_dossier != Path.home() / ".atlas" / "memoire"
+
+
+def test_le_cerveau_claude_recoit_la_memoire_et_ses_outils(monkeypatch, tmp_path):
+    monkeypatch.setattr(hub, "DOSSIER_CERVEAU", tmp_path / "cerveau")
+    dossier = tmp_path / "memoire"
+    cerveau = hub.creer_cerveau(replace(hub._config, cerveau="claude", memoire_dossier=dossier))
+    assert (dossier / ".git").is_dir()
+    assert cerveau._outils.memoire.racine == dossier
+    options = cerveau._fabrique().options
+    assert list(options.mcp_servers) == ["atlas"]
+    assert options.allowed_tools == ["WebSearch", *cerveau._outils.noms]
+
+
+def test_la_memoire_refuse_les_cles_du_core(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "jeton-d-abonnement-de-test")
+    config = replace(
+        hub._config,
+        cerveau="claude",
+        memoire_dossier=tmp_path / "memoire",
+        web_cle="cle-des-pages-de-test",
+        audio_cle="cle-audio-de-test-longue",
+    )
+    outils = hub.ouvrir_la_memoire(config)
+    for secret in (
+        "cle-des-pages-de-test",
+        "cle-audio-de-test-longue",
+        "jeton-d-abonnement-de-test",
+    ):
+        with pytest.raises(memoire.ErreurMemoire, match="clé secrète"):
+            outils.memoire.ecrire("profil.md", f"# Profil\n\nDavid.\n\n{secret}\n")
+
+
+def test_sans_git_le_cerveau_marche_sans_memoire(monkeypatch, tmp_path):
+    monkeypatch.setattr(memoire, "GIT", "git-introuvable")
+    monkeypatch.setattr(hub, "DOSSIER_CERVEAU", tmp_path / "cerveau")
+    config = replace(hub._config, cerveau="claude", memoire_dossier=tmp_path / "memoire")
+    cerveau = hub.creer_cerveau(config)
+    assert cerveau._outils is None
+    assert cerveau._fabrique().options.mcp_servers == {}
+
+
+def test_le_bouchon_n_ouvre_pas_la_memoire(tmp_path):
+    dossier = tmp_path / "memoire"
+    hub.creer_cerveau(replace(hub._config, cerveau="bouchon", memoire_dossier=dossier))
+    assert not dossier.exists()
 
 
 def test_la_voix_et_le_clavier_partagent_le_meme_cerveau(monkeypatch):
