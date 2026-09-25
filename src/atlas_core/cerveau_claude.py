@@ -157,8 +157,20 @@ class CerveauClaude:
         async with self._verrou:
             await self._attendre_le_menage()
             self._interrompu = False
-            question = f"{ligne_de_date(self._maintenant())}\n{texte}"
+            confirmations = self._outils.confirmations if self._outils is not None else None
             try:
+                if confirmations is not None:
+                    # Une action attend le « oui » de David : sa phrase est lue ici, avant
+                    # Claude (spec 2c §6). Une question qu'il n'a pas entendue ne compte pas.
+                    confirmations.abandonner_si_non_posee()
+                    if confirmations.en_attente:
+                        phrase, a_claude = await confirmations.trancher(texte)
+                        if not a_claude:
+                            yield phrase
+                            return
+                        yield phrase + " "
+                lignes = confirmations.prendre_les_lignes() if confirmations is not None else []
+                question = "\n".join([*lignes, ligne_de_date(self._maintenant()), texte])
                 client = await self._poser(question)
                 self._debut_conversation = self._debut_conversation or self._maintenant()
                 if self._fil_perdu:
@@ -235,7 +247,9 @@ class CerveauClaude:
         await self._jeter_le_client()
 
     async def _demander_le_resume(self, client: ClientClaude) -> str:
-        await self._envoyer(client, DEMANDE_RESUME)
+        # Ce que David a confirmé ou refusé juste avant, que Claude n'a pas encore appris.
+        lignes = self._outils.confirmations.prendre_les_lignes()
+        await self._envoyer(client, "\n".join([*lignes, DEMANDE_RESUME]))
         morceaux: list[str] = []
         async with contextlib.aclosing(self._lire_le_tour(client)) as fragments:
             async for fragment in fragments:
@@ -307,6 +321,8 @@ class CerveauClaude:
         client, self._client = self._client, None
         self._tour_ouvert = False
         self._debut_conversation = self._fin_conversation = None
+        if self._outils is not None:
+            self._outils.confirmations.abandonner()  # la conversation se termine
         if client is not None:
             with contextlib.suppress(Exception):
                 await client.disconnect()
@@ -368,6 +384,9 @@ class CerveauClaude:
                     if self._outils is not None and annoncer:
                         for note in self._outils.prendre_les_annonces():
                             yield note
+                        # Une action N3 : sa question, une fois, après ce qui la précède.
+                        if (question := self._outils.confirmations.poser()) is not None:
+                            yield question
         except ErreurCerveau:
             raise
         except Exception as e:  # noqa: BLE001 — le SDK ne sait plus où il en est
