@@ -108,14 +108,15 @@ dépendances `audio` et des modèles (§7.3).
   Core écoute le mot de réveil pour cette page ; éteint, il ne se réveille jamais seul.
 - **Toucher l'orbe**, micro allumé : au repos, Atlas t'écoute, comme après « Hey Atlas » ; pendant qu'il parle, c'est
   une coupure de parole. Dans les deux modes. La relance après une réponse fonctionne comme sur le Mac.
-- **Le son.** Le micro est capté avec l'annulation d'écho du navigateur (`echoCancellation: true` ; le spike S4 fixe
-  les autres contraintes). Le processeur de capture ramène le son à 16 kHz mono en blocs de 20 ms (640 octets,
+- **Le son.** Le micro est capté avec les réglages par défaut du navigateur : annulation d'écho, réduction de bruit,
+  gain automatique (spike S4). L'annulation d'écho n'est jamais coupée : sans elle, iOS baisse la voix d'Atlas. Le processeur de capture ramène le son à 16 kHz mono en blocs de 20 ms (640 octets,
   s16le) ; le processeur de lecture joue les trames reçues, rééchantillonnées à la fréquence du contexte, dans un
   tampon que le Core peut vider d'un coup.
 - **Écran allumé.** Tant que « Hey Atlas » écoute, la page demande à l'écran de rester allumé (API Wake Lock,
   iOS 16.4 et plus), et le redemande quand elle redevient visible.
-- **Quand iOS coupe le micro** (écran verrouillé, Safari en arrière-plan, appel), la page ferme `/ws/voix` et
-  affiche « Touche pour réactiver le micro ».
+- **Quand iOS coupe le son** (écran verrouillé, app en arrière-plan, appel), la page garde `/ws/voix` ouverte (et la
+  rouvre si iOS l'a fermée entre-temps). Au retour, le son repart seul (spike S4) ; la page n'affiche « Touche pour
+  réactiver le micro » que s'il ne reprend pas, et signale la reprise au Core (`reprise`).
 - Aucune dépendance, aucune ressource extérieure ; la politique de sécurité ne change pas (`default-src 'self'`
   couvre le module de l'AudioWorklet ; `connect-src` accepte déjà `wss://` sur l'hôte de la page).
 
@@ -137,7 +138,10 @@ dépendances `audio` et des modèles (§7.3).
   `ATLAS_BARGEIN_MS`, `ATLAS_RELANCE_S`), plus deux réglages du navigateur :
   - `ATLAS_VOIX_MARGE_S` : la latence de sortie du navigateur, là où le client du Mac prend 0,15 s ;
   - `ATLAS_VOIX_BARGEIN_DBFS` : la porte d'énergie du barge-in, l'écho résiduel n'étant pas celui du binaire Swift.
-  Leurs valeurs par défaut sortent du spike S4.
+  Valeurs par défaut, d'après le spike S4 : 0,2 s et −40 dBFS.
+- **Le démarrage de l'annuleur** (spike S4) : pendant la première seconde et demie de son joué après l'ouverture de
+  `/ws/voix` ou un message `reprise`, la coupure à la voix est ignorée. L'annuleur d'iOS laisse passer l'écho entier
+  pendant ses 0,7 premières secondes, une seule fois.
 - **La régie** garde toutes les sessions audio (et non plus seulement la dernière). Une question tapée va à la session
   de sa page si elle en a une, sinon à la session audio la plus récente, sinon à la session écrite. Le muet fait taire
   toutes les sessions audio.
@@ -154,6 +158,7 @@ Page vers Core :
 | *(binaire)* | un bloc de micro, au format de `/ws/audio` (octet `0x01` puis 640 octets s16le à 16 kHz) |
 | `parler` | `{}` — l'orbe a été touchée |
 | `hey_atlas` | `{actif}` — l'interrupteur a changé |
+| `reprise` | `{}` — le son reprend après une interruption d'iOS |
 
 Core vers page :
 
@@ -215,7 +220,10 @@ petit serveur sur le M5 vers lequel pointe le « Proxy Host », mesure :
 `autoGainControl`).
 
 **Repli** si l'écho passe malgré tout sur un appareil : pas de coupure à la voix sur celui-là. Le micro se tait
-pendant qu'Atlas parle, et on touche l'orbe pour le couper.
+pendant qu'Atlas parle, et on touche l'orbe pour le couper ; l'annulation d'écho, elle, reste active.
+
+**Verdict (25 septembre 2026) :** approche validée sur l'iPhone ; valeurs et ajustements reportés aux §4, §5 et §6.
+L'iPad reste à vérifier à l'essai sur le matériel. Voir `docs/superpowers/spikes/2026-09-25-s4-voix-navigateur.md`.
 
 ## 9. Les tests
 

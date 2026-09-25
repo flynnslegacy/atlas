@@ -1,7 +1,7 @@
-# Spike S4 — La voix dans le navigateur : protocole
+# Spike S4 — Verdict : la voix dans le navigateur
 
 **Date :** 25 septembre 2026
-**Statut :** protocole prêt ; mesures sur l'iPhone et l'iPad à faire par David ; le verdict viendra compléter ce document
+**Statut :** mesuré sur l'iPhone le 25 septembre 2026 ; approche validée, avec trois ajustements de la spec. L'iPad, absent ce jour-là, reste à vérifier à l'essai sur le matériel
 **Spec :** `docs/superpowers/specs/2026-09-25-voix-navigateur-design.md` (§8)
 **Code du spike (jetable, non versionné) :** dossier local `spikes/s4-voix-navigateur/` (`index.html`, `essai.js`,
 `processeurs.js`, `serveur.py`, `analyse_s4.py`, `cout_cpu.py`)
@@ -103,3 +103,82 @@ coupures retrouvés tels qu'injectés.
   bruit ni gain automatique ; en dernier recours, réentraîner avec des prises passées par le navigateur.
 - **`ATLAS_VOIX_MARGE_S`** : la moitié de la latence aller-retour mesurée, plus une marge pour le réseau.
 - **L'iPad sur son support** n'est possible que si le verrou d'écran tient.
+
+## Résultats
+
+### L'iPhone
+
+iOS 27, Chrome pour iOS (le moteur de Safari, imposé sur iOS), volume à 50 %, posé sur le bureau. Micro demandé avec
+`echoCancellation`, `noiseSuppression` et `autoGainControl` (les valeurs par défaut du navigateur) ; contexte audio à
+48 kHz.
+
+| Mesure | Résultat | Exigé |
+|---|---|---|
+| Écho résiduel pendant qu'Atlas parle, sur 300 ms | −94,4 dBFS en médiane, −68,5 au 95e centile | — |
+| Même voix, l'annuleur installé (`echo_repris`) | −95,0 dBFS en médiane, −77,6 au maximum | — |
+| Voix de David à sa distance habituelle | −20,7 dBFS en médiane | — |
+| Faux barge-in sur la minute d'écho | **1**, à toute porte d'énergie : le démarrage de l'annuleur (ci-dessous) | au plus 1 |
+| Faux barge-in, l'annuleur installé | **0**, à toute porte d'énergie | 0 |
+| Vraies coupures (« Attends, attends, stop ») | **3 sur 3**, en 1,29 ; 1,10 ; 1,06 s, réaction de David comprise, de −55 à −30 dBFS | 3 sur 3, < 1,5 s |
+| « Hey Atlas » à travers le traitement du navigateur | **3 sur 3** | au moins 2 sur 3 |
+| Latence aller-retour (cinq clics) | 71 à 72 ms | — |
+| Écran gardé allumé | tenu (constaté par David) | — |
+| Écran verrouillé, ou autre app devant | contexte « interrupted », plus aucun bloc ; la piste reste « live » | — |
+| Retour sur la page | le son repart seul, 50 blocs/s, **sans toucher l'écran** | — |
+
+**Le démarrage de l'annuleur.** Pendant les 0,7 premières secondes de la toute première voix d'Atlas après l'ouverture
+du micro, l'écho passe entier (−19 dBFS, autant que la voix jouée), puis tombe sous −84 dBFS. C'est l'unique faux
+barge-in. Les voix suivantes (`double`, `echo_repris`) démarrent déjà sous −85 dBFS : l'annuleur ne démarre qu'une
+fois.
+
+**Sans annulation d'écho, iOS baisse la voix d'Atlas.** David l'a entendue « très faible » dans la phase `sans_aec`,
+normale partout ailleurs. L'atténuation calculée par le script (25 dB) compare donc deux sons joués différents : elle
+ne vaut rien. La marge utile est celle, mesurée dans le même réglage, entre la voix de David et l'écho résiduel :
+plus de 45 dB.
+
+### Le Mac (Chrome)
+
+Mesure invalide : le micro n'a livré que des zéros, du début à la fin, y compris quand David parlait. Chrome avait
+l'autorisation du site, mais macOS lui envoyait du silence (autorisation « Micro » de Confidentialité et sécurité, ou
+mauvais micro choisi dans Chrome). Seul enseignement : sur le Mac, Chrome continue de capter quand l'onglet est caché.
+Le Mac garde de toute façon son client audio Python.
+
+### L'iPad
+
+Pas mesuré (absent ce jour-là). Même moteur et même traitement vocal d'Apple que l'iPhone : on s'attend aux mêmes
+résultats, à confirmer à l'essai sur le matériel, verrou d'écran compris.
+
+### Le Core
+
+2 % d'un cœur par page à l'écoute (voir plus haut).
+
+## Décision
+
+**L'approche de la spec est validée**, avec ces réglages et trois ajustements :
+
+- **`ATLAS_VOIX_BARGEIN_DBFS` = −40 dBFS**, comme pour le Mac : toutes les portes de −55 à −30 donnent le même
+  résultat, et −40 laisse une vingtaine de dB de marge sous la voix de David et plus de quarante au-dessus de l'écho
+  résiduel.
+- **`ATLAS_VOIX_MARGE_S` = 0,2 s** : la marge du Mac (0,15 s) plus 50 ms pour le Wi-Fi ; la latence aller-retour
+  mesurée est de 72 ms.
+- **Contraintes de capture** : les valeurs par défaut du navigateur (annulation d'écho, réduction de bruit, gain
+  automatique), avec lesquelles « Hey Atlas » passe trois fois sur trois.
+
+Les ajustements de la spec :
+
+1. **Le démarrage de l'annuleur** : pendant la première seconde et demie de son joué après l'ouverture du micro (ou
+   sa reprise après une interruption), la coupure à la voix est ignorée.
+2. **L'annulation d'écho reste toujours active.** Le repli, si l'écho passait sur un appareil, supprime la coupure à
+   la voix, jamais l'annulation d'écho : sans elle, iOS baisse la voix d'Atlas.
+3. **Au retour sur la page, le son repart seul** : la page garde `/ws/voix` ouverte pendant une interruption, la
+   rouvre si iOS l'a fermée, et n'affiche « Touche pour réactiver le micro » que si le son ne reprend pas.
+
+## Leçon de méthode
+
+- **Rejouer le jugement du client sur les captures** a encore payé : le faux barge-in se lit dans les niveaux bloc à
+  bloc, et se révèle être un démarrage unique, pas un défaut de fond.
+- **Demander à David ce qu'il entendait** a évité une fausse conclusion : sans son « très faible », le chiffre
+  d'atténuation aurait été pris au sérieux.
+- **Vérifier les captures brutes avant de conclure** : le Mac « réussissait » (zéro faux barge-in) parce que son
+  micro était muet.
+
