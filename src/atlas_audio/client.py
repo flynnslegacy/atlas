@@ -197,7 +197,12 @@ class ClientAudio:
     # --- micro vers Core --------------------------------------------------
 
     async def boucle_capture(self) -> None:
-        with contextlib.suppress(asyncio.CancelledError, asyncio.IncompleteReadError):
+        # Une annulation (extérieure, ou levée par un faux périphérique de test à court de
+        # blocs) termine la capture sans bruit. Une vraie panne du périphérique — le
+        # binaire Swift qui meurt lève `IncompleteReadError` — doit au contraire remonter :
+        # `connexion.servir_connexion` la transforme en arrêt de la connexion, plutôt que
+        # de laisser le client tourner sourd indéfiniment.
+        with contextlib.suppress(asyncio.CancelledError):
             while True:
                 bloc = await self._peripherique.lire_bloc()
                 await self._traiter_bloc(bloc)
@@ -283,9 +288,12 @@ class ClientAudio:
                 break
             await self._capturer(bloc_passe, parle_passe)
 
-    def _couper(self) -> None:
-        """Marque l'énoncé courant comme coupé ; son audio vient d'être vidé."""
-        self._id_coupe = max(self._id_coupe, self._id_courant)
+    def _couper(self, id_enonce: int = 0) -> None:
+        """Marque l'énoncé courant (et `id_enonce`, si plus grand) comme coupé ; son audio
+        vient d'être vidé. `id_enonce` couvre un `StopAudio` en avance sur un `Dire` (et
+        ses trames) du même énoncé encore dans la file de `connexion.py` : sans lui, ce
+        `Dire` en retard relèverait `_id_courant` et ferait rejouer une réponse déjà coupée."""
+        self._id_coupe = max(self._id_coupe, self._id_courant, id_enonce)
         self._id_courant = 0
         self._fin_lecture = 0.0
         self._core_parle = False
@@ -312,7 +320,7 @@ class ClientAudio:
                 self._pre_roulement.clear()
                 self._fenetre_energie.reinitialiser()
         elif isinstance(msg, StopAudio):
-            self._couper()
+            self._couper(msg.id_enonce)
             await self._peripherique.vider()
         elif isinstance(msg, Erreur):
             _journal.warning("erreur signalée par le Core [%s] : %s", msg.code, msg.message)
@@ -371,6 +379,15 @@ class TransportWebSocket:
         await self._ws.send(trame)
 
 
+async def _vider_le_micro(peripherique) -> None:
+    """Pendant que le Core est injoignable, personne d'autre ne lit le micro : sans cette
+    tâche, l'audio s'accumule (le binaire Swift en rejoue de vieilles secondes au
+    rebranchement ; sounddevice sature sa file et son rappel crie `QueueFull` en boucle)
+    jusqu'à ce que la connexion revienne."""
+    while True:
+        await peripherique.lire_bloc()
+
+
 async def principal() -> None:
     import websockets
 
@@ -405,7 +422,11 @@ async def principal() -> None:
         await servir_connexion(ws, client)
 
     try:
-        await boucle_de_connexion(lambda: websockets.connect(URL_CORE), servir)
+        await boucle_de_connexion(
+            lambda: websockets.connect(URL_CORE),
+            servir,
+            pendant_l_absence=lambda: _vider_le_micro(peripherique),
+        )
     finally:
         await peripherique.fermer()
 

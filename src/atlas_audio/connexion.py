@@ -11,7 +11,7 @@ from typing import Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
-from atlas_core.protocole import MessageCore
+from atlas_core.protocole import MessageCore, StopAudio
 
 _journal = logging.getLogger(__name__)
 
@@ -24,6 +24,11 @@ FERMETURE_NON_AUTORISE = 4401
 _MESSAGES_CORE: TypeAdapter[MessageCore] = TypeAdapter(MessageCore)
 
 
+class PeripheriqueEnPanne(Exception):
+    """Le périphérique audio (capture ou lecture) est mort. Ce n'est pas une coupure
+    réseau : la connexion ne se retente pas, elle s'arrête, comme avant cette tâche."""
+
+
 class ClientConnecte(Protocol):
     """Ce que la connexion attend du client audio (`ClientAudio`)."""
 
@@ -34,41 +39,70 @@ class ClientConnecte(Protocol):
 
 
 async def servir_connexion(ws, client: ClientConnecte) -> None:
-    """Sert une connexion au Core jusqu'à sa fin. L'audio d'Atlas part dans une file que
-    la tâche de lecture vide à son rythme ; les messages de contrôle, eux, sont traités
-    dès leur arrivée : un `StopAudio` n'attend jamais derrière des secondes de son."""
-    file: asyncio.Queue[bytes] = asyncio.Queue()
-    taches = [
-        asyncio.create_task(client.boucle_capture()),
-        asyncio.create_task(_jouer_la_file(client, file)),
-    ]
+    """Sert une connexion au Core jusqu'à sa fin. Les trames et les messages du Core
+    (sauf `StopAudio`) partagent une seule file, jouée dans l'ordre par sa propre tâche :
+    un `Dire` suivi de ses trames ne doit jamais être doublé par l'état qui le suit, sans
+    quoi la relance pourrait rouvrir l'écoute avant que la réponse n'ait fini de jouer.
+    Seul `StopAudio` est traité aussitôt par le lecteur, pour ne jamais attendre derrière
+    des secondes de son déjà en file.
+
+    Si le périphérique audio meurt (capture ou lecture), la connexion s'arrête avec
+    `PeripheriqueEnPanne` plutôt que de tourner sourde et muette en se reconnectant sans
+    fin ; une annulation de cette coroutine, elle, relève une simple `CancelledError`."""
+    file: asyncio.Queue[bytes | MessageCore] = asyncio.Queue()
+    capture = asyncio.create_task(client.boucle_capture())
+    lecture = asyncio.create_task(_traiter_la_file(client, file))
+    flux = asyncio.create_task(_lire_le_flux(ws, client, file))
+    en_cours = {capture, lecture, flux}
     try:
-        async for recu in ws:
-            if isinstance(recu, bytes):
-                file.put_nowait(recu)
-                continue
-            try:
-                msg = _MESSAGES_CORE.validate_json(recu)
-            except ValidationError as e:
-                _journal.warning("message du Core illisible : %s", e)
-                continue
-            await client.sur_message(msg)
+        while True:
+            fait, en_cours = await asyncio.wait(en_cours, return_when=asyncio.FIRST_COMPLETED)
+            for tache in fait:
+                if tache is flux or tache.cancelled():
+                    continue
+                erreur = tache.exception()
+                if erreur is not None:
+                    raise PeripheriqueEnPanne("le périphérique audio est mort") from erreur
+            if flux in fait:
+                break
+        flux.result()  # relève une erreur du flux Core (sinon fin normale : rien à faire)
     finally:
-        for tache in taches:
+        for tache in (capture, lecture, flux):
             tache.cancel()
-        for tache in taches:
-            with contextlib.suppress(asyncio.CancelledError):
+        for tache in (capture, lecture, flux):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await tache
         await client.arreter()
 
 
-async def _jouer_la_file(client: ClientConnecte, file: asyncio.Queue[bytes]) -> None:
-    while True:
-        trame = await file.get()
+async def _lire_le_flux(ws, client: ClientConnecte, file: asyncio.Queue) -> None:
+    """Lit le flux du Core. `StopAudio` est traité aussitôt ; tout le reste (trames et
+    messages) rejoint la file, jouée dans l'ordre par `_traiter_la_file`."""
+    async for recu in ws:
+        if isinstance(recu, bytes):
+            file.put_nowait(recu)
+            continue
         try:
-            await client.sur_trame(trame)
-        except ValueError as e:
-            _journal.warning("trame audio du Core illisible : %s", e)
+            msg = _MESSAGES_CORE.validate_json(recu)
+        except ValidationError as e:
+            _journal.warning("message du Core illisible : %s", e)
+            continue
+        if isinstance(msg, StopAudio):
+            await client.sur_message(msg)
+        else:
+            file.put_nowait(msg)
+
+
+async def _traiter_la_file(client: ClientConnecte, file: asyncio.Queue) -> None:
+    while True:
+        item = await file.get()
+        if isinstance(item, bytes):
+            try:
+                await client.sur_trame(item)
+            except ValueError as e:
+                _journal.warning("trame audio du Core illisible : %s", e)
+        else:
+            await client.sur_message(item)
 
 
 def _code_de_fermeture(e: BaseException) -> int | None:
@@ -76,38 +110,77 @@ def _code_de_fermeture(e: BaseException) -> int | None:
     return getattr(getattr(e, "rcvd", None), "code", None)
 
 
+def _demarrer_absence(
+    pendant_l_absence: Callable[[], Awaitable[None]] | None,
+) -> asyncio.Task | None:
+    return asyncio.create_task(pendant_l_absence()) if pendant_l_absence is not None else None
+
+
+async def _arreter_absence(absence: asyncio.Task | None) -> None:
+    """Annule la tâche qui occupe le micro pendant l'absence du Core, et relève sa panne
+    si elle en a une : un périphérique mort pendant l'absence est aussi fatal que pendant
+    le service (sinon un micro mort passerait inaperçu tant que le Core reste injoignable).
+    """
+    if absence is None:
+        return
+    absence.cancel()
+    try:
+        await absence
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        raise PeripheriqueEnPanne("le périphérique audio est mort") from e
+
+
 async def boucle_de_connexion(
     ouvrir: Callable[[], AbstractAsyncContextManager],
     servir: Callable[[object], Awaitable[None]],
     attendre: Callable[[float], Awaitable[None]] = asyncio.sleep,
     delais: Sequence[float] = DELAIS_RECONNEXION_S,
+    pendant_l_absence: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Garde le client branché au Core : s'il disparaît, on se reconnecte, de plus en
     plus patiemment (1, 2, 4, 8, 16 puis 30 s). Une connexion acceptée remet ce compte à
-    zéro ; une clé refusée, non."""
+    zéro ; une clé refusée, non.
+
+    `pendant_l_absence`, si fourni, tourne en tâche de fond tant qu'aucune connexion n'est
+    servie (dès le départ, pendant les tentatives et les attentes) : sans elle, personne
+    ne lit le micro entre deux connexions, et le son s'accumule jusqu'au rebranchement.
+    Elle est arrêtée juste avant que `servir` ne démarre, et relancée quand il rend la
+    main."""
     echecs = 0
-    while True:
-        acceptee = False
-        try:
-            async with ouvrir() as ws:
-                acceptee = True
-                await servir(ws)
-            _journal.warning("le Core a fermé la connexion")
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # noqa: BLE001 — on se reconnecte, quoi qu'il arrive
-            code = _code_de_fermeture(e)
-            if code == FERMETURE_NON_AUTORISE:
-                acceptee = False
-                _journal.error("le Core refuse la clé : vérifie ATLAS_AUDIO_CLE des deux côtés")
-            elif code == FERMETURE_CLE_ABSENTE:
-                acceptee = False
-                _journal.error("le Core n'a pas de clé : ajoute ATLAS_AUDIO_CLE dans son .env")
-            else:
-                _journal.warning("Core injoignable ou connexion perdue (%s)", type(e).__name__)
-        if acceptee:
-            echecs = 0
-        delai = delais[min(echecs, len(delais) - 1)]
-        echecs += 1
-        _journal.info("nouvelle tentative de connexion dans %s s", delai)
-        await attendre(delai)
+    absence = _demarrer_absence(pendant_l_absence)
+    try:
+        while True:
+            acceptee = False
+            try:
+                async with ouvrir() as ws:
+                    acceptee = True
+                    await _arreter_absence(absence)
+                    absence = None
+                    await servir(ws)
+                _journal.warning("le Core a fermé la connexion")
+            except asyncio.CancelledError:
+                raise
+            except PeripheriqueEnPanne:
+                raise
+            except Exception as e:  # noqa: BLE001 — on se reconnecte, quoi qu'il arrive
+                code = _code_de_fermeture(e)
+                if code == FERMETURE_NON_AUTORISE:
+                    acceptee = False
+                    _journal.error("le Core refuse la clé : vérifie ATLAS_AUDIO_CLE des deux côtés")
+                elif code == FERMETURE_CLE_ABSENTE:
+                    acceptee = False
+                    _journal.error("le Core n'a pas de clé : ajoute ATLAS_AUDIO_CLE dans son .env")
+                else:
+                    _journal.warning("Core injoignable ou connexion perdue (%s)", type(e).__name__)
+            if absence is None:
+                absence = _demarrer_absence(pendant_l_absence)
+            if acceptee:
+                echecs = 0
+            delai = delais[min(echecs, len(delais) - 1)]
+            echecs += 1
+            _journal.info("nouvelle tentative de connexion dans %s s", delai)
+            await attendre(delai)
+    finally:
+        await _arreter_absence(absence)
