@@ -1,7 +1,7 @@
 # La voix dans le navigateur — design
 
 **Date :** 25 septembre 2026
-**Statut :** design validé par David, section par section
+**Statut :** design validé par David, section par section ; ajusté par le spike S4 (§8) et par le plan (§12)
 **Spec parente :** `2026-09-22-atlas-design.md` (§6.5 la page, §13 réseau et sécurité, §15 phasage) ; s'appuie sur
 `2026-09-24-interface-orbe-design.md` (la page) et `2026-09-24-phase-2a-cerveau-design.md` (le cerveau, la boucle
 vocale, la clé de `/ws/audio`)
@@ -77,7 +77,7 @@ Le `ClientAudio` ne change pas de rôle : son « périphérique » n'est plus le
 | `src/atlas_core/protocole_web.py` | `Authentification` gagne `page` (facultatif) |
 | `src/atlas_core/regie.py` | Plusieurs sessions audio ; une question tapée va à la session de sa page ; le muet les fait toutes taire |
 | `src/atlas_core/config.py` | `voix_marge_s`, `voix_bargein_dbfs` |
-| `src/atlas_audio/client.py` | La marge de sortie (`MARGE_SORTIE_S`) devient un paramètre du `ClientAudio` |
+| `src/atlas_audio/client.py` | La marge de sortie (`MARGE_SORTIE_S`) devient un paramètre du `ClientAudio` ; l'amorçage de l'annuleur d'écho ; l'orbe touchée (`demander_la_parole`) |
 
 Le Core importe désormais `atlas_audio` (le client, Silero, openWakeWord) : la machine du Core a besoin des
 dépendances `audio` et des modèles (§7.3).
@@ -87,8 +87,7 @@ dépendances `audio` et des modèles (§7.3).
 | Fichier | Rôle |
 |---|---|
 | `src/atlas_web/voix.js` (nouveau) | La connexion `/ws/voix`, le micro, le verrou d'écran, les boutons |
-| `src/atlas_web/voix_worklet.js` (nouveau) | Les deux processeurs AudioWorklet : capture et lecture |
-| `src/atlas_web/audio.js` (nouveau) | Les calculs purs, testés avec `node --test` : rééchantillonnage, découpage en blocs de 20 ms, tampon de lecture |
+| `src/atlas_web/voix_worklet.js` (nouveau) | Les deux processeurs AudioWorklet, capture et lecture, et leurs calculs purs, testés avec `node --test` : rééchantillonnage, découpage en blocs de 20 ms, tampon de lecture |
 | `src/atlas_web/app.js`, `index.html`, `style.css` | Le bouton « Micro », l'interrupteur « Hey Atlas », l'orbe à toucher |
 
 ### 3.3 Documentation
@@ -128,11 +127,15 @@ dépendances `audio` et des modèles (§7.3).
 - **Par page, le Core monte** :
   - un `PeripheriqueNavigateur` : `lire_bloc` attend le prochain bloc reçu de la page ; `jouer` lui envoie une trame ;
     `vider` lui envoie `vider` ;
-  - un `ReveilleurPage` : il se déclenche sur `parler`, et sur « Hey Atlas » (openWakeWord, `hey_atlas.onnx`) si
-    l'interrupteur est allumé ;
-  - `parler` reçu pendant qu'Atlas parle ne passe pas par le réveilleur (le `ClientAudio` ne le consulte qu'au
-    repos) : il déclenche la même coupure qu'un barge-in — `Interruption` au Core, son vidé, capture ouverte ;
+  - un `ReveilleurPage` : il se déclenche sur « Hey Atlas » (openWakeWord, `hey_atlas.onnx`) si l'interrupteur est
+    allumé ;
+  - `parler` va directement au `ClientAudio` (`demander_la_parole`), qui le traite au bloc suivant : au repos, il
+    ouvre l'écoute comme un réveil ; pendant qu'Atlas parle, il déclenche la même coupure qu'un barge-in —
+    `Interruption` au Core, son vidé, capture ouverte ;
   - un détecteur de voix Silero, le `ClientAudio` et sa `Session`, rattachée à la régie sous l'identifiant de la page.
+    Les modèles (Silero, « Hey Atlas ») gardent un état : chaque page a les siens, chargés hors de la boucle du Core.
+    S'ils manquent sur la machine du Core, la page reçoit `erreur` (`modeles_absents`) et la connexion se ferme
+    (`4000`).
   - Quand la page part, la session est fermée et détachée, comme pour `/ws/audio`.
 - **Les réglages** sont ceux du client du Mac, lus par le Core (`ATLAS_REVEIL_SEUIL`, `ATLAS_SILENCE_MS`,
   `ATLAS_BARGEIN_MS`, `ATLAS_RELANCE_S`), plus deux réglages du navigateur :
@@ -156,7 +159,7 @@ Page vers Core :
 | Message | Contenu |
 |---|---|
 | `authentification` | `{cle, page, hey_atlas}` — premier message, sous 5 s |
-| *(binaire)* | un bloc de micro, au format de `/ws/audio` (octet `0x01` puis 640 octets s16le à 16 kHz) |
+| *(binaire)* | un bloc de micro : 640 octets s16le à 16 kHz (20 ms), bruts — sur `/ws/voix`, tout ce qui est binaire est de l'audio |
 | `parler` | `{}` — l'orbe a été touchée |
 | `hey_atlas` | `{actif}` — l'interrupteur a changé |
 | `reprise` | `{}` — le son reprend après une interruption d'iOS |
@@ -165,9 +168,13 @@ Core vers page :
 
 | Message | Contenu |
 |---|---|
-| *(binaire)* | une trame à jouer, au format de `/ws/audio` (octet `0x02`, identifiant d'énoncé, 640 octets) |
+| `pret` | `{}` — la clé est acceptée : la page peut envoyer son micro |
+| *(binaire)* | une trame à jouer : 640 octets bruts ; le client que le Core fait tourner pour la page a déjà écarté celles d'un énoncé coupé |
 | `vider` | `{}` — le son en cours s'arrête net |
-| `erreur` | `{code, message}` |
+| `erreur` | `{code, message}` — `cle_absente`, `modeles_absents`, `message_invalide`, `trame_invalide` |
+
+Fermetures : `1008` (origine), `4401` (clé refusée ou absente du premier message), `4000` (clé ou modèles non
+configurés sur le Core), `1011` (la voix de la page s'est arrêtée sur une panne : la page se rebranche).
 
 `/ws/web` : `authentification` gagne `page` (facultatif), le même identifiant tiré au hasard par la page à son
 ouverture, pour qu'une question tapée trouve la session de sa page.
@@ -248,3 +255,15 @@ L'iPad reste à vérifier à l'essai sur le matériel. Voir `docs/superpowers/sp
 - **§6.5 :** la page capte aussi la voix (micro, « Hey Atlas », l'orbe à toucher), le Core écoutant pour elle.
 - **§13 :** la page passe en HTTPS derrière Nginx Proxy Manager ; `/ws/voix` rejoint les routes protégées.
 - **§15 :** une étape « la voix dans le navigateur » s'insère entre la phase 2a et la phase 2b.
+
+## 12. Ajustements du plan (25 septembre 2026)
+
+En écrivant et en vérifiant le code du plan (`docs/superpowers/plans/2026-09-25-voix-navigateur.md`) :
+
+- **L'audio de `/ws/voix` passe brut**, 640 octets dans les deux sens (§6) : la connexion ne transporte que de l'audio
+  en binaire, et les trames d'un énoncé coupé sont déjà écartées côté Core.
+- **Le Core confirme l'entrée d'une page** par `pret` (§6) : la page n'envoie son micro qu'une fois acceptée.
+- **Toucher l'orbe va directement au client audio** (§5), au repos comme pendant qu'Atlas parle ; le réveilleur de la
+  page n'écoute que « Hey Atlas ».
+- **Les calculs purs de l'audio vivent dans `voix_worklet.js`** (§3.2) : le module de l'AudioWorklet reste d'un seul
+  tenant, sans import, et ses classes se testent quand même avec `node --test`.
