@@ -9,9 +9,11 @@ import pytest
 from test_cerveau_claude import (
     BLOQUE,
     MOMENT,
+    EnAvance,
     Fabrique,
     FauxClientClaude,
     Temps,
+    appel_atlas,
     debut_texte,
     delta,
     fin,
@@ -59,6 +61,7 @@ class Supprimer:
     def __init__(self, outils: OutilsMemoire, chemin: str = CHEMIN) -> None:
         self._outil = next(o for o in outils.outils if o.name == "memoire_supprimer")
         self._chemin = chemin
+        self.avant = appel_atlas("memoire_supprimer")
 
     async def __call__(self) -> None:
         await self._outil.handler({"chemin": self._chemin})
@@ -214,3 +217,17 @@ async def test_le_resume_apprend_ce_que_david_a_confirme_juste_avant(outils):
         "[Confirmé par David : le document « Offre de lancement » est supprimé.]\n" + DEMANDE_RESUME
     )
     assert outils.confirmations.prendre_les_lignes() == []
+
+
+async def test_une_suppression_executee_en_avance_se_pose_apres_le_texte_qui_la_precede(outils):
+    # Le vrai SDK exécute l'outil dès que le CLI le demande, pendant que le texte qui précède
+    # l'appel attend encore d'être lu : la session parle au rythme de la synthèse.
+    tour = [
+        debut_texte(),
+        delta("Bien sûr, "),
+        delta("je le supprime."),
+        EnAvance(Supprimer(outils)),
+        fin(),
+    ]
+    fragments = await _tout(_cerveau(outils, FauxClientClaude(tour)), "Supprime l'offre.")
+    assert fragments == ["Bien sûr, ", "je le supprime.", Confirmation(QUESTION)]

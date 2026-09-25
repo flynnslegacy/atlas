@@ -327,7 +327,7 @@ class CerveauClaude:
         self._tour_ouvert = False
         self._debut_conversation = self._fin_conversation = None
         if self._outils is not None:
-            self._outils.confirmations.abandonner()  # la conversation se termine
+            self._outils.nouvelle_conversation()
         if client is not None:
             with contextlib.suppress(Exception):
                 await client.disconnect()
@@ -341,6 +341,8 @@ class CerveauClaude:
         try:
             async with contextlib.aclosing(client.receive_response()) as messages:
                 async for message in messages:
+                    if self._outils is not None:
+                        self._outils.marquer_vus(message)  # ses appels à nos outils sont lus
                     # Une question arrivée d'ailleurs a coupé ce tour (`_interrompu`) : on
                     # continue à lire jusqu'au message de fin, pour vider le tampon du SDK
                     # tout de suite, mais on ne rend plus rien — la réponse s'arrête là.
@@ -387,10 +389,12 @@ class CerveauClaude:
                     # Le résumé non plus ne les annonce pas : elles attendent la réponse suivante.
                     annoncer = not (self._interrompu or self._resume_en_cours)
                     if self._outils is not None and annoncer:
-                        for note in self._outils.prendre_les_annonces():
+                        # Pas avant d'avoir lu l'appel de l'outil (tout, en fin de tour).
+                        fin_du_tour = isinstance(message, ResultMessage)
+                        for note in self._outils.prendre_les_annonces(toutes=fin_du_tour):
                             yield note
                         # Une action N3 : sa question, une fois, après ce qui la précède.
-                        if (question := self._outils.confirmations.poser()) is not None:
+                        if (question := self._outils.poser_la_question()) is not None:
                             yield question
         except ErreurCerveau:
             raise
@@ -466,8 +470,9 @@ class CerveauClaude:
                 interruption = asyncio.create_task(client.interrupt())
                 try:
                     async with contextlib.aclosing(client.receive_response()) as reste:
-                        async for _message in reste:
-                            pass
+                        async for message in reste:
+                            if self._outils is not None:
+                                self._outils.marquer_vus(message)
                 finally:
                     # Toujours reprendre la main sur cette tâche : si le vidage s'arrête en
                     # cours de route (erreur, minuterie), l'interruption ne finira peut-être

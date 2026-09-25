@@ -4,8 +4,9 @@ avec des outils factices, appelés comme Claude les appelle (leur gestionnaire).
 import asyncio
 
 import pytest
+from claude_agent_sdk import AssistantMessage, ToolUseBlock
 
-from atlas_core.cerveau import Note
+from atlas_core.cerveau import Confirmation, Note
 from atlas_core.confirmation import Confirmations, Suppression
 from atlas_core.memoire import ErreurMemoire
 from atlas_core.outils import (
@@ -145,3 +146,44 @@ async def test_un_refus_revient_a_claude_et_une_panne_se_note(serveur, banc, cap
     assert await appeler(panne, "ecrire", texte="x") == (ECHEC, True)
     assert "l'outil ecrire a échoué" in caplog.text
     assert refus.prendre_les_annonces() == [] and panne.prendre_les_annonces() == []
+
+
+def _appel(nom: str, parent: str | None = None) -> AssistantMessage:
+    bloc = ToolUseBlock(id="a1", name=f"mcp__atlas__{nom}", input={})
+    return AssistantMessage(content=[bloc], model="claude-sonnet-5", parent_tool_use_id=parent)
+
+
+async def test_une_annonce_attend_que_le_cerveau_ait_lu_l_appel_de_son_outil(serveur):
+    await appeler(serveur, "lire", chemin="profil.md")
+    await appeler(serveur, "ecrire", texte="neuf")
+    assert serveur.prendre_les_annonces(toutes=False) == []
+    serveur.marquer_vus(_appel("lire"))
+    recherche = ToolUseBlock(id="w1", name="WebSearch", input={})
+    serveur.marquer_vus(AssistantMessage(content=[recherche], model="claude-sonnet-5"))
+    serveur.marquer_vus(_appel("ecrire", parent="t9"))  # un sous-agent : pas la réponse d'Atlas
+    assert serveur.prendre_les_annonces(toutes=False) == []
+    serveur.marquer_vus(_appel("ecrire"))
+    assert serveur.prendre_les_annonces(toutes=False) == [Note("J'ai écrit la fiche Paul Durand.")]
+
+
+async def test_la_question_attend_aussi_que_le_cerveau_ait_lu_l_appel(serveur):
+    await appeler(serveur, "supprimer", chemin="personnes/paul-durand.md")
+    assert serveur.poser_la_question() is None
+    serveur.marquer_vus(_appel("supprimer"))
+    assert serveur.poser_la_question() == Confirmation(
+        "Je supprime la fiche Paul Durand. Tu confirmes ?"
+    )
+    assert serveur.poser_la_question() is None
+
+
+async def test_une_nouvelle_conversation_abandonne_et_recompte_les_appels(serveur):
+    await appeler(serveur, "ecrire", texte="neuf")
+    await appeler(serveur, "supprimer", chemin="personnes/paul-durand.md")
+    serveur.nouvelle_conversation()
+    assert not serveur.confirmations.en_attente
+    # Ce qui attendait d'être dit le sera, au début de la réponse suivante.
+    assert serveur.prendre_les_annonces(toutes=False) == [Note("J'ai écrit la fiche Paul Durand.")]
+    await appeler(serveur, "ecrire", texte="encore")
+    assert serveur.prendre_les_annonces(toutes=False) == []
+    serveur.marquer_vus(_appel("ecrire"))
+    assert serveur.prendre_les_annonces(toutes=False) == [Note("J'ai écrit la fiche Paul Durand.")]

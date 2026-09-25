@@ -15,10 +15,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server, tool
+from claude_agent_sdk import (
+    AssistantMessage,
+    SdkMcpTool,
+    ToolUseBlock,
+    create_sdk_mcp_server,
+    tool,
+)
 from claude_agent_sdk.types import McpSdkServerConfig
 
-from .cerveau import Note
+from .cerveau import Confirmation, Note
 from .confirmation import Confirmations
 from .memoire import ErreurMemoire
 
@@ -79,7 +85,13 @@ class ServeurAtlas:
         self.declarations = list(outils)
         self.confirmations = confirmations
         self.ecriture_permise = True  # False pendant le résumé d'une conversation
-        self._annonces: list[Note] = []
+        # Le SDK exécute nos outils dès que le CLI le demande, avant que le cerveau ait lu le
+        # texte qui précède l'appel : chaque annonce, et la question, attendent que le cerveau
+        # ait lu l'appel de leur outil (les appels sont numérotés, ceux lus comptés).
+        self._annonces: list[tuple[int, Note]] = []
+        self._appels = 0
+        self._vus = 0
+        self._appel_de_la_question: int | None = None
         self.outils: list[SdkMcpTool] = [
             tool(o.nom, o.description, o.parametres)(self._regle(o)) for o in outils
         ]
@@ -92,13 +104,41 @@ class ServeurAtlas:
     def serveur(self) -> McpSdkServerConfig:
         return create_sdk_mcp_server(SERVEUR, tools=self.outils)
 
-    def prendre_les_annonces(self) -> list[Note]:
-        """Ce qui a été fait depuis le dernier appel, à annoncer dans l'ordre."""
-        annonces, self._annonces = self._annonces, []
-        return annonces
+    def prendre_les_annonces(self, toutes: bool = True) -> list[Note]:
+        """Ce qui a été fait depuis le dernier appel, à annoncer dans l'ordre ; avec
+        `toutes=False`, seulement ce dont le cerveau a déjà lu l'appel."""
+        pretes = [note for appel, note in self._annonces if toutes or appel <= self._vus]
+        self._annonces = [(a, n) for a, n in self._annonces if not (toutes or a <= self._vus)]
+        return pretes
+
+    def marquer_vus(self, message: object) -> None:
+        """Le cerveau a lu ce message : ses appels à nos outils sont passés dans la réponse."""
+        if isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
+            prefixe = f"mcp__{SERVEUR}__"
+            self._vus += sum(
+                isinstance(bloc, ToolUseBlock) and bloc.name.startswith(prefixe)
+                for bloc in message.content
+            )
+
+    def poser_la_question(self) -> Confirmation | None:
+        """La question de l'action N3 en attente, une fois le cerveau arrivé à son appel."""
+        appel = self._appel_de_la_question
+        if appel is None or appel > self._vus:
+            return None
+        return self.confirmations.poser()
+
+    def nouvelle_conversation(self) -> None:
+        """La conversation se termine : l'action en attente est abandonnée, et les appels se
+        recomptent ; ce qui attend d'être annoncé le sera au début de la réponse suivante."""
+        self.confirmations.abandonner()
+        self._appels = self._vus = 0
+        self._appel_de_la_question = None
+        self._annonces = [(0, note) for _, note in self._annonces]
 
     def _regle(self, outil: Outil) -> Gestionnaire:
         async def appliquer(arguments: dict[str, Any]) -> dict[str, Any]:
+            self._appels += 1
+            appel = self._appels
             if outil.niveau > Niveau.N1 and not self.ecriture_permise:
                 return _refus(PENDANT_LE_RESUME)
             try:
@@ -111,10 +151,11 @@ class ServeurAtlas:
             if outil.niveau == Niveau.N3:
                 if not self.confirmations.mettre_en_attente(resultat):
                     return _refus(DEJA_EN_ATTENTE)
+                self._appel_de_la_question = appel
                 return _texte(EN_ATTENTE)
             if outil.niveau == Niveau.N2:
                 if resultat.annonce is not None:
-                    self._annonces.append(Note(resultat.annonce))
+                    self._annonces.append((appel, Note(resultat.annonce)))
                 return _texte(resultat.texte)
             return _texte(resultat)
 
