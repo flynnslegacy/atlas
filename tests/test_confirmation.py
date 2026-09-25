@@ -331,3 +331,34 @@ async def test_apres_ne_suit_qu_une_execution_reussie(confirmations, temoin):
     confirmations.poser()
     await confirmations.trancher("oui")
     assert apres == ["vu"]
+
+
+async def test_une_annulation_pendant_la_suppression_n_empeche_pas_de_conclure(
+    confirmations, temoin
+):
+    libre = threading.Event()
+    apres: list[str] = []
+
+    def executer() -> None:
+        libre.wait(2)
+        temoin.executer()
+
+    confirmations.mettre_en_attente(
+        Suppression("documents/a.md", "A", executer, apres=lambda: apres.append("vu"))
+    )
+    confirmations.poser()
+    reponse = asyncio.create_task(confirmations.trancher("oui"))
+    await asyncio.sleep(0.05)  # la suppression tourne dans son fil…
+    reponse.cancel()  # … quand la réponse est annulée (une autre question, l'arrêt du Core)
+    libre.set()
+    with pytest.raises(asyncio.CancelledError):
+        await reponse
+    for _ in range(200):
+        if temoin.fins:
+            break
+        await asyncio.sleep(0.01)
+    assert len(temoin.executions) == 1
+    assert temoin.fins == ["Supprimé : le document A."] and apres == ["vu"]
+    assert confirmations.prendre_les_lignes() == [
+        "[Confirmé par David : le document « A » est supprimé.]"
+    ]

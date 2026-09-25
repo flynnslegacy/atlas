@@ -172,6 +172,7 @@ class Confirmations:
         self._action: Suppression | None = None
         self._posee = False
         self._minuterie: asyncio.Task | None = None
+        self._execution: asyncio.Future | None = None  # gardée : une tâche oubliée se perd
         self._lignes: list[str] = []
 
     @property
@@ -208,6 +209,13 @@ class Confirmations:
             ligne = f"[David a répondu autre chose : {action.objet} est abandonnée.]"
             self._conclure(ligne, RIEN_SUPPRIME)
             return "Je ne supprime rien.", True
+        # L'exécution et sa conclusion vont jusqu'au bout, même si la réponse est annulée
+        # entre-temps (une autre question, l'arrêt du Core) : sinon la suppression serait
+        # faite sans que les pages, ni Claude, ne l'apprennent.
+        self._execution = asyncio.ensure_future(self._executer(action))
+        return await asyncio.shield(self._execution)
+
+    async def _executer(self, action: Suppression) -> tuple[str, bool]:
         try:
             await asyncio.to_thread(action.executer)
         except Exception as e:  # noqa: BLE001 — retouché entre-temps, dépôt en panne…
