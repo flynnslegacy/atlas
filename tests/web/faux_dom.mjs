@@ -12,6 +12,10 @@ export function fauxElement(tag) {
     textContent: "",
     type: "",
     hidden: false,
+    attributs: {},
+    setAttribute(nom, valeur) {
+      this.attributs[nom] = String(valeur);
+    },
     classList: {
       add: (nom) => classes.add(nom),
       remove: (nom) => classes.delete(nom),

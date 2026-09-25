@@ -267,6 +267,9 @@ dessinée en Canvas 2D, sans Three.js : 12 orbes et 6 fonds animés au choix, av
 conversation en sous-titres et une saisie au clavier (voir
 `2026-09-24-interface-orbe-design.md`). Puis le tableau de bord : état des workflows n8n,
 contenu de la mémoire, documents produits, erreurs.
+**Amendé le 25/09/2026 (la voix dans le navigateur).** La page capte aussi la voix : un
+bouton « Micro », « Hey Atlas » écouté pour elle, et l'orbe à toucher pour parler. Le Core
+écoute pour elle, avec le code du client audio. Voir `2026-09-25-voix-navigateur-design.md`.
 
 ### 6.6 Protocole entre le client audio et le Core
 
@@ -438,6 +441,9 @@ corriger de façon fiable. La source de vérité reste les fichiers Markdown d'A
 
 - Communication entre machines en **WSS et HTTPS**, derrière le reverse proxy Unraid
   existant, sous le domaine déjà en place.
+  **Amendé le 25/09/2026 (la voix dans le navigateur)** : la page passe en HTTPS derrière
+  Nginx Proxy Manager, accès limité au réseau local et au VPN ; `/ws/voix` rejoint les
+  routes protégées par la clé des pages.
 - **Vérification de l'origine** sur toutes les routes qui modifient un état.
 - **`/ws/audio` protégé par une clé** (amendé le 24/09/2026, phase 2a) : `ATLAS_AUDIO_CLE`,
   dans le `hello` du client audio, comparée en temps constant. Les navigateurs restent
@@ -497,6 +503,9 @@ et le document produit se relit sans retouche.
 **Amendé le 24/09/2026.** La phase 2 est découpée en trois étapes, chacune avec sa spec,
 son plan et sa fusion : 2a, le cerveau branché (`2026-09-24-phase-2a-cerveau-design.md`) ;
 2b, la mémoire ; 2c, outils et permissions.
+**Amendé le 25/09/2026.** Une étape « la voix dans le navigateur »
+(`2026-09-25-voix-navigateur-design.md`) s'insère entre 2a et 2b : la page de l'iPhone ou
+de l'iPad écoute et répond à voix haute, pas seulement le M5.
 
 **Phase 3 — Les outils.** Registre d'outils, routeur d'intention, Ollama, supervision n8n,
 point quotidien, déclenchement vocal, diagnostic.

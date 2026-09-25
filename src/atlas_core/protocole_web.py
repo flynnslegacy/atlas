@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_valid
 
 LONGUEUR_MAX_SAISIE = 1000
 TAILLE_MAX_CLE = 256
+# L'identifiant qu'une page tire au hasard à son ouverture, le même sur /ws/web et sur
+# /ws/voix : une question tapée trouve ainsi la voix de sa page.
+MOTIF_PAGE = r"^[A-Za-z0-9_-]{1,64}$"
 
 Source = Literal["voix", "clavier"]
 
@@ -69,6 +72,7 @@ class Historique(BaseModel):
 class Authentification(BaseModel):
     type: Literal["authentification"] = "authentification"
     cle: str = Field(max_length=TAILLE_MAX_CLE)
+    page: str | None = Field(default=None, pattern=MOTIF_PAGE)
 
 
 class Saisie(BaseModel):

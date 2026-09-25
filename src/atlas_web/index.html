@@ -22,9 +22,17 @@
       <input type="checkbox" id="muet">
       <span>Muet</span>
     </label>
+    <button type="button" class="icone" id="micro" aria-label="Micro" aria-pressed="false">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/>
+      </svg>
+    </button>
     <button type="button" class="icone" id="ouvrir-historique" aria-label="Historique">☰</button>
     <button type="button" class="icone" id="ouvrir-parametres" aria-label="Paramètres">⚙</button>
   </header>
+
+  <button type="button" id="message-voix" hidden></button>
+  <button type="button" id="parler" aria-label="Parler à Atlas" hidden></button>
 
   <section id="sous-titres" aria-live="polite">
     <p id="st-question"></p>
@@ -49,6 +57,11 @@
       <h2>Paramètres</h2>
       <button type="button" class="icone fermer" aria-label="Fermer">✕</button>
     </header>
+    <h3>Voix</h3>
+    <label class="interrupteur">
+      <input type="checkbox" id="hey-atlas">
+      <span>Écouter « Hey Atlas » quand le micro est allumé</span>
+    </label>
     <h3>Orbe</h3>
     <div id="galerie-orbes" class="galerie"></div>
     <h3>Fond</h3>

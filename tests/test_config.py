@@ -58,3 +58,36 @@ def test_la_cle_audio_vient_de_l_environnement(monkeypatch):
 def test_sans_cle_audio_la_valeur_est_vide(monkeypatch):
     monkeypatch.delenv("ATLAS_AUDIO_CLE", raising=False)
     assert Config.depuis_environnement().audio_cle == ""
+
+
+def test_les_reglages_de_la_voix_des_pages_ont_les_valeurs_du_spike(monkeypatch):
+    monkeypatch.delenv("ATLAS_VOIX_MARGE_S", raising=False)
+    monkeypatch.delenv("ATLAS_VOIX_BARGEIN_DBFS", raising=False)
+    config = Config.depuis_environnement()
+    assert config.voix_marge_s == 0.2 and config.voix_bargein_dbfs == -40.0
+
+
+def test_les_reglages_de_la_voix_des_pages_viennent_de_l_environnement(monkeypatch):
+    monkeypatch.setenv("ATLAS_VOIX_MARGE_S", "0.35")
+    monkeypatch.setenv("ATLAS_VOIX_BARGEIN_DBFS", "-45.5")
+    config = Config.depuis_environnement()
+    assert config.voix_marge_s == 0.35 and config.voix_bargein_dbfs == -45.5
+
+
+@pytest.mark.parametrize(
+    ("nom", "brute"),
+    [
+        ("ATLAS_VOIX_MARGE_S", "vite"),
+        ("ATLAS_VOIX_MARGE_S", "-0.1"),
+        ("ATLAS_VOIX_MARGE_S", "3"),
+        ("ATLAS_VOIX_MARGE_S", "nan"),
+        ("ATLAS_VOIX_BARGEIN_DBFS", "fort"),
+        ("ATLAS_VOIX_BARGEIN_DBFS", "5"),
+        ("ATLAS_VOIX_BARGEIN_DBFS", "-200"),
+        ("ATLAS_VOIX_BARGEIN_DBFS", "-inf"),
+    ],
+)
+def test_un_reglage_de_la_voix_des_pages_invalide_est_refuse(monkeypatch, nom, brute):
+    monkeypatch.setenv(nom, brute)
+    with pytest.raises(ValueError, match=nom):
+        Config.depuis_environnement()

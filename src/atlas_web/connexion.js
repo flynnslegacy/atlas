@@ -1,22 +1,33 @@
-// La connexion à /ws/web : authentification, messages, reconnexion espacée.
+// Une connexion au Core (/ws/web, /ws/voix) : authentification, messages, reconnexion espacée.
 
 export const DELAIS_RECONNEXION_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 export const FERMETURE_CLE_ABSENTE = 4000;
 export const FERMETURE_NON_AUTORISE = 4401;
 const OUVERT = 1;
 
+// L'identifiant que la page tire à son ouverture, le même sur /ws/web et sur /ws/voix : une
+// question tapée trouve ainsi la voix de sa page.
+export function identifiantDePage(aleatoire = globalThis.crypto) {
+  const octets = aleatoire.getRandomValues(new Uint8Array(12));
+  return Array.from(octets, (octet) => octet.toString(16).padStart(2, "0")).join("");
+}
+
 export class Connexion {
   constructor({
     url,
     lireCle,
+    entree = () => ({}),
     surMessage,
+    surBinaire = () => {},
     surStatut,
     FabriqueWebSocket = globalThis.WebSocket,
     planifier = (rappel, delai) => setTimeout(rappel, delai),
   }) {
     this._url = url;
     this._lireCle = lireCle;
+    this._entree = entree;
     this._surMessage = surMessage;
+    this._surBinaire = surBinaire;
     this._surStatut = surStatut;
     this._Fabrique = FabriqueWebSocket;
     this._planifier = planifier;
@@ -44,6 +55,12 @@ export class Connexion {
     return true;
   }
 
+  envoyerBinaire(donnees) {
+    if (!this._ws || this._ws.readyState !== OUVERT || !this._enLigne) return false;
+    this._ws.send(donnees);
+    return true;
+  }
+
   _abandonner() {
     const ancienne = this._ws;
     this._ws = null;
@@ -66,8 +83,14 @@ export class Connexion {
     const ws = new this._Fabrique(this._url);
     this._ws = ws;
     this._enLigne = false;
-    ws.onopen = () => ws.send(JSON.stringify({ type: "authentification", cle }));
+    ws.binaryType = "arraybuffer";
+    // L'entrée est relue à chaque connexion : elle porte l'état du moment (« Hey Atlas »…).
+    ws.onopen = () => ws.send(JSON.stringify({ type: "authentification", cle, ...this._entree() }));
     ws.onmessage = (evenement) => {
+      if (typeof evenement.data !== "string") {
+        if (this._enLigne) this._surBinaire(evenement.data);
+        return;
+      }
       let message;
       try {
         message = JSON.parse(evenement.data);

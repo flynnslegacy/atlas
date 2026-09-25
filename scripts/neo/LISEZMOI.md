@@ -2,10 +2,12 @@
 
 Le Core quitte le Mac de développement pour le MacBook néo de la baie : il y tourne en
 service, démarre avec la machine et redémarre s'il tombe. Le client audio reste sur le M5,
-et la page s'ouvre à l'adresse du néo.
+et la page s'ouvre à l'adresse du néo — en HTTPS, par Nginx Proxy Manager, pour que
+l'iPhone et l'iPad puissent parler à Atlas.
 
-Dans ce guide, `neo.local` désigne le néo sur le réseau local : remplace-le par son nom ou
-son adresse chez toi. Rien de ce qui suit ne sort du réseau local.
+Dans ce guide, `neo.local` désigne le néo sur le réseau local, et `atlas.example.com` le
+sous-domaine d'Atlas : remplace-les par leur nom ou leur adresse chez toi. Rien de ce qui
+suit ne sort du réseau local et du VPN.
 
 ## 1. Installer les outils et le dépôt
 
@@ -99,6 +101,59 @@ Puis `make run-audio`. Si le Core disparaît (redémarrage du néo, coupure du r
 client audio se reconnecte seul : 1, 2, 4, 8, 16 puis 30 secondes entre les tentatives.
 Une clé refusée est signalée dans son journal.
 
-## 8. Ouvrir la page
+## 8. Les modèles de la voix des pages
 
-Sur l'iPhone, l'iPad ou le Mac : `http://neo.local:8080/`, avec la clé `ATLAS_WEB_CLE`.
+Le Core écoute les pages avec les mêmes modèles que le client audio du M5 : « Hey Atlas »
+et Silero. Copie-les depuis le M5, puis télécharge une fois les modèles de traits
+d'openWakeWord sur le néo :
+
+```bash
+# sur le M5, dans ~/atlas
+scp models/hey_atlas.onnx models/silero_vad.onnx neo.local:atlas/models/
+# sur le néo, dans ~/atlas
+uv run python -c "import openwakeword.utils; openwakeword.utils.download_models()"
+```
+
+Redémarre ensuite le Core. S'il manque un modèle, la page le dit quand on allume son
+micro, et le reste d'Atlas marche comme avant.
+
+## 9. Le HTTPS, par Nginx Proxy Manager
+
+Safari n'ouvre le micro que sur une page en HTTPS. Dans Nginx Proxy Manager, sur l'Unraid,
+un « Proxy Host » (si celui du spike S4 existe déjà, change seulement sa destination) :
+
+- **Details** : le domaine `atlas.example.com`, vers `http`, `neo.local`, port `8080` ;
+  coche « Websockets Support » ; laisse passer l'en-tête `Host` tel quel (le réglage par
+  défaut) : le Core s'en sert pour reconnaître sa page ;
+- **Access List** : une liste qui n'autorise que le réseau local et le VPN ;
+- **SSL** : un certificat Let's Encrypt, obtenu par le défi DNS (le sous-domaine n'est pas
+  joignable depuis Internet), ou le certificat générique du domaine s'il existe déjà ;
+  coche « Force SSL » ;
+- **Advanced** : sans ces deux lignes, nginx ferme au bout de 60 s une connexion restée
+  silencieuse :
+
+  ```nginx
+  proxy_read_timeout 3600s;
+  proxy_send_timeout 3600s;
+  ```
+
+Le DNS : `atlas.example.com` pointe vers l'adresse de l'Unraid sur le réseau local (un
+enregistrement DNS local, ou un enregistrement public vers une adresse privée). Le client
+audio du M5, lui, continue de parler directement au Core (`ws://neo.local:8080/ws/audio`).
+
+## 10. Ouvrir la page et lui parler
+
+Sur l'iPhone, l'iPad ou le Mac : `https://atlas.example.com/`, avec la clé
+`ATLAS_WEB_CLE`. L'adresse `http://neo.local:8080/` marche encore, mais sans micro.
+
+- **Le micro** (l'icône à côté de « Muet ») : à toucher à chaque ouverture de la page ;
+  Safari demande l'autorisation la première fois. Allumé, la page envoie le son au Core
+  (iOS affiche son point orange).
+- **Toucher l'orbe**, micro allumé : Atlas t'écoute ; pendant qu'il parle, ça le coupe.
+- **« Hey Atlas »** : l'interrupteur des Paramètres, retenu par l'appareil. Allumé, le Core
+  écoute le mot de réveil pour cette page, et l'écran reste allumé : un iPad sur son
+  support, un iPhone posé sur le bureau. iOS coupe le micro quand l'écran se verrouille ;
+  au retour, il repart seul, sinon la page demande un toucher.
+- Chaque appareil répond pour lui-même, et le client du M5 marche toujours à côté.
+- Les dix premières secondes de voix d'Atlas après l'allumage du micro, on ne le coupe
+  qu'en touchant l'orbe : l'annulation d'écho du navigateur s'installe.

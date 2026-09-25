@@ -157,6 +157,8 @@ class ClientAudio:
         seuil_bargein_dbfs: float = _SEUIL_BARGEIN_DBFS_DEFAUT,
         relance_s: float = 0.0,
         attendre: Callable[[float], Awaitable[None]] | None = None,
+        marge_sortie_s: float = MARGE_SORTIE_S,
+        amorcage_s: float = 0.0,
     ) -> None:
         self._transport = transport
         self._peripherique = peripherique
@@ -203,11 +205,35 @@ class ClientAudio:
         self._relance_s = relance_s
         self._reponse_jouee = False
         self._relance_due = False
+        # La latence de sortie : celle du haut-parleur du Mac, ou d'une page (spike S4).
+        self._marge_sortie_s = marge_sortie_s
+        # L'annuleur d'écho d'un navigateur laisse passer l'écho le temps de s'installer
+        # (spike S4) : pendant `amorcage_s` s de voix jouée, la voix ne coupe pas Atlas.
+        self._trames_a_amorcer = round(amorcage_s / DUREE_BLOC_S)  # compte entier, sans arrondi
+        self._trames_amorcees = 0  # jouées depuis l'ouverture (ou la reprise) du micro
+        self._fin_amorcage = 0.0  # heure où finit de jouer la dernière trame amorcée
+        # L'orbe touchée : au prochain bloc, l'écoute s'ouvre, ou Atlas est coupé.
+        self._parole_demandee = False
 
     def _atlas_parle_encore(self) -> bool:
         # Une échéance expire d'elle-même, et tout état autre que « parole » désarme le
         # Core : le micro ne peut jamais rester sourd.
-        return self._core_parle or self._horloge() < self._fin_lecture + MARGE_SORTIE_S
+        return self._core_parle or self._horloge() < self._fin_lecture + self._marge_sortie_s
+
+    def _amorcage_en_cours(self) -> bool:
+        en_cours = self._trames_amorcees < self._trames_a_amorcer
+        return en_cours or self._horloge() < self._fin_amorcage
+
+    def reamorcer(self) -> None:
+        """Le micro de la page vient de rouvrir (ou le son de reprendre après une
+        interruption d'iOS) : l'annuleur d'écho s'installe à nouveau."""
+        self._trames_amorcees = 0
+        self._fin_amorcage = 0.0
+
+    def demander_la_parole(self) -> None:
+        """L'orbe a été touchée : au prochain bloc (dans la tâche de capture, donc sans
+        croiser un bloc en cours), l'écoute s'ouvre, ou Atlas est coupé s'il parle."""
+        self._parole_demandee = True
 
     # --- micro vers Core --------------------------------------------------
 
@@ -224,6 +250,18 @@ class ClientAudio:
                 await self._traiter_bloc(bloc)
 
     async def _traiter_bloc(self, bloc: bytes) -> None:
+        if self._parole_demandee:
+            self._parole_demandee = False
+            if self._atlas_parle_encore():
+                await self._interrompre([])
+            elif not self._capture:
+                self._relance_due = False
+                self._ouvrir_capture()
+                await self._annoncer_ecoute()
+            if self._capture:
+                await self._capturer(bloc, self._detecteur.parle(bloc))
+            return
+
         if self._atlas_parle_encore():
             await self._surveiller_bargein(bloc)
             return
@@ -288,10 +326,15 @@ class ClientAudio:
         # porte d'énergie en a laissé passer.
         self._pre_roulement.append((bloc, parle))
         niveau = self._fenetre_energie.ajouter(bloc)
+        if self._amorcage_en_cours():
+            return  # l'écho de l'annuleur qui s'installe n'est pas une interruption
         if self._bargein.ajouter(parle and niveau > self._seuil_bargein_dbfs) != "debut":
             return
         _journal.info("interruption détectée (%.1f dBFS sur 300 ms)", niveau)
-        pre_roulement = list(self._pre_roulement)
+        await self._interrompre(list(self._pre_roulement))
+
+    async def _interrompre(self, pre_roulement: list[tuple[bytes, bool]]) -> None:
+        """Coupe Atlas et ouvre l'écoute : barge-in à la voix, ou orbe touchée."""
         self._couper()
         # Le Core d'abord : il arrête la synthèse et Claude pendant que le son se vide.
         await self._transport.envoyer_json(Interruption(horodatage=time.time()))
@@ -373,6 +416,11 @@ class ClientAudio:
         if self._a_jouer(identifiant):
             # Sinon, coupée pendant l'écriture : le vidage l'a suivie, l'horloge n'avance pas.
             self._fin_lecture = max(self._horloge(), self._fin_lecture) + DUREE_BLOC_S
+            if self._trames_amorcees < self._trames_a_amorcer:
+                self._trames_amorcees += 1
+                if self._trames_amorcees == self._trames_a_amorcer:
+                    # La dernière trame amorcée ne finira de jouer qu'à cette heure-là.
+                    self._fin_amorcage = self._fin_lecture
 
     def _a_jouer(self, identifiant: int) -> bool:
         return identifiant > self._id_coupe and identifiant == self._id_courant
