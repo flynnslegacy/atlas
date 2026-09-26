@@ -1,0 +1,161 @@
+/* Le panneau « Documents » et la confirmation d'une action (N3) : spec 2c §7. */
+
+/* Les documents : la liste, puis la lecture d'un document mis en forme. */
+.panneau > header #retour-documents {
+  margin-right: 8px;
+}
+
+.panneau > header h2 {
+  flex: 1;
+}
+
+#liste-documents .documents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#liste-documents .document {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  border-top: 1px solid var(--bord);
+  text-align: left;
+}
+
+#liste-documents p {
+  margin: 2px 0;
+}
+
+#liste-documents .titre {
+  font-weight: 600;
+}
+
+#liste-documents .resume,
+#liste-documents .vide {
+  color: var(--texte-doux);
+}
+
+#liste-documents .date {
+  font-size: 12px;
+  color: var(--texte-doux);
+}
+
+#lecture-document {
+  padding-bottom: 12px;
+  line-height: 1.55;
+}
+
+#lecture-document h1,
+#lecture-document h2,
+#lecture-document h3 {
+  margin: 20px 0 8px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--texte);
+}
+
+#lecture-document h1 {
+  font-size: 22px;
+}
+
+#lecture-document h2 {
+  font-size: 18px;
+}
+
+#lecture-document h3 {
+  font-size: 16px;
+}
+
+#lecture-document blockquote {
+  margin: 12px 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--texte-doux);
+}
+
+#lecture-document code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.92em;
+}
+
+#lecture-document pre {
+  overflow-x: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#lecture-document pre code {
+  padding: 0;
+  background: none;
+}
+
+#lecture-document table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+#lecture-document th,
+#lecture-document td {
+  padding: 6px 10px;
+  border: 1px solid var(--bord);
+  text-align: left;
+}
+
+#lecture-document a {
+  color: var(--accent);
+}
+
+#lecture-document .erreur {
+  color: var(--erreur);
+}
+
+/* La confirmation d'une action (N3) : la question et ses deux boutons, au-dessus de la saisie. */
+#confirmation {
+  position: fixed;
+  left: 50%;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 64px);
+  width: min(760px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  background: var(--verre-fort);
+  text-align: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#texte-confirmation {
+  margin: 0;
+}
+
+#boutons-confirmation {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+#boutons-confirmation button {
+  padding: 8px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--bord);
+}
+
+#boutons-confirmation #confirmer {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #02030a;
+}
+
+#boutons-confirmation button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

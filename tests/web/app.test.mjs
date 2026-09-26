@@ -8,29 +8,39 @@ import { fauxElement, fauxStockage } from "./faux_dom.mjs";
 
 // Tous les identifiants cherchés par app.js via $("…") (voir tests/web/page.test.mjs).
 const IDENTIFIANTS = [
+  "annuler-confirmation",
+  "boutons-confirmation",
   "champ",
   "champ-cle",
+  "confirmation",
+  "confirmer",
   "formulaire-cle",
   "galerie-fonds",
   "galerie-orbes",
   "hey-atlas",
+  "lecture-document",
   "libelle-etat",
+  "liste-documents",
   "liste-historique",
   "message-cle",
   "message-voix",
   "micro",
   "muet",
+  "ouvrir-documents",
   "ouvrir-historique",
   "ouvrir-parametres",
   "panneau-cle",
+  "panneau-documents",
   "panneau-historique",
   "panneau-parametres",
   "parler",
   "pastille",
+  "retour-documents",
   "saisie",
   "sous-titres",
   "st-question",
   "st-reponse",
+  "texte-confirmation",
 ];
 
 // Un contexte 2D qui lève sur le moindre appel : simule un dessin cassé, quelle qu'en
@@ -271,4 +281,107 @@ test("au retour sur la page, un son resté coupé se rouvre d'un toucher", async
   await tourner();
   assert.equal(contexte.state, "running");
   assert.equal($("message-voix").hidden, true, $("message-voix").textContent);
+});
+
+const OFFRE = {
+  chemin: "documents/offre-de-lancement.md",
+  titre: "Offre de lancement",
+  resume: "Trois formules.",
+  modifie: "25 septembre 2026, 21 h 14",
+};
+
+test("le panneau Documents : la liste, un document, le retour, et les changements", async () => {
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+  web.recevoir({ type: "historique", echanges: [] }); // la page est en ligne
+  for (const id of ["panneau-documents", "panneau-historique", "panneau-parametres"]) $(id).hidden = true;
+
+  $("ouvrir-documents").declencher("click");
+  assert.equal($("panneau-documents").hidden, false);
+  assert.deepEqual(web.envoyes.at(-1), { type: "documents" });
+  web.recevoir({ type: "liste_documents", disponible: true, documents: [OFFRE] });
+  const [liste] = $("liste-documents").children;
+  liste.children[0].children[0].declencher("click");
+  assert.deepEqual(web.envoyes.at(-1), { type: "lire_document", chemin: OFFRE.chemin });
+
+  web.recevoir({ type: "document", chemin: OFFRE.chemin, titre: "Offre", contenu: "# Offre\n\nTexte.\n", erreur: null });
+  assert.equal($("lecture-document").hidden, false);
+  assert.equal($("liste-documents").hidden, true);
+  assert.equal($("retour-documents").hidden, false);
+  assert.deepEqual(
+    $("lecture-document").children.map((bloc) => bloc.tagName),
+    ["H1", "P"],
+  );
+  web.recevoir({ type: "liste_documents", disponible: true, documents: [] }); // une vieille liste
+  web.recevoir({ type: "document", chemin: "documents/autre.md", titre: "Autre", contenu: "Autre.", erreur: null });
+  assert.equal($("liste-documents").hidden, true);
+  assert.equal($("liste-documents").children[0], liste, "la liste en attente reste celle d'avant");
+  assert.deepEqual(
+    $("lecture-document").children.map((bloc) => bloc.tagName),
+    ["H1", "P"],
+    "le document d'un autre chemin ne remplace pas celui qu'on lit",
+  );
+  web.recevoir({ type: "documents_changes" });
+  assert.deepEqual(web.envoyes.at(-1), { type: "lire_document", chemin: OFFRE.chemin });
+
+  $("retour-documents").declencher("click");
+  assert.equal($("lecture-document").hidden, true);
+  assert.equal($("liste-documents").hidden, false);
+  assert.equal($("retour-documents").hidden, true);
+  assert.deepEqual(web.envoyes.at(-1), { type: "documents" });
+  web.recevoir({ type: "documents_changes" });
+  assert.deepEqual(web.envoyes.at(-1), { type: "documents" });
+
+  $("ouvrir-documents").declencher("click"); // le même bouton ferme
+  assert.equal($("panneau-documents").hidden, true);
+  const envoyes = web.envoyes.length;
+  web.recevoir({ type: "documents_changes" });
+  web.recevoir({ type: "document", chemin: OFFRE.chemin, titre: "Offre", contenu: "# Offre\n", erreur: null });
+  assert.equal(web.envoyes.length, envoyes, "panneau fermé : rien n'est redemandé");
+});
+
+test("la barre de confirmation : la question, les boutons, puis la fin", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+
+  web.recevoir({ type: "confirmation", texte: "Je supprime le document Offre. Tu confirmes ?" });
+  assert.equal($("confirmation").hidden, false);
+  assert.equal($("boutons-confirmation").hidden, false);
+  assert.equal($("texte-confirmation").textContent, "Je supprime le document Offre. Tu confirmes ?");
+  $("confirmer").declencher("click");
+  $("annuler-confirmation").declencher("click");
+  assert.deepEqual(web.envoyes.slice(-2), [
+    { type: "confirmer", oui: true },
+    { type: "confirmer", oui: false },
+  ]);
+
+  web.recevoir({ type: "confirmation_finie", texte: "Rien n'a été supprimé." });
+  assert.equal($("boutons-confirmation").hidden, true);
+  assert.equal($("texte-confirmation").textContent, "Rien n'a été supprimé.");
+  t.mock.timers.tick(3999);
+  assert.equal($("confirmation").hidden, false);
+  web.recevoir({ type: "confirmation", texte: "Je supprime ton profil. Tu confirmes ?" });
+  t.mock.timers.tick(10);
+  assert.equal($("confirmation").hidden, false, "la nouvelle question reste affichée");
+  web.recevoir({ type: "confirmation_finie", texte: "Supprimé : ton profil." });
+  t.mock.timers.tick(4000);
+  assert.equal($("confirmation").hidden, true);
+});
+
+test("une page qui se reconnecte oublie une question qui n'attend plus", async () => {
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+  web.recevoir({ type: "confirmation", texte: "Je supprime ton profil. Tu confirmes ?" });
+  web.recevoir({ type: "historique", echanges: [] }); // ce que le Core envoie à chaque connexion
+  assert.equal($("confirmation").hidden, true);
 });

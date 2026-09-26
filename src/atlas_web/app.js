@@ -2,6 +2,7 @@
 
 import { Connexion, identifiantDePage } from "./connexion.js";
 import { dimensionner, rgba } from "./dessin.js";
+import { rendreDocument, rendreListeDocuments } from "./documents.js";
 import { LIBELLES, appliquerMessage, avancer, creerEtat, sceneDe } from "./etat.js";
 import { fonds } from "./fonds/index.js";
 import { rendreHistorique } from "./historique.js";
@@ -16,6 +17,9 @@ const CLE_STOCKAGE = "atlas.cle";
 const CLE_HEY_ATLAS = "atlas.hey_atlas";
 const SEUIL_GLISSEMENT_PX = 60;
 const TOUCHENT_HISTORIQUE = new Set(["question", "reponse", "erreur", "latences", "historique"]);
+const TOUCHENT_DOCUMENTS = new Set(["liste_documents", "document", "documents_changes"]);
+// La fin d'une attente de confirmation reste affichée ce temps-là, puis la barre s'efface.
+const DUREE_FIN_CONFIRMATION_MS = 4000;
 const STATUTS = {
   connexion: "Connexion…",
   hors_ligne: "Hors ligne — nouvelle tentative…",
@@ -69,6 +73,13 @@ const connexion = new Connexion({
     if (TOUCHENT_HISTORIQUE.has(message.type) && !$("panneau-historique").hidden) {
       rendreHistorique(document, $("liste-historique"), etat.historique);
     }
+    if (TOUCHENT_DOCUMENTS.has(message.type)) surDocuments(message);
+    if (message.type === "confirmation" || message.type === "confirmation_finie") {
+      afficherConfirmation(message);
+    }
+    // Une connexion (re)commence toujours par l'historique : une question affichée avant
+    // n'attend peut-être plus ; si elle attend, le Core la renvoie juste après.
+    if (message.type === "historique") $("confirmation").hidden = true;
   },
   surStatut(nouveau) {
     statut = nouveau;
@@ -150,6 +161,63 @@ $("muet").addEventListener("change", () => {
   if (!connexion.envoyer({ type: "muet", actif: $("muet").checked })) $("muet").checked = etat.muet;
 });
 
+// --- La confirmation d'une action (N3) --------------------------------------------
+
+let jetonConfirmation = 0; // la fin d'une attente n'efface pas la question suivante
+
+function afficherConfirmation(message) {
+  const jeton = ++jetonConfirmation;
+  $("texte-confirmation").textContent = message.texte;
+  $("boutons-confirmation").hidden = message.type !== "confirmation";
+  $("confirmation").hidden = false;
+  if (message.type === "confirmation_finie") {
+    setTimeout(() => {
+      if (jeton === jetonConfirmation) $("confirmation").hidden = true;
+    }, DUREE_FIN_CONFIRMATION_MS);
+  }
+}
+
+// Comme taper « oui » ou « non » depuis cette page.
+$("confirmer").addEventListener("click", () => connexion.envoyer({ type: "confirmer", oui: true }));
+$("annuler-confirmation").addEventListener("click", () =>
+  connexion.envoyer({ type: "confirmer", oui: false }),
+);
+
+// --- Les documents ----------------------------------------------------------------
+
+let documentOuvert = null; // le chemin du document lu ; null : la liste
+
+function montrerLaListe() {
+  documentOuvert = null;
+  $("lecture-document").hidden = true;
+  $("liste-documents").hidden = false;
+  $("retour-documents").hidden = true;
+  connexion.envoyer({ type: "documents" });
+}
+
+function lireDocument(chemin) {
+  documentOuvert = chemin;
+  connexion.envoyer({ type: "lire_document", chemin });
+}
+
+function surDocuments(message) {
+  if ($("panneau-documents").hidden) return;
+  if (message.type === "documents_changes") {
+    if (documentOuvert === null) connexion.envoyer({ type: "documents" });
+    else lireDocument(documentOuvert);
+  } else if (message.type === "liste_documents") {
+    if (documentOuvert === null) rendreListeDocuments(document, $("liste-documents"), message, lireDocument);
+  } else if (message.chemin === documentOuvert) {
+    rendreDocument(document, $("lecture-document"), message);
+    $("liste-documents").hidden = true;
+    $("lecture-document").hidden = false;
+    $("retour-documents").hidden = false;
+    $("panneau-documents").scrollTop = 0;
+  }
+}
+
+$("retour-documents").addEventListener("click", montrerLaListe);
+
 // --- Les panneaux -----------------------------------------------------------------
 
 function ouvrirParametres() {
@@ -181,6 +249,7 @@ function ouvrirPanneau(panneau) {
   panneau.hidden = false;
   panneau.scrollTop = 0;
   if (panneau === $("panneau-historique")) rendreHistorique(document, $("liste-historique"), etat.historique);
+  else if (panneau === $("panneau-documents")) montrerLaListe();
   else ouvrirParametres();
 }
 
@@ -189,9 +258,11 @@ function fermerPanneaux() {
   galeries = [];
   $("panneau-historique").hidden = true;
   $("panneau-parametres").hidden = true;
+  $("panneau-documents").hidden = true;
 }
 
 $("ouvrir-historique").addEventListener("click", () => ouvrirPanneau($("panneau-historique")));
+$("ouvrir-documents").addEventListener("click", () => ouvrirPanneau($("panneau-documents")));
 $("ouvrir-parametres").addEventListener("click", () => ouvrirPanneau($("panneau-parametres")));
 for (const bouton of document.querySelectorAll(".panneau .fermer")) {
   bouton.addEventListener("click", fermerPanneaux);

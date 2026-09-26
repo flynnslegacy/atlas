@@ -89,6 +89,13 @@ class Note:
     annonce: str
 
 
+@dataclass(frozen=True)
+class Confirmation(Note):
+    """Dans le flux d'une réponse : Atlas demande à David de confirmer une action (N3) ;
+    `annonce` est la question (« Je supprime le document X. Tu confirmes ? »), dite comme
+    une note."""
+
+
 class ErreurCerveau(Exception):
     """Le cerveau n'a pas pu répondre. Le message est en français, prêt à être dit."""
 

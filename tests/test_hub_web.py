@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 
 import pytest
@@ -78,6 +79,93 @@ def test_une_question_tapee_porte_l_identifiant_de_sa_page(regie, page):
         ws.send_json({"type": "saisie", "texte": ""})  # sa réponse prouve que tout est traité
         ws.receive_json()
     assert regie.saisies == ["quelle heure est-il"] and regie.pages == [page]
+
+
+# --- les documents et la confirmation ----------------------------------------------
+
+OFFRE = "# Offre de lancement\n\nTrois formules pour les premiers clients.\n"
+
+
+@pytest.fixture
+def memoire(regie, monkeypatch, tmp_path):
+    dossier = tmp_path / "memoire"
+    config = replace(hub._config, web_cle=CLE, cerveau="claude", memoire_dossier=dossier)
+    monkeypatch.setattr(hub, "_config", config)
+    monkeypatch.setattr(hub, "DOSSIER_CERVEAU", tmp_path / "cerveau")
+    return dossier
+
+
+def test_une_page_liste_puis_lit_les_documents(memoire):
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        hub._outils.memoire.ecrire_document("offre-de-lancement", OFFRE)
+        ws.send_json({"type": "documents"})
+        liste = ws.receive_json()
+        ws.send_json({"type": "lire_document", "chemin": "documents/offre-de-lancement.md"})
+        document = ws.receive_json()
+        ws.send_json({"type": "lire_document", "chemin": "documents/absent.md"})
+        absent = ws.receive_json()
+    assert (liste["type"], liste["disponible"]) == ("liste_documents", True)
+    [info] = liste["documents"]
+    assert (info["chemin"], info["titre"], info["resume"]) == (
+        "documents/offre-de-lancement.md",
+        "Offre de lancement",
+        "Trois formules pour les premiers clients.",
+    )
+    assert re.fullmatch(r"\d{1,2}(er)? \w+ \d{4}, \d{1,2} h \d{2}", info["modifie"])
+    assert document == {
+        "type": "document",
+        "chemin": "documents/offre-de-lancement.md",
+        "titre": "Offre de lancement",
+        "contenu": OFFRE,
+        "erreur": None,
+    }
+    assert (absent["contenu"], absent["erreur"]) == ("", "documents/absent.md n'existe pas.")
+
+
+def test_une_page_ne_lit_pas_une_fiche_par_le_panneau_des_documents(memoire):
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "lire_document", "chemin": "profil.md"})
+        erreur = ws.receive_json()
+    assert (erreur["type"], erreur["code"]) == ("erreur", "message_invalide")
+
+
+def test_sans_memoire_la_page_le_sait(regie, monkeypatch):
+    monkeypatch.setattr(hub, "_config", replace(hub._config, web_cle=CLE, cerveau="bouchon"))
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "documents"})
+        liste = ws.receive_json()
+        ws.send_json({"type": "lire_document", "chemin": "documents/offre-de-lancement.md"})
+        document = ws.receive_json()
+    assert liste == {"type": "liste_documents", "disponible": False, "documents": []}
+    assert document["erreur"] == "La mémoire n'est pas disponible."
+
+
+class _Attente:
+    def __init__(self, en_attente: bool) -> None:
+        self.en_attente = en_attente
+
+
+class _Outils:
+    def __init__(self, en_attente: bool) -> None:
+        self.confirmations = _Attente(en_attente)
+
+
+@pytest.mark.parametrize(("en_attente", "saisies"), [(True, ["oui", "non"]), (False, [])])
+def test_les_boutons_repondent_comme_une_saisie_de_leur_page(
+    regie, monkeypatch, en_attente, saisies
+):
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        ws.send_json({"type": "authentification", "cle": CLE, "page": "iphone-1"})
+        [ws.receive_json() for _ in range(3)]
+        monkeypatch.setattr(hub, "_outils", _Outils(en_attente))
+        ws.send_json({"type": "confirmer", "oui": True})
+        ws.send_json({"type": "confirmer", "oui": False})
+        ws.send_json({"type": "saisie", "texte": ""})  # sa réponse prouve que tout est traité
+        ws.receive_json()
+    assert regie.saisies == saisies and regie.pages == ["iphone-1"] * len(saisies)
 
 
 def test_une_mauvaise_cle_ferme_la_connexion(regie):

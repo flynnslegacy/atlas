@@ -12,7 +12,7 @@ from test_session_web import (
     FauxPlanificateur,
 )
 
-from atlas_core.cerveau import RECHERCHE, ErreurCerveau, Note
+from atlas_core.cerveau import RECHERCHE, Confirmation, ErreurCerveau, Note
 from atlas_core.protocole import Dire, Erreur, Etat, FinEnonce, Interruption, Reveil
 from atlas_core.protocole_web import Reponse
 from atlas_core.session import PHRASE_ATTENTE, Session
@@ -299,6 +299,25 @@ async def test_sans_voix_une_note_ne_s_annonce_qu_en_texte():
     await _attendre(lambda: [e.valeur for e in d.de(Etat)][-1:] == ["repos"])
     assert _dits(c) == []
     assert [r.texte for r in d.de(Reponse)] == [PAUL.annonce, "Voilà."]
+    await s.fermer()
+
+
+QUESTION = Confirmation("Je supprime le document Offre de lancement. Tu confirmes ?")
+
+
+async def test_une_confirmation_se_dit_comme_une_note_et_sans_voix_s_affiche():
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, CerveauScript("D'accord. ", QUESTION))
+    await s.sur_saisie("Supprime l'offre.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+    assert _dits(c) == ["D'accord.", QUESTION.annonce]
+    await s.fermer()
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, CerveauScript(QUESTION), avec_voix=lambda: False)
+    await s.sur_saisie("Supprime l'offre.")
+    await _attendre(lambda: [e.valeur for e in d.de(Etat)][-1:] == ["repos"])
+    assert _dits(c) == []
+    assert [r.texte for r in d.de(Reponse)] == [QUESTION.annonce]
     await s.fermer()
 
 

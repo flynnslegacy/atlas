@@ -15,7 +15,17 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel
 
 from .protocole import Erreur, Etat
-from .protocole_web import Echange, Historique, Latences, Muet, Niveau, Question, Reponse
+from .protocole_web import (
+    AttenteConfirmation,
+    Echange,
+    FinConfirmation,
+    Historique,
+    Latences,
+    Muet,
+    Niveau,
+    Question,
+    Reponse,
+)
 
 TAILLE_HISTORIQUE = 50
 # Une page qui n'arrive pas à suivre perd des niveaux (l'orbe saute une image), jamais
@@ -72,13 +82,17 @@ class Diffuseur:
         self._en_cours: Echange | None = None
         self._dernier_etat = Etat(valeur="repos")
         self._muet = False
+        self._confirmation: AttenteConfirmation | None = None  # la question qui attend
         self._heure = heure or _heure_locale
 
     def abonner(self, envoyer: Envoyer) -> Abonnement:
-        """Abonne une page : elle reçoit d'abord l'historique, le mode muet et l'état courant."""
+        """Abonne une page : elle reçoit d'abord l'historique, le mode muet et l'état courant,
+        puis la question qui attend le « oui » de David, s'il y en a une."""
         abonnement = Abonnement(self, envoyer)
         for msg in (self.historique(), Muet(actif=self._muet), self._dernier_etat):
             abonnement.deposer(msg)
+        if self._confirmation is not None:
+            abonnement.deposer(self._confirmation)
         self._abonnements.append(abonnement)
         return abonnement
 
@@ -101,6 +115,10 @@ class Diffuseur:
                 self._en_cours = None
         elif isinstance(msg, Muet):
             self._muet = msg.actif
+        elif isinstance(msg, AttenteConfirmation):
+            self._confirmation = msg
+        elif isinstance(msg, FinConfirmation):
+            self._confirmation = None
         elif isinstance(msg, Question):
             self._en_cours = Echange(heure=self._heure(), source=msg.source, question=msg.texte)
             self._echanges.append(self._en_cours)

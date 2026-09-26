@@ -6,12 +6,21 @@ from pydantic import ValidationError
 from atlas_core.protocole import Etat
 from atlas_core.protocole_web import (
     LONGUEUR_MAX_SAISIE,
+    AttenteConfirmation,
     Authentification,
+    Confirmer,
+    DemandeDocuments,
+    Document,
+    DocumentsChanges,
     Echange,
+    FinConfirmation,
     Historique,
     Latences,
+    LireDocument,
+    ListeDocuments,
     Muet,
     Niveau,
+    ResumeDocument,
     Saisie,
     decoder_message_page,
 )
@@ -85,3 +94,65 @@ def test_l_etat_du_protocole_audio_sert_aussi_aux_pages():
         "type": "etat",
         "valeur": "parole",
     }
+
+
+def test_les_messages_des_documents_et_de_la_confirmation_se_decodent():
+    assert decoder_message_page('{"type":"documents"}') == DemandeDocuments()
+    chemin = "documents/offre-de-lancement.md"
+    assert decoder_message_page(
+        json.dumps({"type": "lire_document", "chemin": chemin})
+    ) == LireDocument(chemin=chemin)
+    assert decoder_message_page('{"type":"confirmer","oui":true}') == Confirmer(oui=True)
+    assert decoder_message_page('{"type":"confirmer","oui":false}') == Confirmer(oui=False)
+
+
+@pytest.mark.parametrize(
+    "chemin",
+    [
+        "profil.md",
+        "personnes/paul-durand.md",
+        "documents/../profil.md",
+        "documents/Offre.md",
+        "documents/offre.txt",
+        "../documents/offre.md",
+        "documents/" + "a" * 61 + ".md",
+    ],
+)
+def test_une_page_ne_lit_qu_un_document(chemin):
+    with pytest.raises(ValueError):
+        decoder_message_page(json.dumps({"type": "lire_document", "chemin": chemin}))
+
+
+def test_confirmer_demande_oui_ou_non():
+    for brut in ('{"type":"confirmer"}', '{"type":"confirmer","oui":"peut-être"}'):
+        with pytest.raises(ValueError):
+            decoder_message_page(brut)
+
+
+def test_les_messages_des_documents_et_de_la_confirmation_vers_les_pages():
+    resume = ResumeDocument(
+        chemin="documents/offre-de-lancement.md",
+        titre="Offre de lancement",
+        resume="Trois formules.",
+        modifie="25 septembre 2026, 21 h 14",
+    )
+    assert json.loads(ListeDocuments(documents=[resume]).model_dump_json()) == {
+        "type": "liste_documents",
+        "disponible": True,
+        "documents": [resume.model_dump()],
+    }
+    assert ListeDocuments(disponible=False).model_dump() == {
+        "type": "liste_documents",
+        "disponible": False,
+        "documents": [],
+    }
+    assert Document(chemin="documents/a.md", titre="A", contenu="# A\n").model_dump() == {
+        "type": "document",
+        "chemin": "documents/a.md",
+        "titre": "A",
+        "contenu": "# A\n",
+        "erreur": None,
+    }
+    assert DocumentsChanges().model_dump() == {"type": "documents_changes"}
+    assert AttenteConfirmation(texte="Q ?").model_dump() == {"type": "confirmation", "texte": "Q ?"}
+    assert FinConfirmation(texte="F.").model_dump() == {"type": "confirmation_finie", "texte": "F."}

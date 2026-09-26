@@ -7,6 +7,7 @@
   <title>Atlas</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="documents.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -27,6 +28,11 @@
         <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/>
       </svg>
     </button>
+    <button type="button" class="icone" id="ouvrir-documents" aria-label="Documents">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path fill="currentColor" d="M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm7 1.5V9h5.5L13 3.5ZM8 13v2h8v-2H8Zm0 4v2h8v-2H8Z"/>
+      </svg>
+    </button>
     <button type="button" class="icone" id="ouvrir-historique" aria-label="Historique">☰</button>
     <button type="button" class="icone" id="ouvrir-parametres" aria-label="Paramètres">⚙</button>
   </header>
@@ -37,6 +43,14 @@
   <section id="sous-titres" aria-live="polite">
     <p id="st-question"></p>
     <p id="st-reponse"></p>
+  </section>
+
+  <section id="confirmation" role="alertdialog" aria-live="assertive" aria-label="Confirmation" hidden>
+    <p id="texte-confirmation"></p>
+    <div id="boutons-confirmation">
+      <button type="button" id="confirmer">Confirmer</button>
+      <button type="button" id="annuler-confirmation">Annuler</button>
+    </div>
   </section>
 
   <form id="saisie" autocomplete="off">
@@ -50,6 +64,16 @@
       <button type="button" class="icone fermer" aria-label="Fermer">✕</button>
     </header>
     <ol id="liste-historique"></ol>
+  </section>
+
+  <section id="panneau-documents" class="panneau" aria-label="Documents" hidden>
+    <header>
+      <button type="button" class="icone" id="retour-documents" aria-label="Retour à la liste" hidden>←</button>
+      <h2>Documents</h2>
+      <button type="button" class="icone fermer" aria-label="Fermer">✕</button>
+    </header>
+    <div id="liste-documents"></div>
+    <article id="lecture-document" hidden></article>
   </section>
 
   <section id="panneau-parametres" class="panneau" aria-label="Paramètres" hidden>

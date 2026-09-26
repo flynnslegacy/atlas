@@ -21,8 +21,10 @@ from atlas_audio.connexion import PeripheriqueEnPanne
 from .cerveau import Cerveau, CerveauBouchon
 from .cerveau_claude import CerveauClaude, options_cerveau, purger_cles_api
 from .config import Config
+from .confirmation import Confirmations
+from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
-from .memoire import Memoire
+from .memoire import ErreurMemoire, Memoire
 from .outils_memoire import OutilsMemoire
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
@@ -34,7 +36,21 @@ from .protocole_voix import (
     decoder_message_voix,
     verifier_bloc_page,
 )
-from .protocole_web import Authentification, Muet, Saisie, decoder_message_page
+from .protocole_web import (
+    AttenteConfirmation,
+    Authentification,
+    Confirmer,
+    DemandeDocuments,
+    Document,
+    DocumentsChanges,
+    FinConfirmation,
+    LireDocument,
+    ListeDocuments,
+    Muet,
+    ResumeDocument,
+    Saisie,
+    decoder_message_page,
+)
 from .regie import Regie
 from .session import Session, sans_destinataire
 from .synthese import ClientSynthese
@@ -48,6 +64,7 @@ _config = Config.depuis_environnement()
 _reglages = lire_reglages()
 _http: httpx.AsyncClient | None = None
 _cerveau: Cerveau | None = None
+_outils: OutilsMemoire | None = None  # la mémoire et ses outils, le temps de la vie du Core
 
 RACINE_WEB = Path(__file__).resolve().parent.parent / "atlas_web"
 # Le dossier de travail de Claude : vide, à lui seul, hors de tout projet.
@@ -57,6 +74,7 @@ FERMETURE_CLE_ABSENTE = 4000
 FERMETURE_NON_AUTORISE = 4401
 FERMETURE_ORIGINE = 1008  # « policy violation », avant même d'accepter la connexion
 FERMETURE_PANNE = 1011  # « internal error » : la voix d'une page s'est arrêtée, elle se rebranche
+MEMOIRE_ABSENTE = "La mémoire n'est pas disponible."
 
 
 def creer_cerveau(config: Config) -> Cerveau:
@@ -78,17 +96,57 @@ def creer_cerveau(config: Config) -> Cerveau:
 
 def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
     """La mémoire d'Atlas et ses outils ; None si elle ne s'ouvre pas (Atlas marche alors
-    sans). Les clés du Core sont des secrets qu'elle refuse d'écrire."""
+    sans). Les clés du Core sont des secrets qu'elle refuse d'écrire. Les pages sont
+    prévenues quand un document change, et de la question qui attend le « oui » de David."""
     secrets = [config.web_cle, config.audio_cle, os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")]
     memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
-    return OutilsMemoire(memoire) if memoire is not None else None
+    if memoire is None:
+        return None
+
+    def publier(msg) -> None:
+        _regie.diffuseur.publier(msg)
+
+    confirmations = Confirmations(
+        sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
+        sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
+    )
+    return OutilsMemoire(memoire, confirmations, lambda: publier(DocumentsChanges()))
+
+
+async def _liste_documents() -> ListeDocuments:
+    if _outils is None:
+        return ListeDocuments(disponible=False)
+    infos = await asyncio.to_thread(_outils.memoire.documents)
+    return ListeDocuments(
+        documents=[
+            ResumeDocument(
+                chemin=info.chemin,
+                titre=info.titre,
+                resume=info.resume,
+                modifie=f"{date_en_lettres(info.modifie)}, {heure_en_chiffres(info.modifie)}",
+            )
+            for info in infos
+        ]
+    )
+
+
+async def _lire_document(chemin: str) -> Document:
+    if _outils is None:
+        return Document(chemin=chemin, erreur=MEMOIRE_ABSENTE)
+    try:
+        contenu = await asyncio.to_thread(_outils.memoire.lire, chemin)
+    except (ErreurMemoire, OSError) as e:
+        return Document(chemin=chemin, erreur=str(e))
+    titre = contenu.split("\n", 1)[0].lstrip("#").strip()
+    return Document(chemin=chemin, titre=titre, contenu=contenu)
 
 
 @asynccontextmanager
 async def _cycle_de_vie(app: FastAPI):
-    global _http, _cerveau
+    global _http, _cerveau, _outils
     _http = httpx.AsyncClient()
     _cerveau = creer_cerveau(_config)
+    _outils = _cerveau.outils if isinstance(_cerveau, CerveauClaude) else None
     try:
         yield
     finally:
@@ -97,7 +155,7 @@ async def _cycle_de_vie(app: FastAPI):
         try:
             await _cerveau.fermer()
         finally:
-            _cerveau = None
+            _cerveau = _outils = None
             await _http.aclose()
             _http = None
 
@@ -294,6 +352,14 @@ async def ws_web(ws: WebSocket) -> None:
                 await _regie.saisie(msg.texte, demande.page)
             elif isinstance(msg, Muet):
                 await _regie.basculer_muet(msg.actif)
+            elif isinstance(msg, DemandeDocuments):
+                abonnement.envoyer_prive(await _liste_documents())
+            elif isinstance(msg, LireDocument):
+                abonnement.envoyer_prive(await _lire_document(msg.chemin))
+            elif isinstance(msg, Confirmer):
+                # Comme taper « oui » ou « non » depuis cette page ; trop tard, rien.
+                if _outils is not None and _outils.confirmations.en_attente:
+                    await _regie.saisie("oui" if msg.oui else "non", demande.page)
     except WebSocketDisconnect:
         pass
     finally:

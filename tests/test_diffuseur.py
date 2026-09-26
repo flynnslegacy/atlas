@@ -2,7 +2,16 @@ import asyncio
 
 from atlas_core.diffuseur import RETARD_MAX_NIVEAUX, Diffuseur
 from atlas_core.protocole import Erreur, Etat
-from atlas_core.protocole_web import Historique, Latences, Muet, Niveau, Question, Reponse
+from atlas_core.protocole_web import (
+    AttenteConfirmation,
+    FinConfirmation,
+    Historique,
+    Latences,
+    Muet,
+    Niveau,
+    Question,
+    Reponse,
+)
 
 
 class Page:
@@ -210,3 +219,21 @@ async def test_une_page_en_panne_se_retire_seule():
     await _laisser_passer()
     # La file ne doit pas avoir grossi (pas de nouveaux messages)
     assert abonnement._file.qsize() == taille_initiale
+
+
+async def test_une_page_ouverte_pendant_une_confirmation_la_recoit_aussi():
+    d = _diffuseur()
+    d.publier(AttenteConfirmation(texte="Je supprime le document X. Tu confirmes ?"))
+    page = Page()
+    abonnement = d.abonner(page.envoyer)
+    await _laisser_passer()
+    assert page.types() == ["historique", "muet", "etat", "confirmation"]
+    d.publier(FinConfirmation(texte="Rien n'a été supprimé."))
+    tard = Page()
+    abonnement_tard = d.abonner(tard.envoyer)
+    await _laisser_passer()
+    assert tard.types() == ["historique", "muet", "etat"]
+    assert page.types()[-1] == "confirmation_finie"
+    assert d.historique().echanges == []
+    await abonnement.fermer()
+    await abonnement_tard.fermer()

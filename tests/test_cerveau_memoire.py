@@ -7,9 +7,11 @@ import pytest
 from test_cerveau_claude import (
     BLOQUE,
     MOMENT,
+    EnAvance,
     Fabrique,
     FauxClientClaude,
     Temps,
+    appel_atlas,
     debut_texte,
     delta,
     fin,
@@ -38,6 +40,7 @@ class AppelOutil:
     def __init__(self, outils: OutilsMemoire, nom: str, **arguments) -> None:
         self._outil = next(o for o in outils.outils if o.name == nom)
         self._arguments = arguments
+        self.avant = appel_atlas(nom)
 
     async def __call__(self) -> None:
         await self._outil.handler(self._arguments)
@@ -181,6 +184,34 @@ async def test_une_note_d_une_reponse_coupee_par_une_autre_question_passe_a_cell
     assert await _tout(cerveau, "deux") == [Note(ANNONCE_PROFIL), "Seconde."]
     await tache
     assert premiere == ["Première "]
+
+
+async def test_une_ecriture_executee_en_avance_s_annonce_apres_le_texte_qui_la_precede(outils):
+    ecriture = AppelOutil(
+        outils, "memoire_ecrire", chemin="profil.md", contenu=PROFIL + "\nDeux enfants.\n"
+    )
+    tour = [
+        debut_texte(),
+        delta("Je note "),
+        delta("tes enfants."),
+        EnAvance(ecriture),
+        debut_texte(),
+        delta("Autre chose ?"),
+        fin(),
+    ]
+    fragments = await _tout(_cerveau(outils, FauxClientClaude(tour)), "Note mes enfants.")
+    assert fragments == ["Je note ", "tes enfants.", Note(ANNONCE_PROFIL), " Autre chose ?"]
+
+
+async def test_une_ecriture_dont_l_appel_n_est_pas_lu_s_annonce_en_fin_de_reponse(outils):
+    outil = next(o for o in outils.outils if o.name == "memoire_ecrire")
+
+    async def ecrire_sans_appel_visible() -> None:  # aucun message de Claude ne l'appelle
+        await outil.handler({"chemin": "profil.md", "contenu": PROFIL + "\nDeux enfants.\n"})
+
+    tour = [debut_texte(), delta("D'accord."), ecrire_sans_appel_visible, fin()]
+    fragments = await _tout(_cerveau(outils, FauxClientClaude(tour)), "Note mes enfants.")
+    assert fragments == ["D'accord.", Note(ANNONCE_PROFIL)]
 
 
 async def test_sans_memoire_le_cerveau_ne_recoit_ni_amorcage_ni_outils():

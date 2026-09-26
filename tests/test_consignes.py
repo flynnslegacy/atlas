@@ -81,6 +81,27 @@ def test_avec_la_memoire_les_consignes_gardent_tout_et_disent_comment_la_tenir()
         assert attendu in texte, attendu
 
 
+def test_avec_la_memoire_les_consignes_disent_les_documents_et_la_suppression():
+    texte = CONSIGNES_AVEC_MEMOIRE.lower()
+    for attendu in (
+        "document_ecrire",
+        "quand david te demande un document",
+        "se relit sans retouche",
+        "rien d'inventé",
+        "jamais l'écrire sans qu'il le demande",
+        "sans le lire",
+        "relis-le avec memoire_lire, puis réécris-le en entier",
+        "le seul endroit où tu écris en markdown",
+        "memoire_supprimer",
+        "atlas demande à david de confirmer",
+        "ne dis jamais que c'est fait",
+        "« [confirmé par david : …] »",
+    ):
+        assert attendu in texte, attendu
+    assert "Tu ne peux rien faire d'autre que réfléchir et chercher sur le web." in CONSIGNES
+    assert "document" not in CONSIGNES.lower()
+
+
 def test_la_demande_de_resume_ne_fait_rien_ecrire_et_admet_rien():
     assert DEMANDE_RESUME.startswith("[Fin de la conversation]")
     assert "n'écris rien dans ta mémoire" in DEMANDE_RESUME

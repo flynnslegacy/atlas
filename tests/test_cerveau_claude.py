@@ -66,6 +66,21 @@ def appel_recherche(identifiant: str = "t1") -> AssistantMessage:
     return AssistantMessage(content=[bloc], model="claude-sonnet-5")
 
 
+def appel_atlas(nom: str, identifiant: str = "a1") -> AssistantMessage:
+    """Le message complet de Claude qui appelle un outil d'Atlas : il précède l'exécution."""
+    bloc = ToolUseBlock(id=identifiant, name=f"mcp__atlas__{nom}", input={})
+    return AssistantMessage(content=[bloc], model="claude-sonnet-5")
+
+
+class EnAvance:
+    """Le vrai SDK exécute un outil d'Atlas dès que le CLI le demande, pendant que la réponse
+    attend encore dans sa file : l'outil tourne avant que le lecteur n'arrive au texte qui
+    précède l'appel. À sa place dans le flux, il ne reste que le message qui l'appelle."""
+
+    def __init__(self, appel) -> None:
+        self.appel = appel
+
+
 def erreur_assistant(code: str, texte: str = "API Error") -> AssistantMessage:
     return AssistantMessage(content=[TextBlock(text=texte)], model="claude-sonnet-5", error=code)
 
@@ -129,8 +144,13 @@ class FauxClientClaude:
         self._reveil = asyncio.Event()
 
     async def receive_response(self):
+        for message in list(self._tour):
+            if isinstance(message, EnAvance):
+                await message.appel()
         while self._tour:
             message = self._tour.pop(0)
+            if isinstance(message, EnAvance):
+                message = message.appel.avant
             if message is BLOQUE:
                 self._en_attente_du_reveil = True
                 try:
@@ -141,6 +161,9 @@ class FauxClientClaude:
             if isinstance(message, BaseException):
                 raise message
             if callable(message):
+                if (avant := getattr(message, "avant", None)) is not None:
+                    yield avant  # le message complet de Claude qui appelle l'outil, d'abord
+                    await asyncio.sleep(0)
                 await message()  # un outil que Claude appelle : le SDK l'exécute
                 continue
             yield message

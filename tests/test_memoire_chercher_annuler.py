@@ -99,7 +99,7 @@ def test_chercher_ignore_ce_qui_n_est_pas_une_fiche_permise(memoire, tmp_path):
 def test_annuler_retire_la_derniere_note_et_rend_son_titre(memoire):
     memoire.ecrire("personnes/paul-durand.md", PAUL)
     memoire.ecrire("personnes/elise-martin.md", ELISE)
-    assert memoire.annuler() == "Élise Martin"
+    assert memoire.annuler().titre == "Élise Martin"
     assert not (memoire.racine / "personnes" / "elise-martin.md").exists()
     assert memoire.lire("personnes/paul-durand.md") == PAUL
     assert git(memoire, "log", "-1", "--format=%ae|%s").strip() == (
@@ -117,8 +117,8 @@ def test_annuler_une_modification_rend_la_version_d_avant(memoire):
 def test_redire_annuler_remonte_d_une_note(memoire):
     memoire.ecrire("personnes/paul-durand.md", PAUL)
     memoire.ecrire("personnes/elise-martin.md", ELISE)
-    assert memoire.annuler() == "Élise Martin"
-    assert memoire.annuler() == "Paul Durand"
+    assert memoire.annuler().titre == "Élise Martin"
+    assert memoire.annuler().titre == "Paul Durand"
     with pytest.raises(ErreurMemoire, match="plus de note à retirer"):
         memoire.annuler()
 
@@ -142,7 +142,7 @@ def test_ni_le_journal_ni_les_commits_de_david_ne_s_annulent(memoire):
         "Journal : 25 septembre 2026",
         auteur="Atlas|atlas@atlas.local",
     )
-    assert memoire.annuler() == "Paul Durand"
+    assert memoire.annuler().titre == "Paul Durand"
     assert (memoire.racine / "projets" / "site-web.md").exists()
     assert (memoire.racine / "journal" / "2026-09-25.md").exists()
 
