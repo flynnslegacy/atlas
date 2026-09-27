@@ -138,6 +138,14 @@ def test_le_poste_ajoute_ses_outils_chacun_a_son_niveau(outils):
     assert outils.avec_poste
 
 
+def test_ouvrir_demande_a_claude_le_nom_de_fichier_de_l_app(outils):
+    # macOS ouvre une app par le nom de son fichier (Calendar.app, Preview.app), pas par le
+    # nom qu'il affiche en français (Calendrier, Aperçu).
+    ouvrir = next(o for o in outils.declarations if o.nom == "mac_ouvrir")
+    for attendu in ("nom de son fichier", "Calendar", "Preview", "System Settings"):
+        assert attendu in ouvrir.description, attendu
+
+
 def test_sans_poste_aucun_outil_du_mac(tmp_path):
     outils = OutilsMemoire(Memoire.ouvrir(tmp_path / "memoire"))
     assert not any(o.nom.startswith("mac_") for o in outils.declarations)

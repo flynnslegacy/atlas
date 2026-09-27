@@ -29,8 +29,10 @@ TEMPS_ECOULE = "Le temps de la mission est écoulé."
 FAIT = "Fait."
 
 OUVRIR = (
-    "Ouvre une app du Mac de David par son simple nom (app), ou une page web en http(s) "
-    "(adresse), quand David te le demande. Atlas l'annonce : ne l'annonce pas toi-même."
+    "Ouvre une app du Mac de David (app), par le nom de son fichier, souvent en anglais même "
+    "sur un Mac en français (Calendar, Preview, System Settings, Music, Reminders), ou une "
+    "page web en http(s) (adresse), quand David te le demande. Atlas l'annonce : ne l'annonce "
+    "pas toi-même."
 )
 REGARDER = (
     "Regarde l'écran du Mac de David, seulement quand il te demande quelque chose sur son "
