@@ -69,6 +69,17 @@ def test_la_cle_du_poste_vient_de_l_environnement(monkeypatch):
     assert Config.depuis_environnement().poste_cle == ""
 
 
+def test_la_duree_d_une_mission_vient_de_l_environnement(monkeypatch):
+    monkeypatch.delenv("ATLAS_MISSION_MIN", raising=False)
+    assert Config.depuis_environnement().mission_min == 3.0
+    monkeypatch.setenv("ATLAS_MISSION_MIN", "5")
+    assert Config.depuis_environnement().mission_min == 5.0
+    for brute in ("0", "31", "vite"):
+        monkeypatch.setenv("ATLAS_MISSION_MIN", brute)
+        with pytest.raises(ValueError, match="ATLAS_MISSION_MIN"):
+            Config.depuis_environnement()
+
+
 def test_les_reglages_de_la_voix_des_pages_ont_les_valeurs_du_spike(monkeypatch):
     monkeypatch.delenv("ATLAS_VOIX_MARGE_S", raising=False)
     monkeypatch.delenv("ATLAS_VOIX_BARGEIN_DBFS", raising=False)

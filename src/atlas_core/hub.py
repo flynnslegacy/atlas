@@ -26,6 +26,7 @@ from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
 from .memoire import ErreurMemoire, Memoire
 from .outils_memoire import OutilsMemoire
+from .outils_poste import Missions
 from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
@@ -111,7 +112,12 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
         sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
         sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
     )
-    return OutilsMemoire(memoire, confirmations, lambda: publier(DocumentsChanges()))
+    # Le poste du Mac, si sa clé est configurée : ses outils n'existent pas sans elle.
+    poste = _poste if config.poste_cle else None
+    missions = Missions(duree_s=config.mission_min * 60)
+    return OutilsMemoire(
+        memoire, confirmations, lambda: publier(DocumentsChanges()), poste=poste, missions=missions
+    )
 
 
 async def _liste_documents() -> ListeDocuments:

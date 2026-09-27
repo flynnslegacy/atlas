@@ -201,6 +201,15 @@ def test_la_memoire_previent_les_pages(monkeypatch, tmp_path):
     ]
 
 
+def test_avec_la_cle_du_poste_le_cerveau_recoit_les_outils_du_mac(tmp_path):
+    base = replace(hub._config, memoire_dossier=tmp_path / "memoire", mission_min=5.0)
+    avec = hub.ouvrir_la_memoire(replace(base, poste_cle="cle-du-poste"))
+    assert avec.avec_poste and "mcp__atlas__mac_mission" in avec.noms
+    assert avec.missions.duree_s == 300
+    sans = hub.ouvrir_la_memoire(replace(base, poste_cle=""))
+    assert not sans.avec_poste and not any("mac_" in nom for nom in sans.noms)
+
+
 def test_le_core_garde_les_outils_du_cerveau_le_temps_de_sa_vie(monkeypatch, tmp_path):
     config = replace(hub._config, cerveau="claude", memoire_dossier=tmp_path / "memoire")
     monkeypatch.setattr(hub, "_config", config)
