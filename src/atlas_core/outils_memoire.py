@@ -107,9 +107,10 @@ class OutilsMemoire(ServeurAtlas):
             confirmations or Confirmations(),
         )
 
-    def fin_du_tour(self) -> None:
-        """La réponse est finie : une mission ne lui survit pas."""
-        self.missions.fermer("Mission terminée.")
+    def fin_du_tour(self, arretee: bool = False) -> None:
+        """La réponse est finie : une mission ne lui survit pas. `arretee` : la réponse a été
+        coupée (David a parlé, ou touché « Stop »)."""
+        self.missions.fermer("Mission arrêtée." if arretee else "Mission terminée.")
 
     def nouvelle_phrase(self) -> None:
         """David parle : la mission en cours s'arrête net."""

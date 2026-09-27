@@ -188,8 +188,8 @@ class CerveauClaude:
             finally:
                 self._dernier_echange = self._horloge()
                 self._fin_conversation = self._maintenant()
-                if self._outils is not None:
-                    self._outils.fin_du_tour()  # une mission ne survit pas à sa réponse
+                if self._outils is not None:  # une mission ne survit pas à sa réponse
+                    self._outils.fin_du_tour(arretee=asyncio.current_task().cancelling() > 0)
                 if self._tour_ouvert and self._client is not None:
                     # Réponse lâchée en route (ou coupée par une erreur) : le tour doit
                     # finir chez Claude avant la question suivante, sans retenir la session.

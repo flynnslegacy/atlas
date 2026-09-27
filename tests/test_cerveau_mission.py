@@ -3,6 +3,7 @@ la moindre phrase de David l'arrête. Avec la doublure du SDK, un faux poste et 
 mémoire sur un dépôt temporaire."""
 
 import asyncio
+import contextlib
 
 import pytest
 from test_cerveau_claude import (
@@ -126,6 +127,33 @@ async def test_la_moindre_phrase_de_david_arrete_la_mission(outils, pages):
     await en_route
     assert pages.fins == ["Mission arrêtée."]
     assert client.questions[-1].endswith("Stop.")
+
+
+async def test_une_reponse_coupee_par_sa_session_arrete_la_mission(outils, pages):
+    # « Hey Atlas », une coupure à la voix, ou le bouton « Stop » d'une page au micro allumé :
+    # la session annule sa réponse avant même que la phrase suivante n'arrive.
+    pilotage = [AppelOutil(outils, "mac_capture"), BLOQUE, delta("jamais"), fin()]
+    client = FauxClientClaude(_demande(outils), pilotage, reponse("D'accord, j'arrête."))
+    cerveau = _cerveau(outils, client)
+    await _tout(cerveau, "Écris bonjour dans une note.")
+
+    async def lire() -> None:
+        async with contextlib.aclosing(cerveau.repondre("Oui.")) as fragments:
+            async for _ in fragments:
+                pass
+
+    en_route = asyncio.create_task(lire())
+    for _ in range(200):
+        if outils.missions.en_cours is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert outils.missions.en_cours == NOTE
+    en_route.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await en_route
+    assert pages.fins == ["Mission arrêtée."]
+    assert await _tout(cerveau, "Stop.") == ["D'accord, j'arrête."]
+    assert pages.fins == ["Mission arrêtée."]
 
 
 async def test_une_panne_de_claude_en_pleine_mission_la_ferme(outils, pages):
