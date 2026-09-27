@@ -40,7 +40,7 @@ from claude_agent_sdk import (
 )
 
 from .cerveau import RECHERCHE, ErreurCerveau, Note, Recherche
-from .consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE, DEMANDE_RESUME, RIEN, ligne_de_date
+from .consignes import DEMANDE_RESUME, RIEN, consignes_pour, ligne_de_date
 from .outils import SERVEUR
 from .outils_memoire import OutilsMemoire
 
@@ -68,13 +68,12 @@ _ERREURS_ASSISTANT = {
 def options_cerveau(
     modele: str, dossier: Path, outils: OutilsMemoire | None = None
 ) -> ClaudeAgentOptions:
-    """Claude enfermé dans son rôle : la recherche web, et les outils de sa mémoire s'il en
-    a une ; aucun réglage ni `CLAUDE.md` de la machine, aucun autre serveur MCP, un
-    dossier de travail vide."""
+    """Claude enfermé dans son rôle : la recherche web, et ses outils s'il en a (mémoire,
+    poste) ; aucun réglage ni `CLAUDE.md` de la machine, aucun autre MCP, un dossier vide."""
     return ClaudeAgentOptions(
         tools=[OUTIL_RECHERCHE],
         allowed_tools=[OUTIL_RECHERCHE, *(outils.noms if outils else [])],
-        system_prompt=CONSIGNES_AVEC_MEMOIRE if outils else CONSIGNES,
+        system_prompt=consignes_pour(outils),
         setting_sources=[],
         mcp_servers={SERVEUR: outils.serveur()} if outils else {},
         strict_mcp_config=True,
@@ -152,6 +151,8 @@ class CerveauClaude:
         return self._outils
 
     async def repondre(self, texte: str) -> AsyncIterator[str | Recherche | Note]:
+        if self._outils is not None:
+            self._outils.nouvelle_phrase()  # David parle : une mission en cours s'arrête net
         if self._echeance is not None and not self._resume_en_cours:
             self._echeance.cancel()  # la conversation continue
             self._echeance = None
@@ -187,6 +188,8 @@ class CerveauClaude:
             finally:
                 self._dernier_echange = self._horloge()
                 self._fin_conversation = self._maintenant()
+                if self._outils is not None:
+                    self._outils.fin_du_tour()  # une mission ne survit pas à sa réponse
                 if self._tour_ouvert and self._client is not None:
                     # Réponse lâchée en route (ou coupée par une erreur) : le tour doit
                     # finir chez Claude avant la question suivante, sans retenir la session.
