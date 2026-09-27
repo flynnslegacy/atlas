@@ -85,9 +85,10 @@ La voix, la régie, les clients audio, la mémoire et les documents ne changent 
 ## 4. Le poste
 
 - **Il se connecte au Core, jamais l'inverse** : comme le client audio, il ouvre `/ws/poste` (réglage
-  `ATLAS_POSTE_URL`, `ws://127.0.0.1:8080/ws/poste` par défaut) et se présente avec sa clé (`ATLAS_POSTE_CLE`, la même
-  dans le `.env` du Core et dans celui du poste). Le Mac n'expose aucun port. Il se reconnecte seul, comme le client
-  audio. Un seul poste à la fois : un nouveau remplace l'ancien.
+  `ATLAS_POSTE_URL`, `ws://127.0.0.1:8080/ws/poste` par défaut). Le poste et le Core se prouvent l'un à l'autre
+  qu'ils connaissent la clé (`ATLAS_POSTE_CLE`, la même dans le `.env` du Core et dans celui du poste), sans jamais
+  l'envoyer : le poste n'obéit qu'au serveur qui la prouve. Le Mac n'expose aucun port. Il se reconnecte seul, comme
+  le client audio. Un seul poste à la fois : un nouveau remplace l'ancien.
 - **Ses actions, et rien d'autre :**
 
 | Action | Arguments | Ce qu'elle fait, sur macOS |
@@ -109,10 +110,15 @@ La voix, la régie, les clients audio, la mémoire et les documents ne changent 
 
 | Sens | Message | Contenu |
 |---|---|---|
-| poste → Core | `bonjour` | `cle` |
-| Core → poste | `pret` | `{}` : la clé est acceptée |
-| Core → poste | `action` | `id`, `nom` (une des six actions), et ses arguments |
-| poste → Core | `resultat` | `id`, `ok`, `erreur` (le message si l'action a échoué), et pour `capturer` : `image` (JPEG en base64), `largeur`, `hauteur` |
+| poste → Core | `bonjour` | `nonce` (tiré au hasard) |
+| Core → poste | `defi` | `nonce`, et `preuve` : un HMAC-SHA256 de la clé sur les deux nonces, qui prouve la clé au poste |
+| poste → Core | `reponse` | `preuve` : le HMAC du poste, qui prouve la clé au Core |
+| Core → poste | `pret` | `{}` : la preuve du poste est acceptée |
+| Core → poste | `action` | `id`, `geste` (`nom`, une des six actions, et ses arguments), `preuve` (signée par la clé de la connexion, tirée des deux nonces) |
+| poste → Core | `resultat` | `id`, `ok`, `erreur` (le message si l'action a échoué), et pour `capturer` : `image` (JPEG en base64), `largeur`, `hauteur` ; `preuve` (signée de même) |
+
+  Le poste n'exécute aucune action non signée, ni une action déjà exécutée (les `id` croissent) ; le Core ignore un
+  résultat non signé.
 
 - **Les délais** : 10 secondes par action, 5 pour `capturer`, attendus par le Core ; passé ce délai, l'action est
   réputée échouée (« Le poste ne répond pas. »).
@@ -169,7 +175,9 @@ La voix, la régie, les clients audio, la mémoire et les documents ne changent 
 
 ## 7. Sécurité et erreurs
 
-- **Le poste n'obéit qu'au Core**, qui se présente par la clé ; il n'ouvre aucun port.
+- **Le poste n'obéit qu'au Core**, qui lui prouve qu'il connaît la clé ; la clé ne circule jamais, et chaque action
+  et chaque résultat portent la preuve de la connexion : un appareil qui répondrait à l'adresse du Core n'obtient ni
+  la clé ni un geste, et un intrus sur le réseau n'en glisse aucun. Le poste n'ouvre aucun port.
 - **Les actions sont fermées et vérifiées des deux côtés** : une app par son simple nom (ni chemin, ni option, ni
   « / »), une adresse `http(s)` seulement, un texte de 2 000 caractères au plus, des touches de la liste fixe, un
   défilement borné, un clic dans les limites de la dernière capture.

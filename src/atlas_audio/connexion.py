@@ -113,6 +113,11 @@ async def _traiter_la_file(client: ClientConnecte, file: asyncio.Queue) -> None:
             await client.sur_message(item)
 
 
+class CleNonProuvee(Exception):
+    """Le serveur n'a pas prouvé qu'il connaît la clé (le poste le vérifie) : ce n'est pas le
+    Core, ou pas avec la même clé."""
+
+
 def _code_de_fermeture(e: BaseException) -> int | None:
     """Le code de fermeture envoyé par le Core, si l'exception en porte un."""
     return getattr(getattr(e, "rcvd", None), "code", None)
@@ -172,7 +177,14 @@ async def boucle_de_connexion(
                 raise
             except Exception as e:  # noqa: BLE001 — on se reconnecte, quoi qu'il arrive
                 code = _code_de_fermeture(e)
-                if code == FERMETURE_NON_AUTORISE:
+                if isinstance(e, CleNonProuvee):
+                    acceptee = False
+                    _journal.error(
+                        "ce serveur ne prouve pas qu'il connaît %s : ce n'est pas le Core, ou "
+                        "sa clé diffère",
+                        nom_cle,
+                    )
+                elif code == FERMETURE_NON_AUTORISE:
                     acceptee = False
                     _journal.error("le Core refuse la clé : vérifie %s des deux côtés", nom_cle)
                 elif code == FERMETURE_CLE_ABSENTE:

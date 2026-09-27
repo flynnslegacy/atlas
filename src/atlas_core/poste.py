@@ -2,7 +2,8 @@
 
 Un seul poste à la fois : un nouveau remplace l'ancien. Chaque geste part avec son `id` et
 attend sa réponse, dans un délai ; le poste peut être absent, muet, ou répondre qu'il n'a
-pas pu. `servir_poste` tient la route /ws/poste : la clé, puis les réponses du poste.
+pas pu. `servir_poste` tient la route /ws/poste : la preuve de la clé, dans les deux sens,
+puis les réponses du poste, signées de la clé de la session.
 """
 
 from __future__ import annotations
@@ -19,12 +20,20 @@ from .protocole_poste import (
     ActionPoste,
     BonjourPoste,
     Capturer,
+    DefiPoste,
     Geste,
     PretPoste,
+    ReponsePoste,
     ResultatPoste,
+    cle_de_session,
     decoder_message_poste,
+    est_signe,
+    nouveau_nonce,
+    preuve_du_core,
+    preuve_du_poste,
+    preuve_valide,
+    signer,
 )
-from .web import cle_valide
 
 _journal = logging.getLogger(__name__)
 
@@ -119,19 +128,30 @@ async def _recevoir_texte(ws: WebSocket) -> str | None:
             return texte
 
 
-async def _presente(ws: WebSocket, cle: str) -> bool:
-    """Vrai si le premier message est un `BonjourPoste` à la bonne clé, reçu à temps."""
+async def _message[M](ws: WebSocket, attendu: type[M]) -> M | None:
+    """Le message suivant du poste, s'il est du type attendu et reçu à temps."""
     try:
-        premier = await asyncio.wait_for(_recevoir_texte(ws), DELAI_AUTHENTIFICATION_S)
-    except TimeoutError:
-        return False
-    if premier is None:
-        return False
-    try:
-        bonjour = decoder_message_poste(premier)
-    except ValueError:
-        return False
-    return isinstance(bonjour, BonjourPoste) and cle_valide(bonjour.cle, cle)
+        brut = await asyncio.wait_for(_recevoir_texte(ws), DELAI_AUTHENTIFICATION_S)
+        message = decoder_message_poste(brut) if brut is not None else None
+    except (TimeoutError, ValueError):
+        return None
+    return message if isinstance(message, attendu) else None
+
+
+async def _session(ws: WebSocket, cle: str) -> str | None:
+    """Le poste et le Core se prouvent la clé sans l'envoyer ; rend la clé de la session, ou
+    None si le poste ne la prouve pas."""
+    bonjour = await _message(ws, BonjourPoste)
+    if bonjour is None:
+        return None
+    nonce = nouveau_nonce()
+    preuve = preuve_du_core(cle, bonjour.nonce, nonce)
+    await ws.send_text(DefiPoste(nonce=nonce, preuve=preuve).model_dump_json())
+    reponse = await _message(ws, ReponsePoste)
+    attendue = preuve_du_poste(cle, bonjour.nonce, nonce)
+    if reponse is None or not preuve_valide(attendue, reponse.preuve):
+        return None
+    return cle_de_session(cle, bonjour.nonce, nonce)
 
 
 async def servir_poste(ws: WebSocket, poste: Poste, cle: str) -> None:
@@ -149,13 +169,14 @@ async def servir_poste(ws: WebSocket, poste: Poste, cle: str) -> None:
         await ws.send_text(Erreur(code="cle_absente", message=message).model_dump_json())
         await ws.close(code=FERMETURE_CLE_ABSENTE)
         return
-    if not await _presente(ws, cle):
+    session = await _session(ws, cle)
+    if session is None:
         with contextlib.suppress(Exception):
             await ws.close(code=FERMETURE_NON_AUTORISE)
         return
 
     async def envoyer(action: ActionPoste) -> None:
-        await ws.send_text(action.model_dump_json())
+        await ws.send_text(signer(session, action).model_dump_json())
 
     await ws.send_text(PretPoste().model_dump_json())
     jeton = poste.rattacher(envoyer)
@@ -168,7 +189,10 @@ async def servir_poste(ws: WebSocket, poste: Poste, cle: str) -> None:
                 _journal.warning("message du poste ignoré : %s", e)
                 continue
             if isinstance(message, ResultatPoste):
-                poste.recevoir(message)
+                if est_signe(session, message):
+                    poste.recevoir(message)
+                else:
+                    _journal.warning("résultat du poste non signé : ignoré")
     except WebSocketDisconnect:
         pass
     finally:

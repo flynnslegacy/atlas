@@ -1,13 +1,21 @@
 """Messages échangés entre le poste (le programme du Mac de David) et le Core, sur /ws/poste.
 
-Le poste se présente (`BonjourPoste`, avec sa clé), le Core l'accepte (`PretPoste`), puis
-lui envoie des actions ; le poste répond à chacune par un `ResultatPoste` du même `id`. Les
-gestes sont fermés : chacun est vérifié ici, et le poste comme le Core passent par ces
+Le poste et le Core se prouvent l'un à l'autre qu'ils connaissent `ATLAS_POSTE_CLE`, sans
+jamais l'envoyer : le poste se présente avec un nonce (`BonjourPoste`), le Core prouve la clé
+sur ce nonce et lance le sien (`DefiPoste`), le poste prouve la clé à son tour
+(`ReponsePoste`), et le Core l'accepte (`PretPoste`). Chaque action, et chaque résultat,
+porte ensuite la preuve de la clé de la session : un appareil qui répondrait à l'adresse du
+Core n'obtient ni la clé ni un geste, et un intrus sur le réseau n'en glisse aucun.
+
+Les gestes sont fermés : chacun est vérifié ici, et le poste comme le Core passent par ces
 modèles, si bien qu'aucun geste hors de cette liste n'est jamais exécuté.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -19,7 +27,8 @@ from pydantic import (
     model_validator,
 )
 
-TAILLE_MAX_CLE = 256
+MOTIF_NONCE = r"^[0-9a-f]{32}$"
+MOTIF_PREUVE = r"^[0-9a-f]{64}$"
 TEXTE_MAX = 2_000
 QUANTITE_MAX = 20
 COORDONNEE_MAX = 10_000
@@ -125,8 +134,16 @@ Geste = Annotated[
 # --- Core vers poste ----------------------------------------------------------------
 
 
+class DefiPoste(BaseModel):
+    """Le Core prouve qu'il connaît la clé, sur le nonce du poste, et lance son propre nonce."""
+
+    type: Literal["defi"] = "defi"
+    nonce: str = Field(pattern=MOTIF_NONCE)
+    preuve: str = Field(pattern=MOTIF_PREUVE)
+
+
 class PretPoste(BaseModel):
-    """La clé est acceptée : le poste attend ses actions."""
+    """La preuve du poste est acceptée : il attend ses actions."""
 
     type: Literal["pret"] = "pret"
 
@@ -135,17 +152,24 @@ class ActionPoste(BaseModel):
     type: Literal["action"] = "action"
     id: int
     geste: Geste
+    preuve: str = ""  # la preuve de la session (`signer`)
 
 
 # --- poste vers Core ----------------------------------------------------------------
 
 
 class BonjourPoste(BaseModel):
-    """Le premier message du poste : il porte `ATLAS_POSTE_CLE`, sans laquelle le Core
-    ferme la connexion."""
+    """Le premier message du poste : un nonce, jamais la clé."""
 
     type: Literal["bonjour"] = "bonjour"
-    cle: str = Field(max_length=TAILLE_MAX_CLE)
+    nonce: str = Field(pattern=MOTIF_NONCE)
+
+
+class ReponsePoste(BaseModel):
+    """Le poste prouve qu'il connaît la clé, sur les deux nonces."""
+
+    type: Literal["reponse"] = "reponse"
+    preuve: str = Field(pattern=MOTIF_PREUVE)
 
 
 class ResultatPoste(BaseModel):
@@ -159,10 +183,53 @@ class ResultatPoste(BaseModel):
     image: str | None = None
     largeur: int | None = None
     hauteur: int | None = None
+    preuve: str = ""  # la preuve de la session (`signer`)
 
 
-MessagePoste = Annotated[BonjourPoste | ResultatPoste, Field(discriminator="type")]
-MessageVersPoste = Annotated[PretPoste | ActionPoste, Field(discriminator="type")]
+MessagePoste = Annotated[BonjourPoste | ReponsePoste | ResultatPoste, Field(discriminator="type")]
+MessageVersPoste = Annotated[DefiPoste | PretPoste | ActionPoste, Field(discriminator="type")]
+
+
+# --- les preuves ----------------------------------------------------------------------
+
+
+def nouveau_nonce() -> str:
+    return secrets.token_hex(16)
+
+
+def _preuve(cle: str, *parties: str) -> str:
+    return hmac.new(cle.encode(), "|".join(parties).encode(), hashlib.sha256).hexdigest()
+
+
+def preuve_du_core(cle: str, nonce_poste: str, nonce_core: str) -> str:
+    return _preuve(cle, "core", nonce_poste, nonce_core)
+
+
+def preuve_du_poste(cle: str, nonce_poste: str, nonce_core: str) -> str:
+    return _preuve(cle, "poste", nonce_poste, nonce_core)
+
+
+def cle_de_session(cle: str, nonce_poste: str, nonce_core: str) -> str:
+    """La clé qui signe les actions et les résultats d'une connexion, et d'elle seule."""
+    return _preuve(cle, "session", nonce_poste, nonce_core)
+
+
+def preuve_valide(attendue: str, recue: str) -> bool:
+    return hmac.compare_digest(attendue.encode(), recue.encode())
+
+
+def signer[M: (ActionPoste, ResultatPoste)](session: str, message: M) -> M:
+    return message.model_copy(update={"preuve": _preuve(session, _contenu(message))})
+
+
+def est_signe(session: str, message: ActionPoste | ResultatPoste) -> bool:
+    return preuve_valide(_preuve(session, _contenu(message)), message.preuve)
+
+
+def _contenu(message: ActionPoste | ResultatPoste) -> str:
+    return message.model_dump_json(exclude={"preuve"})
+
+
 _adaptateur_poste = TypeAdapter(MessagePoste)
 _adaptateur_vers_poste = TypeAdapter(MessageVersPoste)
 
