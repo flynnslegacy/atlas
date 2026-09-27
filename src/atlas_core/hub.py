@@ -39,6 +39,7 @@ from .protocole_voix import (
     verifier_bloc_page,
 )
 from .protocole_web import (
+    Arreter,
     AttenteConfirmation,
     Authentification,
     Confirmer,
@@ -46,8 +47,10 @@ from .protocole_web import (
     Document,
     DocumentsChanges,
     FinConfirmation,
+    FinMission,
     LireDocument,
     ListeDocuments,
+    MissionEnCours,
     Muet,
     ResumeDocument,
     Saisie,
@@ -99,7 +102,8 @@ def creer_cerveau(config: Config) -> Cerveau:
 def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
     """La mémoire d'Atlas et ses outils ; None si elle ne s'ouvre pas (Atlas marche alors
     sans). Les clés du Core sont des secrets qu'elle refuse d'écrire. Les pages sont
-    prévenues quand un document change, et de la question qui attend le « oui » de David."""
+    prévenues quand un document change, de la question qui attend le « oui » de David, et
+    de la mission en cours sur le Mac."""
     secrets = [config.web_cle, config.audio_cle, os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")]
     memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
     if memoire is None:
@@ -114,7 +118,11 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
     )
     # Le poste du Mac, si sa clé est configurée : ses outils n'existent pas sans elle.
     poste = _poste if config.poste_cle else None
-    missions = Missions(duree_s=config.mission_min * 60)
+    missions = Missions(
+        duree_s=config.mission_min * 60,
+        sur_debut=lambda texte: publier(MissionEnCours(texte=texte)),
+        sur_fin=lambda texte: publier(FinMission(texte=texte)),
+    )
     return OutilsMemoire(
         memoire, confirmations, lambda: publier(DocumentsChanges()), poste=poste, missions=missions
     )
@@ -368,6 +376,10 @@ async def ws_web(ws: WebSocket) -> None:
                 # Comme taper « oui » ou « non » depuis cette page ; trop tard, rien.
                 if _outils is not None and _outils.confirmations.en_attente:
                     await _regie.saisie("oui" if msg.oui else "non", demande.page)
+            elif isinstance(msg, Arreter):
+                # Comme taper « stop » depuis cette page ; la mission déjà finie, rien.
+                if _outils is not None and _outils.missions.en_cours is not None:
+                    await _regie.saisie("stop", demande.page)
     except WebSocketDisconnect:
         pass
     finally:

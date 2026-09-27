@@ -175,3 +175,24 @@ rsync -a ~/.atlas/memoire/ neo.local:.atlas/memoire/
 
 Sans `git` sur la machine, Atlas marche sans mémoire ; le journal du Core le dit au
 démarrage.
+
+## 12. Le poste : Atlas sur ton Mac
+
+Le poste est le programme du M5 qui ouvre tes apps, regarde ton écran et le pilote pour
+Atlas. Comme le client audio, il se connecte au Core : le Mac n'ouvre aucun port. Atlas
+n'y touche que si tu le lui demandes, et pour cliquer ou taper, il te demande d'abord de
+confirmer la mission entière ; ton moindre mot, ou le bouton « Stop » de la page, l'arrête.
+
+1. Génère une clé (commande de l'étape 4) et mets-la dans `ATLAS_POSTE_CLE`, dans le
+   `.env` du Core et dans celui du M5 ; redémarre le Core. Sans elle, Atlas n'a aucun
+   outil pour le Mac.
+2. Dans le `.env` du M5 : `ATLAS_POSTE_URL=ws://neo.local:8080/ws/poste` (à laisser vide
+   si le Core tourne sur le M5 lui-même).
+3. Sur le M5 : `make install`, puis, dans le Terminal, `make run-poste`.
+4. macOS demande alors, pour le Terminal (Réglages Système › Confidentialité et
+   sécurité), l'« Enregistrement de l'écran » (regarder) et l'« Accessibilité » (cliquer,
+   taper, défiler) ; au premier raccourci, il demande aussi l'« Automatisation » de
+   « System Events » (les combinaisons de touches). Donne-les, quitte et rouvre le
+   Terminal, puis relance `make run-poste`. Tant qu'une manque, Atlas dit laquelle.
+
+`ATLAS_MISSION_MIN` (trois minutes par défaut, côté Core) borne la durée d'une mission.

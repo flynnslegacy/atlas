@@ -16,7 +16,13 @@ from atlas_core.protocole import (
     Reveil,
     encoder_audio_entrant,
 )
-from atlas_core.protocole_web import AttenteConfirmation, DocumentsChanges, FinConfirmation
+from atlas_core.protocole_web import (
+    AttenteConfirmation,
+    DocumentsChanges,
+    FinConfirmation,
+    FinMission,
+    MissionEnCours,
+)
 
 CLE_AUDIO = "cle-audio-de-test"
 
@@ -198,6 +204,18 @@ def test_la_memoire_previent_les_pages(monkeypatch, tmp_path):
         DocumentsChanges(),
         AttenteConfirmation(texte="Je supprime ton profil. Tu confirmes ?"),
         FinConfirmation(texte="Rien n'a été supprimé."),
+    ]
+
+
+def test_la_mission_previent_les_pages(monkeypatch, tmp_path):
+    publies: list = []
+    monkeypatch.setattr(hub._regie.diffuseur, "publier", publies.append)
+    outils = hub.ouvrir_la_memoire(replace(hub._config, memoire_dossier=tmp_path / "memoire"))
+    outils.missions.sur_debut("Mission en cours : écrire bonjour dans une note")
+    outils.missions.sur_fin("Mission arrêtée.")
+    assert publies == [
+        MissionEnCours(texte="Mission en cours : écrire bonjour dans une note"),
+        FinMission(texte="Mission arrêtée."),
     ]
 
 

@@ -19,8 +19,10 @@ from .protocole_web import (
     AttenteConfirmation,
     Echange,
     FinConfirmation,
+    FinMission,
     Historique,
     Latences,
+    MissionEnCours,
     Muet,
     Niveau,
     Question,
@@ -83,16 +85,18 @@ class Diffuseur:
         self._dernier_etat = Etat(valeur="repos")
         self._muet = False
         self._confirmation: AttenteConfirmation | None = None  # la question qui attend
+        self._mission: MissionEnCours | None = None  # la mission en cours sur le Mac
         self._heure = heure or _heure_locale
 
     def abonner(self, envoyer: Envoyer) -> Abonnement:
         """Abonne une page : elle reçoit d'abord l'historique, le mode muet et l'état courant,
-        puis la question qui attend le « oui » de David, s'il y en a une."""
+        puis la question qui attend le « oui » de David et la mission en cours, s'il y en a."""
         abonnement = Abonnement(self, envoyer)
         for msg in (self.historique(), Muet(actif=self._muet), self._dernier_etat):
             abonnement.deposer(msg)
-        if self._confirmation is not None:
-            abonnement.deposer(self._confirmation)
+        for msg in (self._confirmation, self._mission):
+            if msg is not None:
+                abonnement.deposer(msg)
         self._abonnements.append(abonnement)
         return abonnement
 
@@ -119,6 +123,10 @@ class Diffuseur:
             self._confirmation = msg
         elif isinstance(msg, FinConfirmation):
             self._confirmation = None
+        elif isinstance(msg, MissionEnCours):
+            self._mission = msg
+        elif isinstance(msg, FinMission):
+            self._mission = None
         elif isinstance(msg, Question):
             self._en_cours = Echange(heure=self._heure(), source=msg.source, question=msg.texte)
             self._echanges.append(self._en_cours)

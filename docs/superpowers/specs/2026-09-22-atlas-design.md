@@ -64,6 +64,11 @@ Ce qui est explicitement **écarté** de ces références : le Web Speech API du
 - Toute saisie de mot de passe ou d'identifiant par Atlas.
 - Correction automatique de workflows n8n sans validation humaine.
 
+**Amendé le 26/09/2026 (le poste).** Atlas devient l'assistant du quotidien de David. Une
+feuille de route remplace la phase 3 : le poste (Atlas agit sur le Mac), puis l'agenda
+iCloud et Gmail, Home Assistant, joindre David (appels et messages), les réseaux sociaux.
+Les décisions « hors périmètre » tiennent. Voir `2026-09-26-poste-mac-design.md`.
+
 ---
 
 ## 3. Infrastructure disponible
@@ -397,6 +402,9 @@ mémoire ; la phase 2c y ajoute les autres et les niveaux d'autorisation.
 **Amendé le 25/09/2026 (phase 2c).** Une liste explicite d'outils par famille (mémoire,
 documents), chacun avec son niveau déclaré ; la découverte automatique « un fichier par
 outil » attendra que les outils soient plus nombreux.
+**Amendé le 26/09/2026 (le poste).** Une famille d'outils « poste » (`mac_…`), servie par
+le programme du M5, qui se connecte au Core : ouvrir une app ou une page, regarder
+l'écran, et les gestes d'une mission.
 
 Familles d'outils en v1 : n8n, mémoire et documents, veille. Home Assistant et agenda/mail
 viennent après la v1.
@@ -423,6 +431,11 @@ l'action résolue, jamais par Claude ; la réponse vient de la voix, du clavier 
 de la page, et elle est lue par le Core avant Claude ; trente secondes sans réponse valent
 non. La première action N3 est la suppression d'une fiche ou d'un document. Voir
 `2026-09-25-phase-2c-outils-design.md`.
+
+**Amendé le 26/09/2026 (le poste).** La mission (N3) couvre le pilotage des apps : un
+« oui » pour la tâche entière, que Claude décrit et que le Core reformule. Ses gestes
+n'existent que pendant la réponse qui suit, dans une durée limitée (trois minutes par
+défaut), et la moindre phrase de David l'arrête. Voir `2026-09-26-poste-mac-design.md`.
 
 ---
 
@@ -539,6 +552,10 @@ de l'iPad écoute et répond à voix haute, pas seulement le M5.
 point quotidien, déclenchement vocal, diagnostic.
 *Critère de réussite :* un workflow n8n qui échoue déclenche une alerte vocale exacte, et
 un workflow se déclenche à la voix.
+**Amendé le 26/09/2026.** La phase 3 devient la feuille de route de l'assistant du
+quotidien (`2026-09-26-poste-mac-design.md`, §1) : le poste, l'agenda et le mail, Home
+Assistant, joindre David, les réseaux sociaux. La supervision n8n reste parmi les idées ;
+le routeur d'intention et Ollama ne sont pas replanifiés pour l'instant.
 
 **Phase 4 — Présence et accès.** Tableau de bord, Hermes en porte mobile. L'orbe et la
 conversation ont été avancées (`2026-09-24-interface-orbe-design.md`).
