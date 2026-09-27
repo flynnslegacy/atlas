@@ -15,13 +15,13 @@ import re
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import ClassVar, Protocol
 
 from .cerveau import Confirmation
 
 _journal = logging.getLogger(__name__)
 
 DELAI_S = 30.0
-RIEN_SUPPRIME = "Rien n'a été supprimé."
 _OUI = (
     "oui",
     "ouais",
@@ -92,11 +92,51 @@ def _rien() -> None:
     pass
 
 
+class Action(Protocol):
+    """Une action N3 résolue, et la façon de la dire. `executer` tourne hors de la boucle,
+    seulement après le « oui » ; `apres`, dans la boucle, une fois l'exécution réussie.
+    `poursuivre` : le « oui » part aussi à Claude, qui continue (une mission)."""
+
+    nom: ClassVar[str]  # « Suppression », « Mission » : pour les pages
+    poursuivre: ClassVar[bool]
+    executer: Callable[[], object]
+    apres: Callable[[], None]
+
+    @property
+    def question(self) -> str: ...
+    @property
+    def faite(self) -> str: ...
+    @property
+    def ratee(self) -> str: ...
+    @property
+    def refusee(self) -> str: ...
+    @property
+    def abandonnee(self) -> str: ...
+    @property
+    def objet(self) -> str: ...
+    @property
+    def bilan(self) -> str: ...
+    @property
+    def rien(self) -> str: ...
+    @property
+    def page_faite(self) -> str: ...
+
+
+def _majuscule(texte: str) -> str:
+    return texte[0].upper() + texte[1:]
+
+
 @dataclass(frozen=True)
 class Suppression:
     """Une suppression résolue — ce qu'elle retire — et la façon de la dire. `executer`
     tourne hors de la boucle du Core, seulement après le « oui » ; `apres`, dans la boucle,
     une fois l'exécution réussie (prévenir les pages, par exemple)."""
+
+    nom: ClassVar[str] = "Suppression"
+    poursuivre: ClassVar[bool] = False
+    refusee: ClassVar[str] = "D'accord, je ne supprime rien."
+    abandonnee: ClassVar[str] = "Je ne supprime rien."
+    rien: ClassVar[str] = "rien n'a été supprimé"
 
     chemin: str
     titre: str
@@ -156,6 +196,38 @@ class Suppression:
         return f"Supprimé : {self.voix}."
 
 
+@dataclass(frozen=True)
+class Mission:
+    """Une mission de pilotage du Mac : la tâche entière, décrite par Claude à l'infinitif
+    (« écrire bonjour dans une nouvelle note »). Le « oui » l'ouvre (`apres`), puis part à
+    Claude, qui pilote."""
+
+    nom: ClassVar[str] = "Mission"
+    poursuivre: ClassVar[bool] = True
+    faite: ClassVar[str] = "C'est parti."
+    ratee: ClassVar[str] = "Je n'ai pas pu lancer la mission."
+    refusee: ClassVar[str] = "D'accord, je ne fais rien."
+    abandonnee: ClassVar[str] = "Je ne fais rien."
+    rien: ClassVar[str] = "rien n'a été fait"
+    page_faite: ClassVar[str] = "Mission confirmée."
+
+    description: str
+    executer: Callable[[], object] = _rien
+    apres: Callable[[], None] = _rien
+
+    @property
+    def question(self) -> str:
+        return f"Je vais {self.description}. Tu confirmes ?"
+
+    @property
+    def objet(self) -> str:
+        return f"la mission « {self.description} »"
+
+    @property
+    def bilan(self) -> str:
+        return f"la mission « {self.description} » commence"
+
+
 class Confirmations:
     """L'action en attente — une seule à la fois — et les lignes qui diront à Claude comment
     elle s'est finie. `sur_question` et `sur_fin` préviennent les pages."""
@@ -169,7 +241,7 @@ class Confirmations:
         self._attendre = attendre
         self.sur_question = sur_question or (lambda texte: None)
         self.sur_fin = sur_fin or (lambda texte: None)
-        self._action: Suppression | None = None
+        self._action: Action | None = None
         self._posee = False
         self._minuterie: asyncio.Task | None = None
         self._execution: asyncio.Future | None = None  # gardée : une tâche oubliée se perd
@@ -179,7 +251,7 @@ class Confirmations:
     def en_attente(self) -> bool:
         return self._action is not None
 
-    def mettre_en_attente(self, action: Suppression) -> bool:
+    def mettre_en_attente(self, action: Action) -> bool:
         """Met l'action de côté ; False si une autre attend déjà la réponse de David."""
         if self._action is not None:
             return False
@@ -203,29 +275,29 @@ class Confirmations:
         reponse = lire_reponse(texte)
         self._finir()
         if reponse == "non":
-            self._conclure("[Refusé par David : rien n'a été supprimé.]", RIEN_SUPPRIME)
-            return "D'accord, je ne supprime rien.", False
+            self._conclure(f"[Refusé par David : {action.rien}.]", f"{_majuscule(action.rien)}.")
+            return action.refusee, False
         if reponse == "autre":
             ligne = f"[David a répondu autre chose : {action.objet} est abandonnée.]"
-            self._conclure(ligne, RIEN_SUPPRIME)
-            return "Je ne supprime rien.", True
+            self._conclure(ligne, f"{_majuscule(action.rien)}.")
+            return action.abandonnee, True
         # L'exécution et sa conclusion vont jusqu'au bout, même si la réponse est annulée
         # entre-temps (une autre question, l'arrêt du Core) : sinon la suppression serait
         # faite sans que les pages, ni Claude, ne l'apprennent.
         self._execution = asyncio.ensure_future(self._executer(action))
         return await asyncio.shield(self._execution)
 
-    async def _executer(self, action: Suppression) -> tuple[str, bool]:
+    async def _executer(self, action: Action) -> tuple[str, bool]:
         try:
             await asyncio.to_thread(action.executer)
         except Exception as e:  # noqa: BLE001 — retouché entre-temps, dépôt en panne…
             _journal.warning("%s confirmée n'a pas pu se faire : %s", action.objet, e)
-            objet = action.objet[0].upper() + action.objet[1:]
-            self._conclure(f"[{objet} a échoué.]", "La suppression a échoué.")
+            page = f"La {action.nom.lower()} a échoué."
+            self._conclure(f"[{_majuscule(action.objet)} a échoué.]", page)
             return action.ratee, False
         action.apres()
         self._conclure(f"[Confirmé par David : {action.bilan}.]", action.page_faite)
-        return action.faite, False
+        return action.faite, action.poursuivre
 
     def abandonner_si_non_posee(self) -> None:
         """La réponse d'Atlas s'est arrêtée avant la question : David ne l'a pas entendue,
@@ -239,25 +311,26 @@ class Confirmations:
     def abandonner(self) -> None:
         """La conversation se termine : l'action en attente est abandonnée, et les lignes
         pour Claude, qui ne valaient que pour elle, oubliées."""
-        posee = self._posee
-        if self._action is not None:
+        action, posee = self._action, self._posee
+        if action is not None:
             self._finir()
             if posee:
-                self.sur_fin(RIEN_SUPPRIME)
+                self.sur_fin(f"{_majuscule(action.rien)}.")
         self._lignes.clear()
 
     def prendre_les_lignes(self) -> list[str]:
         lignes, self._lignes = self._lignes, []
         return lignes
 
-    async def _expirer(self, action: Suppression) -> None:
+    async def _expirer(self, action: Action) -> None:
         await self._attendre(DELAI_S)
         if self._action is action:
             self._minuterie = None  # c'est elle qui sonne : rien à annuler
             posee = self._posee
             self._finir()
             ligne = f"[Sans réponse de David : {action.objet} est abandonnée.]"
-            self._conclure(ligne, "Suppression abandonnée : pas de réponse." if posee else None)
+            page = f"{action.nom} abandonnée : pas de réponse." if posee else None
+            self._conclure(ligne, page)
 
     def _finir(self) -> None:
         if self._minuterie is not None:

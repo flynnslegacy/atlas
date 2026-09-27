@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from atlas_core.cerveau import Confirmation, Note
-from atlas_core.confirmation import DELAI_S, Confirmations, Suppression, lire_reponse
+from atlas_core.confirmation import DELAI_S, Confirmations, Mission, Suppression, lire_reponse
 from atlas_core.memoire import ErreurMemoire
 
 
@@ -362,3 +362,80 @@ async def test_une_annulation_pendant_la_suppression_n_empeche_pas_de_conclure(
     assert confirmations.prendre_les_lignes() == [
         "[Confirmé par David : le document « A » est supprimé.]"
     ]
+
+
+# --- une mission de pilotage -----------------------------------------------------------
+
+NOTE = "écrire bonjour dans une nouvelle note"
+
+
+def test_une_mission_se_dit_comme_une_tache_entiere():
+    mission = Mission(NOTE)
+    assert mission.question == "Je vais écrire bonjour dans une nouvelle note. Tu confirmes ?"
+    assert (mission.faite, mission.refusee, mission.abandonnee) == (
+        "C'est parti.",
+        "D'accord, je ne fais rien.",
+        "Je ne fais rien.",
+    )
+    assert mission.objet == "la mission « écrire bonjour dans une nouvelle note »"
+    assert mission.page_faite == "Mission confirmée."
+    assert (mission.poursuivre, Suppression("profil.md", "Profil", lambda: None).poursuivre) == (
+        True,
+        False,
+    )
+
+
+async def test_le_oui_d_une_mission_l_ouvre_et_part_aussi_a_claude(confirmations, temoin):
+    ouvertes: list[str] = []
+    confirmations.mettre_en_attente(Mission(NOTE, apres=lambda: ouvertes.append(NOTE)))
+    confirmations.poser()
+    assert await confirmations.trancher("oui") == ("C'est parti.", True)
+    assert ouvertes == [NOTE] and temoin.fins == ["Mission confirmée."]
+    assert confirmations.prendre_les_lignes() == [
+        "[Confirmé par David : la mission « écrire bonjour dans une nouvelle note » commence.]"
+    ]
+
+
+async def test_une_mission_refusee_ou_abandonnee_dit_que_rien_n_est_fait(
+    confirmations, temoin, minuterie
+):
+    confirmations.mettre_en_attente(Mission(NOTE))
+    confirmations.poser()
+    assert await confirmations.trancher("non") == ("D'accord, je ne fais rien.", False)
+    confirmations.mettre_en_attente(Mission(NOTE))
+    confirmations.poser()
+    assert await confirmations.trancher("Attends.") == ("Je ne fais rien.", True)
+    confirmations.mettre_en_attente(Mission(NOTE))
+    confirmations.poser()
+    await _laisser_tourner()
+    minuterie.sonner()
+    await _laisser_tourner()
+    assert temoin.fins == [
+        "Rien n'a été fait.",
+        "Rien n'a été fait.",
+        "Mission abandonnée : pas de réponse.",
+    ]
+    assert confirmations.prendre_les_lignes() == [
+        "[Refusé par David : rien n'a été fait.]",
+        "[David a répondu autre chose : la mission « écrire bonjour dans une nouvelle note » est "
+        "abandonnée.]",
+        "[Sans réponse de David : la mission « écrire bonjour dans une nouvelle note » est "
+        "abandonnée.]",
+    ]
+
+
+async def test_une_mission_qui_ne_s_ouvre_pas_le_dit(confirmations, temoin):
+    def refuser() -> None:
+        raise ErreurMemoire("Ton Mac n'est pas connecté.")
+
+    confirmations.mettre_en_attente(Mission(NOTE, executer=refuser))
+    confirmations.poser()
+    assert await confirmations.trancher("oui") == ("Je n'ai pas pu lancer la mission.", False)
+    assert temoin.fins == ["La mission a échoué."]
+
+
+async def test_la_fin_de_la_conversation_dit_que_la_mission_n_est_pas_faite(confirmations, temoin):
+    confirmations.mettre_en_attente(Mission(NOTE))
+    confirmations.poser()
+    confirmations.abandonner()
+    assert temoin.fins == ["Rien n'a été fait."]
