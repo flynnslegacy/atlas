@@ -321,6 +321,24 @@ async def test_une_confirmation_se_dit_comme_une_note_et_sans_voix_s_affiche():
     await s.fermer()
 
 
+async def test_une_longue_question_de_mission_se_dit_en_phrases_de_250_caracteres_au_plus():
+    # Une mission porte le détail exact, parfois un long texte à écrire ; au-delà de 1 000
+    # caractères, la synthèse refuse : la question se dit en phrases, comme tout texte.
+    texte = "Voici une phrase du message à écrire dans la note, avec ses détails. " * 20
+    question = Confirmation(
+        f"Je vais écrire dans une nouvelle note le texte « {texte.strip()} ». Tu confirmes ?"
+    )
+    c, d = Collecteur(), DiffuseurEspion()
+    s = _session(c, d, CerveauScript("D'accord. ", question))
+    await s.sur_saisie("Écris ce texte dans une note.")
+    await _attendre(lambda: c.etats()[-1:] == ["repos"])
+    dits = _dits(c)
+    assert dits[0] == "D'accord." and len(dits) > 3
+    assert all(len(phrase) <= 250 for phrase in dits)
+    assert "".join(dits[1:]).replace(" ", "") == question.annonce.replace(" ", "")
+    await s.fermer()
+
+
 # --- les erreurs du cerveau ------------------------------------------------------------
 
 
