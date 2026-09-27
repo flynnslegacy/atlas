@@ -26,6 +26,7 @@ from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
 from .memoire import ErreurMemoire, Memoire
 from .outils_memoire import OutilsMemoire
+from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
     AuthentificationVoix,
@@ -194,6 +195,7 @@ def creer_session_ecrite() -> Session:
 
 
 _regie = Regie(Diffuseur(), lambda: creer_session_ecrite())
+_poste = Poste()  # le Mac de David, quand son poste est connecté
 
 
 @app.middleware("http")
@@ -439,6 +441,12 @@ async def ws_voix(ws: WebSocket) -> None:
             _journal.error("la voix d'une page s'est arrêtée", exc_info=erreur)
         _regie.detacher(page.session)
         await page.session.fermer()
+
+
+@app.websocket("/ws/poste")
+async def ws_poste(ws: WebSocket) -> None:
+    """Le poste du Mac de David : le Core lui fait faire ses gestes (poste.py)."""
+    await servir_poste(ws, _poste, _config.poste_cle)
 
 
 # Toujours en dernier : monté sur « / », il capterait sinon les routes déclarées après lui.
