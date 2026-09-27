@@ -182,11 +182,13 @@ def test_la_memoire_refuse_les_cles_du_core(monkeypatch, tmp_path):
         memoire_dossier=tmp_path / "memoire",
         web_cle="cle-des-pages-de-test",
         audio_cle="cle-audio-de-test-longue",
+        poste_cle="cle-du-poste-de-test-longue",
     )
     outils = hub.ouvrir_la_memoire(config)
     for secret in (
         "cle-des-pages-de-test",
         "cle-audio-de-test-longue",
+        "cle-du-poste-de-test-longue",  # Claude peut la voir à l'écran, dans un .env ouvert
         "jeton-d-abonnement-de-test",
     ):
         with pytest.raises(memoire.ErreurMemoire, match="clé secrète"):

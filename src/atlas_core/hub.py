@@ -104,7 +104,8 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
     sans). Les clés du Core sont des secrets qu'elle refuse d'écrire. Les pages sont
     prévenues quand un document change, de la question qui attend le « oui » de David, et
     de la mission en cours sur le Mac."""
-    secrets = [config.web_cle, config.audio_cle, os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")]
+    secrets = [config.web_cle, config.audio_cle, config.poste_cle]
+    secrets.append(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
     memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
     if memoire is None:
         return None
