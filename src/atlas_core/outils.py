@@ -175,7 +175,7 @@ class ServeurAtlas:
                 return self._rendre(outil, appel, await outil.gestionnaire(arguments))
             except (ErreurMemoire, ErreurPoste, ErreurConnecteur) as e:
                 return _refus(str(e))  # un refus : Claude le dit à David
-            except Exception:
+            except (Exception, SystemExit):  # un sys.exit d'un connecteur n'arrête pas le Core
                 _journal.exception("l'outil %s a échoué", outil.nom)
                 return _refus(ECHEC)
 

@@ -143,6 +143,15 @@ async def test_le_refus_d_un_connecteur_revient_a_claude():
     )
 
 
+async def test_un_outil_qui_appelle_sys_exit_est_un_echec_pas_un_arret(caplog):
+    async def sortir(arguments: dict) -> str:
+        raise SystemExit(3)
+
+    serveur = ServeurAtlas([Outil("sortir", "Sort.", {}, Niveau.N1, sortir)], Confirmations())
+    assert await _appeler(serveur, "sortir") == (ECHEC, True)
+    assert "l'outil sortir a échoué" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("niveau", "resultat"),
     [(Niveau.N1, None), (Niveau.N1, 42), (Niveau.N2, "écrit"), (Niveau.N3, Fait("fait"))],

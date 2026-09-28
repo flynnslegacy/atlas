@@ -162,7 +162,7 @@ class OutilsMemoire(ServeurAtlas):
         for actif in self.connecteurs:
             try:
                 getattr(actif.connecteur, reaction)(*arguments)
-            except Exception:
+            except (Exception, SystemExit):  # un sys.exit non plus
                 _journal.exception("le connecteur %s a échoué (%s)", actif.id, reaction)
 
     async def _lire(self, arguments: dict[str, Any]) -> str:

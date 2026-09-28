@@ -122,6 +122,21 @@ def test_les_connecteurs_suivent_la_conversation_meme_si_l_un_plante(tmp_path, p
     assert caplog.text.count("le connecteur a-panne a échoué") == 3
 
 
+def test_un_connecteur_qui_appelle_sys_exit_n_arrete_pas_le_core(tmp_path, perso, caplog):
+    source = temoin("sortie_lire", plante=True).replace("RuntimeError(", "SystemExit(")
+    deposer(perso, "a-sortie", source=source)
+    deposer(perso, "temoin", source=temoin("temoin_lire"))
+    outils = outils_de(tmp_path, perso)
+    outils.basculer("a-sortie", True)
+    outils.basculer("temoin", True)
+    with caplog.at_level(logging.ERROR):
+        outils.nouvelle_phrase()
+        outils.fin_du_tour(arretee=False)
+    temoin_charge = next(c for c in outils.connecteurs if c.id == "temoin").connecteur
+    assert temoin_charge.journal == [("nouvelle_phrase",), ("fin_du_tour", False)]
+    assert caplog.text.count("le connecteur a-sortie a échoué") == 2
+
+
 def test_la_conversation_neuve_dit_aux_pages_que_les_bascules_ont_pris_effet(tmp_path, perso):
     deposer(perso, "agenda", source=temoin("agenda_lire"))
     annonces: list[str] = []
