@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+import jsonschema  # installé avec le SDK de Claude, qui valide ainsi les arguments des outils
+
 from .connecteurs import (
     ID_MAX,
     MOTIF_ID,
@@ -303,6 +305,13 @@ class Registre:
                 raise ConnecteurInvalide(f"nom d'outil invalide : {outil.nom}")
             if not isinstance(outil.niveau, Niveau):
                 raise ConnecteurInvalide(f"niveau invalide pour {outil.nom}")
+            # Ce que l'API de Claude refuserait ferait échouer chaque conversation.
+            if not isinstance(outil.description, str) or not outil.description.strip():
+                raise ConnecteurInvalide(f"description invalide pour {outil.nom}")
+            if not _parametres_valables(outil.parametres):
+                raise ConnecteurInvalide(f"paramètres invalides pour {outil.nom}")
+            if not callable(outil.gestionnaire):
+                raise ConnecteurInvalide(f"gestionnaire invalide pour {outil.nom}")
             if outil.nom in pris:
                 raise ConnecteurInvalide(f"nom d'outil déjà pris : {outil.nom}")
             pris.add(outil.nom)
@@ -330,6 +339,22 @@ class Registre:
             os.replace(temporaire, self._interrupteurs)
         except OSError as e:
             _journal.warning("interrupteurs des connecteurs non enregistrés : %s", e)
+
+
+_TYPES_SIMPLES = (str, int, float, bool, list, dict)
+
+
+def _parametres_valables(parametres: object) -> bool:
+    """Des types simples par argument (`{"jour": str}`), ou un schéma JSON d'objet valable."""
+    if not isinstance(parametres, dict) or not all(isinstance(c, str) for c in parametres):
+        return False
+    if parametres.get("type") == "object" and isinstance(parametres.get("properties"), dict):
+        try:
+            jsonschema.validators.validator_for(parametres).check_schema(parametres)
+        except jsonschema.SchemaError:
+            return False
+        return True
+    return all(valeur in _TYPES_SIMPLES for valeur in parametres.values())
 
 
 def _sous_dossiers(racine: Path) -> list[Path]:

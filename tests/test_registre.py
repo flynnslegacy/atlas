@@ -224,6 +224,14 @@ CASSES = {
     "double": code().replace(
         "dire)]", "dire), Outil('salut_dire', 'Encore.', {}, Niveau.N1, dire)]"
     ),
+    # Ce que l'API de Claude refuserait ferait échouer chaque conversation : refusé d'emblée.
+    "description": code().replace('"Dit bonjour."', "42"),
+    "parametres": code().replace("{}, Niveau.N1", "'aucun', Niveau.N1"),
+    "schema": code().replace(
+        "{}, Niveau.N1",
+        "{'type': 'object', 'properties': {'jour': {'type': 'date'}}}, Niveau.N1",
+    ),
+    "gestionnaire": code().replace("Niveau.N1, dire", "Niveau.N1, None"),
 }
 
 
@@ -238,6 +246,10 @@ CASSES = {
         ("pris", "nom d'outil déjà pris : memoire_lire"),
         ("niveau", "niveau invalide pour salut_dire"),
         ("double", "nom d'outil déjà pris : salut_dire"),
+        ("description", "description invalide pour salut_dire"),
+        ("parametres", "paramètres invalides pour salut_dire"),
+        ("schema", "paramètres invalides pour salut_dire"),
+        ("gestionnaire", "gestionnaire invalide pour salut_dire"),
     ],
 )
 def test_un_connecteur_qui_plante_passe_en_erreur_sans_rien_casser(
