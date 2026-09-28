@@ -23,7 +23,7 @@ from .confirmation import Action
 from .outils import Capture, ErreurConnecteur, Fait, Niveau, Outil
 
 if TYPE_CHECKING:
-    from .outils_poste import Missions
+    from .missions import Missions
     from .poste import Poste
 
 __all__ = [

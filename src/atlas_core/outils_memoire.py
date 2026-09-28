@@ -1,5 +1,5 @@
 """Les outils de la mémoire, que Claude appelle : lire, chercher, écrire une fiche, annuler,
-supprimer — et ceux des documents (outils_documents.py).
+supprimer — ceux des documents (outils_documents.py), et ceux des connecteurs actifs.
 
 Chacun déclare son niveau, et le serveur « atlas » (outils.py) applique la règle : lire et
 chercher sont N1, écrire et annuler N2 (faits, puis annoncés), supprimer N3 (le « oui » de
@@ -9,15 +9,18 @@ David d'abord). Chaque écriture passe par `Memoire`, qui la vérifie et la comm
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from .confirmation import Confirmations, Suppression
 from .memoire import DOSSIER_DOCUMENTS, Defait, Memoire
+from .missions import Missions
 from .outils import Fait, Niveau, Outil, ServeurAtlas
 from .outils_documents import outils_des_documents
-from .outils_poste import Missions, outils_du_poste
-from .poste import Poste
+from .registre import ConnecteurActif, Registre
+
+_journal = logging.getLogger(__name__)
 
 ANNONCE_PROFIL = "Je le note dans ton profil."
 ANNONCE_RETRAIT = "J'ai retiré ma dernière note."
@@ -72,8 +75,9 @@ def annonce_du_retrait(defait: Defait) -> str:
 
 
 class OutilsMemoire(ServeurAtlas):
-    """Le serveur « atlas » : les outils de la mémoire, et ceux du poste s'il y en a un.
-    `sur_documents` prévient les pages quand un document change ; `confirmations` tient
+    """Le serveur « atlas » : le socle (la mémoire et les documents), et les outils des
+    connecteurs actifs du `registre`. `sur_documents` prévient les pages quand un document
+    change, `sur_connecteurs` quand des bascules ont pris effet ; `confirmations` tient
     l'action qui attend le « oui » ; `missions`, la mission en cours sur le Mac."""
 
     def __init__(
@@ -81,44 +85,81 @@ class OutilsMemoire(ServeurAtlas):
         memoire: Memoire,
         confirmations: Confirmations | None = None,
         sur_documents: Callable[[], None] | None = None,
-        poste: Poste | None = None,
         missions: Missions | None = None,
+        registre: Registre | None = None,
+        sur_connecteurs: Callable[[], None] | None = None,
     ) -> None:
         self.memoire = memoire
         self.sur_documents = sur_documents or (lambda: None)
+        self.sur_connecteurs = sur_connecteurs or (lambda: None)
         self.missions = missions or Missions()
-        self.avec_poste = poste is not None
-        super().__init__(
-            [
-                Outil("memoire_lire", LIRE, {"chemin": str}, Niveau.N1, self._lire),
-                Outil("memoire_chercher", CHERCHER, {"texte": str}, Niveau.N1, self._chercher),
-                Outil(
-                    "memoire_ecrire",
-                    ECRIRE,
-                    {"chemin": str, "contenu": str},
-                    Niveau.N2,
-                    self._ecrire,
-                ),
-                *outils_des_documents(memoire, lambda: self.sur_documents()),
-                Outil("memoire_annuler", ANNULER, {}, Niveau.N2, self._annuler),
-                Outil("memoire_supprimer", SUPPRIMER, {"chemin": str}, Niveau.N3, self._supprimer),
-                *(outils_du_poste(poste, self.missions) if poste is not None else []),
-            ],
-            confirmations or Confirmations(),
-        )
+        self.registre = registre
+        self._socle = [
+            Outil("memoire_lire", LIRE, {"chemin": str}, Niveau.N1, self._lire),
+            Outil("memoire_chercher", CHERCHER, {"texte": str}, Niveau.N1, self._chercher),
+            Outil(
+                "memoire_ecrire",
+                ECRIRE,
+                {"chemin": str, "contenu": str},
+                Niveau.N2,
+                self._ecrire,
+            ),
+            *outils_des_documents(memoire, lambda: self.sur_documents()),
+            Outil("memoire_annuler", ANNULER, {}, Niveau.N2, self._annuler),
+            Outil("memoire_supprimer", SUPPRIMER, {"chemin": str}, Niveau.N3, self._supprimer),
+        ]
+        self.connecteurs: list[ConnecteurActif] = []
+        if registre is not None:
+            registre.reserver(o.nom for o in self._socle)
+            registre.demarrer()
+            self.connecteurs = registre.actifs()
+        super().__init__(self._tous(), confirmations or Confirmations())
+
+    def _tous(self) -> list[Outil]:
+        return [*self._socle, *(o for c in self.connecteurs for o in c.outils)]
+
+    @property
+    def consignes_des_connecteurs(self) -> list[str]:
+        return [c.consignes for c in self.connecteurs if c.consignes.strip()]
+
+    def basculer(self, id_: str, actif: bool) -> bool:
+        """Active ou coupe un connecteur ; rend vrai si les connecteurs actifs ont changé.
+        Les outils changent aussitôt ici, mais Claude ne les voit qu'à la conversation
+        neuve : celle en cours garde les siens jusqu'à sa clôture."""
+        if self.registre is None or not self.registre.basculer(id_, actif):
+            return False
+        self.connecteurs = self.registre.actifs()
+        self._installer(self._tous())
+        return True
 
     def fin_du_tour(self, arretee: bool = False) -> None:
         """La réponse est finie : une mission ne lui survit pas. `arretee` : la réponse a été
         coupée (David a parlé, ou touché « Stop »)."""
         self.missions.fermer("Mission arrêtée." if arretee else "Mission terminée.")
+        self._prevenir("fin_du_tour", arretee)
 
     def nouvelle_phrase(self) -> None:
         """David parle : la mission en cours s'arrête net."""
         self.missions.fermer("Mission arrêtée.")
+        self._prevenir("nouvelle_phrase")
 
     def nouvelle_conversation(self) -> None:
         super().nouvelle_conversation()
         self.missions.fermer("Mission arrêtée.")
+        if self.registre is not None and self.registre.actifs() != self.connecteurs:
+            self.connecteurs = self.registre.actifs()  # un connecteur retiré du disque
+            self._installer(self._tous())
+        self._prevenir("nouvelle_conversation")
+        if self.registre is not None and self.registre.appliquer():
+            self.sur_connecteurs()  # les bascules ont pris effet : les pages le voient
+
+    def _prevenir(self, reaction: str, *arguments: object) -> None:
+        """Préviens les connecteurs actifs ; celui qui plante ne gêne ni Atlas ni les autres."""
+        for actif in self.connecteurs:
+            try:
+                getattr(actif.connecteur, reaction)(*arguments)
+            except Exception:
+                _journal.exception("le connecteur %s a échoué (%s)", actif.id, reaction)
 
     async def _lire(self, arguments: dict[str, Any]) -> str:
         return await asyncio.to_thread(self.memoire.lire, arguments["chemin"])

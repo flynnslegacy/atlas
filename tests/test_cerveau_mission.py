@@ -19,15 +19,14 @@ from test_cerveau_claude import (
     reponse,
 )
 from test_cerveau_memoire import AppelOutil
-from test_outils_poste import FauxPoste
+from test_outils_poste import FauxPoste, outils_avec_le_poste
 
 from atlas_core.cerveau import Confirmation, ErreurCerveau
 from atlas_core.cerveau_claude import CerveauClaude, options_cerveau
-from atlas_core.confirmation import Confirmations
-from atlas_core.consignes import CONSIGNES_AVEC_MEMOIRE, CONSIGNES_AVEC_POSTE
+from atlas_core.consignes import CONSIGNES_AVEC_MEMOIRE, consignes_pour
 from atlas_core.memoire import Memoire
+from atlas_core.missions import Missions
 from atlas_core.outils_memoire import OutilsMemoire
-from atlas_core.outils_poste import Missions
 from atlas_core.protocole_poste import Cliquer
 
 NOTE = "écrire bonjour dans une nouvelle note"
@@ -57,12 +56,7 @@ def poste() -> FauxPoste:
 @pytest.fixture
 def outils(tmp_path, poste, pages) -> OutilsMemoire:
     missions = Missions(attendre=_jamais, sur_debut=pages.debuts.append, sur_fin=pages.fins.append)
-    return OutilsMemoire(
-        Memoire.ouvrir(tmp_path / "memoire"),
-        Confirmations(attendre=_jamais),
-        poste=poste,
-        missions=missions,
-    )
+    return outils_avec_le_poste(tmp_path, poste, missions)
 
 
 def _cerveau(outils, *clients) -> CerveauClaude:
@@ -168,7 +162,8 @@ async def test_une_panne_de_claude_en_pleine_mission_la_ferme(outils, pages):
 
 def test_avec_le_poste_claude_recoit_les_consignes_du_mac(outils, tmp_path):
     options = options_cerveau("claude-sonnet-5", tmp_path, outils)
-    assert options.system_prompt == CONSIGNES_AVEC_POSTE
+    assert options.system_prompt == consignes_pour(outils)
+    assert "Tu peux aussi agir sur le Mac de David" in options.system_prompt
     assert "mcp__atlas__mac_mission" in options.allowed_tools
     sans = OutilsMemoire(Memoire.ouvrir(tmp_path / "autre"))
     assert (

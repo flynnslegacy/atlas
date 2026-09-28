@@ -108,7 +108,6 @@ class ServeurAtlas:
     l'action qui attend le « oui » de David."""
 
     def __init__(self, outils: list[Outil], confirmations: Confirmations) -> None:
-        self.declarations = list(outils)
         self.confirmations = confirmations
         self.ecriture_permise = True  # False pendant le résumé d'une conversation
         # Le SDK exécute nos outils dès que le CLI le demande, avant que le cerveau ait lu le
@@ -118,6 +117,11 @@ class ServeurAtlas:
         self._appels = 0
         self._vus = 0
         self._appel_de_la_question: int | None = None
+        self._installer(outils)
+
+    def _installer(self, outils: list[Outil]) -> None:
+        """Les outils servis à Claude : ceux d'une conversation neuve, au besoin."""
+        self.declarations = list(outils)
         self.outils: list[SdkMcpTool] = [
             tool(o.nom, o.description, o.parametres)(self._regle(o)) for o in outils
         ]

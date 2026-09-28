@@ -25,8 +25,8 @@ from .confirmation import Confirmations
 from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
 from .memoire import ErreurMemoire, Memoire
+from .missions import Missions
 from .outils_memoire import OutilsMemoire
-from .outils_poste import Missions
 from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
@@ -57,6 +57,7 @@ from .protocole_web import (
     decoder_message_page,
 )
 from .regie import Regie
+from .registre import OFFICIELS, Registre
 from .session import Session, sans_destinataire
 from .synthese import ClientSynthese
 from .transcription import ClientTranscription
@@ -100,32 +101,37 @@ def creer_cerveau(config: Config) -> Cerveau:
 
 
 def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
-    """La mémoire d'Atlas et ses outils ; None si elle ne s'ouvre pas (Atlas marche alors
-    sans). Les clés du Core sont des secrets qu'elle refuse d'écrire. Les pages sont
-    prévenues quand un document change, de la question qui attend le « oui » de David, et
-    de la mission en cours sur le Mac."""
-    secrets = [config.web_cle, config.audio_cle, config.poste_cle]
-    secrets.append(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
-    memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
-    if memoire is None:
-        return None
+    """La mémoire d'Atlas, ses outils et ses connecteurs ; None si elle ne s'ouvre pas (Atlas
+    marche alors sans). Les clés du Core et les secrets des connecteurs sont des secrets
+    qu'elle refuse d'écrire. Les pages sont prévenues quand un document change, de la
+    question qui attend le « oui » de David, et de la mission en cours sur le Mac."""
 
     def publier(msg) -> None:
         _regie.diffuseur.publier(msg)
 
-    confirmations = Confirmations(
-        sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
-        sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
-    )
-    # Le poste du Mac, si sa clé est configurée : ses outils n'existent pas sans elle.
-    poste = _poste if config.poste_cle else None
     missions = Missions(
         duree_s=config.mission_min * 60,
         sur_debut=lambda texte: publier(MissionEnCours(texte=texte)),
         sur_fin=lambda texte: publier(FinMission(texte=texte)),
     )
+    registre = Registre(OFFICIELS, config.connecteurs_dossier, poste=_poste, missions=missions)
+    registre.decouvrir()
+    secrets = [config.web_cle, config.audio_cle, config.poste_cle, *registre.secrets()]
+    secrets.append(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
+    memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
+    if memoire is None:
+        return None
+
+    confirmations = Confirmations(
+        sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
+        sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
+    )
     return OutilsMemoire(
-        memoire, confirmations, lambda: publier(DocumentsChanges()), poste=poste, missions=missions
+        memoire,
+        confirmations,
+        lambda: publier(DocumentsChanges()),
+        missions=missions,
+        registre=registre,
     )
 
 

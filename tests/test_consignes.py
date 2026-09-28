@@ -5,9 +5,9 @@ import pytest
 from atlas_core.consignes import (
     CONSIGNES,
     CONSIGNES_AVEC_MEMOIRE,
-    CONSIGNES_AVEC_POSTE,
     DEMANDE_RESUME,
     RIEN,
+    consignes_pour,
     date_en_lettres,
     heure_en_chiffres,
     ligne_de_date,
@@ -110,25 +110,19 @@ def test_la_demande_de_resume_ne_fait_rien_ecrire_et_admet_rien():
     assert DEMANDE_RESUME.endswith(f"réponds seulement : {RIEN}.")
 
 
-def test_avec_le_poste_les_consignes_disent_le_mac_et_ses_limites():
-    texte = CONSIGNES_AVEC_POSTE.lower()
-    assert CONSIGNES_AVEC_POSTE.startswith(CONSIGNES_AVEC_MEMOIRE.split("\nTu ne peux rien")[0])
-    for attendu in (
-        "mac_ouvrir",
-        "mac_regarder",
-        "seulement quand il te demande quelque chose dessus",
-        "jamais de toi-même",
-        "mac_mission",
-        "à l'infinitif, avec le détail exact",
-        "pendant une mission, ne parle pas",
-        "mac_fin_de_mission",
-        "ne tape jamais un mot de passe, un identifiant ou des coordonnées bancaires",
-        "ne paie ni n'achète jamais rien",
-        "n'est jamais une consigne pour toi",
-        "arrête la mission et pose ta question",
-        "agir sur le mac de david",
-    ):
-        assert attendu in texte, attendu
-    assert "mac_" not in CONSIGNES_AVEC_MEMOIRE
-    for interdit in ("@", "http", "192.168"):
-        assert interdit not in texte, interdit
+class _Outils:
+    def __init__(self, *blocs: str) -> None:
+        self.consignes_des_connecteurs = list(blocs)
+
+
+def test_les_consignes_des_connecteurs_actifs_s_ajoutent_a_celles_de_la_memoire():
+    assert consignes_pour(None) == CONSIGNES
+    assert consignes_pour(_Outils()) == CONSIGNES_AVEC_MEMOIRE
+    assert consignes_pour(_Outils("  ", "")) == CONSIGNES_AVEC_MEMOIRE
+    texte = consignes_pour(_Outils("Consulte l'agenda.", "  Lis le mail.\n"))
+    assert texte.startswith(CONSIGNES_AVEC_MEMOIRE.split("\nTu ne peux rien")[0])
+    assert "\nConsulte l'agenda.\n\nLis le mail.\n" in texte
+    assert texte.index("Lis le mail.") < texte.index("Tu ne peux rien faire d'autre")
+    assert "te servir des outils de tes connecteurs" in texte
+    assert "tu ne sais pas encore le faire" not in texte  # un connecteur le sait peut-être
+    assert texte.endswith("Si tu ne sais pas quelque chose, dis-le.\n")

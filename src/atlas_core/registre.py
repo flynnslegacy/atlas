@@ -42,7 +42,7 @@ from .connecteurs import (
 )
 
 if TYPE_CHECKING:
-    from .outils_poste import Missions
+    from .missions import Missions
     from .poste import Poste
 
 _journal = logging.getLogger(__name__)
