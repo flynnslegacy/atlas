@@ -11,7 +11,7 @@ chacun lié à l'origine du connecteur (`communaute:meteo`) : un dossier retiré
 interrupteur, et un autre code déposé sous le même nom repart coupé.
 
 `python -m atlas_core.registre installer` (dans `make install`) installe les dépendances de
-tous les connecteurs trouvés.
+tous les connecteurs trouvés, bornées par le verrou d'Atlas (`uv.lock`).
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import types
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -51,7 +52,8 @@ if TYPE_CHECKING:
 
 _journal = logging.getLogger(__name__)
 
-OFFICIELS = Path(__file__).resolve().parents[2] / "connecteurs"
+DEPOT = Path(__file__).resolve().parents[2]
+OFFICIELS = DEPOT / "connecteurs"
 RACINE_DES_MODULES = "atlas_connecteurs"
 DETAIL_MAX = 300
 
@@ -282,9 +284,6 @@ class Registre:
             if r.secret and (valeur := self._environ.get(r.variable, "").strip())
         ]
 
-    def dependances(self) -> list[str]:
-        return sorted({d for f in self._fiches if f.manifeste for d in f.manifeste.dependances})
-
     # --- le chargement --------------------------------------------------------------
 
     def _charger(self, fiche: Fiche) -> bool:
@@ -436,13 +435,41 @@ def installer(
     registre: Registre, lancer: Callable[..., subprocess.CompletedProcess] = subprocess.run
 ) -> int:
     """Installe, dans l'environnement d'Atlas, les dépendances de tous les connecteurs
-    trouvés, coupés compris ; rend le code de retour."""
-    registre.decouvrir()
-    dependances = registre.dependances()
-    if not dependances:
+    trouvés, coupés compris, sans jamais changer une version dont Atlas dépend : le verrou
+    les borne. Les officiels s'installent ensemble, puis chaque connecteur de la communauté
+    à part ; un échec de ceux-là le laisse « à installer » sans faire échouer `make install`.
+    Rend le code de retour."""
+    groupes: list[tuple[str, list[str]]] = []
+    officielles: set[str] = set()
+    for fiche in registre.decouvrir():
+        if fiche.manifeste is None or not fiche.manifeste.dependances:
+            continue
+        if fiche.origine == "atlas":
+            officielles |= set(fiche.manifeste.dependances)
+        else:
+            groupes.append((fiche.id, list(fiche.manifeste.dependances)))
+    if officielles:
+        groupes.insert(0, ("", sorted(officielles)))
+    if not groupes:
         return 0
-    print("Dépendances des connecteurs :", ", ".join(dependances))
-    return lancer(["uv", "pip", "install", *dependances], check=False).returncode
+    with tempfile.TemporaryDirectory() as dossier:
+        verrou = str(Path(dossier) / "verrou.txt")
+        exporter = ["uv", "export", "--project", str(DEPOT), "--frozen", "--no-hashes"]
+        exporter += ["--no-emit-project", "--all-extras", "--quiet", "-o", verrou]
+        code = lancer(exporter, check=False).returncode
+        if code:
+            print("Le verrou d'Atlas ne se lit pas : aucune dépendance de connecteur installée.")
+            return code
+        for id_, dependances in groupes:
+            qui = f"du connecteur {id_}" if id_ else "des connecteurs d'Atlas"
+            print(f"Dépendances {qui} :", ", ".join(dependances))
+            installe = ["uv", "pip", "install", "-c", verrou, *dependances]
+            if (rate := lancer(installe, check=False).returncode) and not id_:
+                code = rate
+            elif rate:
+                print(f"Le connecteur {id_} reste « à installer » : ses dépendances ne vont pas")
+                print("avec celles d'Atlas, ou ne se trouvent pas.")
+    return code
 
 
 if __name__ == "__main__":

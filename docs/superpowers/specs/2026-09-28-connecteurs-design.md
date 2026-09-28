@@ -139,7 +139,10 @@ changent pas.
   « atlas » est reconstruit avec le socle et les connecteurs actifs. La question suivante ouvre la conversation neuve,
   avec la mémoire, les outils et les consignes des connecteurs actifs.
 - **Les dépendances** : `make install` installe, après Atlas, les dépendances de tous les connecteurs trouvés aux deux
-  endroits (`uv pip install`). L'état `a_installer` vérifie la présence de chaque paquet par son nom de distribution.
+  endroits (`uv pip install`), bornées par le verrou d'Atlas (`uv export` de `uv.lock`) : une dépendance qui
+  changerait une version dont Atlas dépend ne s'installe pas. Les officiels s'installent ensemble, puis chaque
+  connecteur de la communauté à part ; un échec de ceux-là le laisse `a_installer` sans faire échouer `make install`.
+  L'état `a_installer` vérifie la présence de chaque paquet par son nom de distribution.
 - **Les secrets** : les réglages `secret` de tous les connecteurs trouvés rejoignent les clés que la mémoire refuse
   d'écrire.
 - **Sans mémoire, pas de connecteurs** : ils s'appuient sur le serveur d'outils et la confirmation qu'elle porte ; la

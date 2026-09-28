@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from atlas_core.connecteurs import Outil
-from atlas_core.registre import Registre, fichier_des_interrupteurs, installer
+from atlas_core.registre import DEPOT, Registre, fichier_des_interrupteurs, installer
 
 MANIFESTE = """
 nom = "{nom}"
@@ -323,17 +323,76 @@ def test_les_secrets_et_les_dependances_de_tous_les_connecteurs_trouves(officiel
     r = registre(officiels, perso, environ=environ)
     r.decouvrir()
     assert r.secrets() == ["un-secret-long"]
-    assert r.dependances() == ["caldav>=1.4", "icalendar"]
+
+
+def lanceur(echouent: tuple[str, ...] = ()):
+    """Un faux `subprocess.run` : note les commandes ; celles qui nomment une des
+    exigences données échouent."""
     lancees: list[list[str]] = []
 
     def lancer(commande, check):
         lancees.append(commande)
-        return types.SimpleNamespace(returncode=0)
+        rate = any(e in commande for e in echouent)
+        return types.SimpleNamespace(returncode=1 if rate else 0)
 
-    assert installer(r, lancer) == 0
-    assert lancees == [["uv", "pip", "install", "caldav>=1.4", "icalendar"]]
-    vide = registre(officiels / "rien", perso / "rien")
-    assert installer(vide, lancer) == 0 and len(lancees) == 1
+    return lancer, lancees
+
+
+def deposer_des_dependances(officiels, perso):
+    deposer(officiels, "ical", MANIFESTE.format(nom="Ical") + 'dependances = ["icalendar"]\n')
+    deposer(officiels, "salut")
+    deposer(perso, "agenda", MANIFESTE.format(nom="Agenda") + 'dependances = ["caldav>=1.4"]\n')
+    deux = 'dependances = ["caldav>=1.4", "vobject"]\n'
+    deposer(perso, "mail", MANIFESTE.format(nom="Mail") + deux)
+
+
+def test_installer_borne_les_dependances_par_le_verrou_d_atlas(officiels, perso):
+    # Une dépendance de connecteur ne change jamais une version dont Atlas dépend : les
+    # officiels ensemble, puis chaque connecteur de la communauté à part.
+    deposer_des_dependances(officiels, perso)
+    lancer, lancees = lanceur()
+    assert installer(registre(officiels, perso), lancer) == 0
+    export = lancees[0]
+    verrou = export[export.index("-o") + 1]
+    assert export == [
+        "uv", "export", "--project", str(DEPOT), "--frozen", "--no-hashes",
+        "--no-emit-project", "--all-extras", "--quiet", "-o", verrou,
+    ]  # fmt: skip
+    installe = ["uv", "pip", "install", "-c", verrou]
+    assert lancees[1:] == [
+        [*installe, "icalendar"],
+        [*installe, "caldav>=1.4"],
+        [*installe, "caldav>=1.4", "vobject"],
+    ]
+
+
+def test_un_connecteur_de_la_communaute_qui_ne_s_installe_pas_n_arrete_rien(officiels, perso):
+    deposer_des_dependances(officiels, perso)
+    lancer, lancees = lanceur(echouent=("caldav>=1.4",))
+    assert installer(registre(officiels, perso), lancer) == 0, "make install réussit"
+    assert [c[-1] for c in lancees[1:]] == ["icalendar", "caldav>=1.4", "vobject"]
+
+
+def test_des_dependances_officielles_qui_ne_s_installent_pas_font_echouer(officiels, perso):
+    deposer_des_dependances(officiels, perso)
+    lancer, lancees = lanceur(echouent=("icalendar",))
+    assert installer(registre(officiels, perso), lancer) == 1
+    assert len(lancees) == 4, "la communauté s'installe quand même"
+
+
+def test_sans_le_verrou_rien_ne_s_installe(officiels, perso):
+    deposer_des_dependances(officiels, perso)
+    lancer, lancees = lanceur(echouent=("export",))
+    assert installer(registre(officiels, perso), lancer) == 1
+    assert len(lancees) == 1
+
+
+def test_sans_dependances_rien_ne_se_lance(officiels, perso):
+    deposer(officiels, "salut")
+    lancer, lancees = lanceur()
+    assert installer(registre(officiels, perso), lancer) == 0
+    assert installer(registre(officiels / "rien", perso / "rien"), lancer) == 0
+    assert lancees == []
 
 
 def test_une_variable_vide_dans_le_env_manque_encore(officiels, perso):

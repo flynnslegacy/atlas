@@ -25,7 +25,7 @@ Atlas le lit sans exécuter aucun code, pour lister le connecteur dans la page.
 | `description` | oui | Une phrase, 300 caractères au plus |
 | `version`, `auteur` | oui | Affichés dans la page |
 | `api` | oui | La version du contrat : `1` |
-| `dependances` | non | Des exigences pip (`"caldav>=1.4"`), installées par `make install` |
+| `dependances` | non | Des exigences pip (`"caldav>=1.4"`), installées par `make install` sans jamais changer une version dont Atlas dépend |
 | `services` | non | Les services du Core dont il a besoin : `"poste"` (le lien avec le Mac et les missions) |
 | `consignes` | non | Ce que Claude doit savoir pour se servir de ses outils, ajouté à ses consignes quand le connecteur est actif |
 | `[[reglages]]` | non | Chacun : `variable` (`ATLAS_…`, dans le `.env` du Core), `description`, `secret` (vrai ou faux) |
