@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from atlas_core.config import MEMOIRE_PAR_DEFAUT, Config
+from atlas_core.config import CONNECTEURS_PAR_DEFAUT, MEMOIRE_PAR_DEFAUT, Config
 
 
 def test_la_cle_web_vient_de_l_environnement(monkeypatch):
@@ -124,3 +124,11 @@ def test_la_memoire_vit_par_defaut_dans_le_dossier_d_atlas(monkeypatch):
 def test_le_dossier_de_la_memoire_se_regle_et_accepte_le_tilde(monkeypatch):
     monkeypatch.setenv("ATLAS_MEMOIRE_DOSSIER", "~/atlas-memoire")
     assert Config.depuis_environnement().memoire_dossier == Path.home() / "atlas-memoire"
+
+
+def test_les_connecteurs_vivent_par_defaut_a_cote_de_la_memoire(monkeypatch):
+    monkeypatch.delenv("ATLAS_CONNECTEURS_DOSSIER", raising=False)
+    assert Config.depuis_environnement().connecteurs_dossier == CONNECTEURS_PAR_DEFAUT
+    assert CONNECTEURS_PAR_DEFAUT == Path.home() / ".atlas" / "connecteurs"
+    monkeypatch.setenv("ATLAS_CONNECTEURS_DOSSIER", "~/mes-connecteurs")
+    assert Config.depuis_environnement().connecteurs_dossier == Path.home() / "mes-connecteurs"
