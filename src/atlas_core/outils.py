@@ -25,7 +25,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import McpSdkServerConfig
 
 from .cerveau import Confirmation, Note
-from .confirmation import Confirmations
+from .confirmation import Action, Confirmations
 from .memoire import ErreurMemoire
 from .poste import ErreurPoste
 
@@ -41,6 +41,10 @@ EN_ATTENTE = (
 DEJA_EN_ATTENTE = "Une action attend déjà la réponse de David : attends-la avant une autre."
 
 Gestionnaire = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+class ErreurConnecteur(Exception):
+    """Le refus d'un outil de connecteur : son message va à Claude, qui le dit à David."""
 
 
 class Niveau(enum.IntEnum):
@@ -164,21 +168,31 @@ class ServeurAtlas:
             if outil.niveau > Niveau.N1 and not self.ecriture_permise:
                 return _refus(PENDANT_LE_RESUME)
             try:
-                resultat = await outil.gestionnaire(arguments)
-            except (ErreurMemoire, ErreurPoste) as e:
+                return self._rendre(outil, appel, await outil.gestionnaire(arguments))
+            except (ErreurMemoire, ErreurPoste, ErreurConnecteur) as e:
                 return _refus(str(e))  # un refus : Claude le dit à David
             except Exception:
                 _journal.exception("l'outil %s a échoué", outil.nom)
                 return _refus(ECHEC)
-            if outil.niveau == Niveau.N3:
-                if not self.confirmations.mettre_en_attente(resultat):
-                    return _refus(DEJA_EN_ATTENTE)
-                self._appel_de_la_question = appel
-                return _texte(EN_ATTENTE)
-            if outil.niveau == Niveau.N2:
-                if resultat.annonce is not None:
-                    self._annonces.append((appel, Note(resultat.annonce)))
-                return _texte(resultat.texte, resultat.image)
-            return _resultat_n1(resultat)
 
         return appliquer
+
+    def _rendre(self, outil: Outil, appel: int, resultat: object) -> dict[str, Any]:
+        """Le résultat d'un outil, selon son niveau ; `TypeError` s'il n'a pas la forme
+        attendue (un connecteur peut se tromper)."""
+        if outil.niveau == Niveau.N3:
+            if not isinstance(resultat, Action):
+                raise TypeError(f"{outil.nom} (N3) doit rendre une action à confirmer")
+            if not self.confirmations.mettre_en_attente(resultat):
+                return _refus(DEJA_EN_ATTENTE)
+            self._appel_de_la_question = appel
+            return _texte(EN_ATTENTE)
+        if outil.niveau == Niveau.N2:
+            if not isinstance(resultat, Fait):
+                raise TypeError(f"{outil.nom} (N2) doit rendre un Fait")
+            if resultat.annonce is not None:
+                self._annonces.append((appel, Note(resultat.annonce)))
+            return _texte(resultat.texte, resultat.image)
+        if not isinstance(resultat, str | Capture):
+            raise TypeError(f"{outil.nom} (N1) doit rendre un texte ou une capture")
+        return _resultat_n1(resultat)

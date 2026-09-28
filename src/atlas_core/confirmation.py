@@ -15,7 +15,7 @@ import re
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import ClassVar, Protocol
+from typing import ClassVar, Protocol, runtime_checkable
 
 from .cerveau import Confirmation
 
@@ -92,6 +92,7 @@ def _rien() -> None:
     pass
 
 
+@runtime_checkable
 class Action(Protocol):
     """Une action N3 résolue, et la façon de la dire. `executer` tourne hors de la boucle,
     seulement après le « oui » ; `apres`, dans la boucle, une fois l'exécution réussie.
