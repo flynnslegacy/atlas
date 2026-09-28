@@ -104,8 +104,8 @@ changent pas.
   N3, gestionnaire), avec les mêmes résultats qu'aujourd'hui : un texte ou une image (N1), un `Fait` avec son annonce
   et son image éventuelle (N2), une action à confirmer (N3), ou un refus (`ErreurConnecteur`, dont le message va à
   Claude). Il peut aussi réagir à `fin_du_tour`, `nouvelle_phrase` et `nouvelle_conversation`, s'il en a besoin.
-- **Les noms d'outils** : minuscules, chiffres et `_`, 64 caractères au plus, uniques parmi le socle et tous les
-  connecteurs actifs.
+- **Les noms d'outils** : minuscules, chiffres et `_`, 52 caractères au plus (Claude les voit précédés de
+  `mcp__atlas__`, et son API refuse un nom de plus de 64), uniques parmi le socle et tous les connecteurs actifs.
 - **Le Core enrobe ces outils comme ceux du socle** : les annonces, la confirmation N3, le refus pendant le résumé, et
   une exception inattendue rendue à Claude comme un échec, sans jamais faire tomber Atlas.
 - **Le poste devient `connecteurs/poste/`** : manifeste (réglage `ATLAS_POSTE_CLE`, secret ; service `poste` ;

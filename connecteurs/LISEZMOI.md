@@ -45,8 +45,8 @@ bibliothèque qui bloque s'appelle par `asyncio.to_thread`.
 
 Chaque outil est un `Outil(nom, description, parametres, niveau, gestionnaire)` :
 
-- `nom` : minuscules, chiffres et `_`, unique parmi tous les outils d'Atlas ; préfixe-le du
-  nom de ton connecteur (`agenda_lire`).
+- `nom` : minuscules, chiffres et `_`, 52 caractères au plus, unique parmi tous les outils
+  d'Atlas ; préfixe-le du nom de ton connecteur (`agenda_lire`).
 - `description` : ce que Claude lit pour décider de s'en servir.
 - `parametres` : les types des arguments (`{"jour": str}`), ou un schéma JSON quand certains
   sont facultatifs.

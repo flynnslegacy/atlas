@@ -219,6 +219,8 @@ CASSES = {
     "sortie": "import sys\nsys.exit(3)\n",
     "outils": code().replace("return [Outil(", "return (Outil(").replace("dire)]", "dire),)"),
     "nom": code(outil="Dire-Bonjour"),
+    # Claude le voit précédé de « mcp__atlas__ » : 64 caractères au plus en tout.
+    "long": code(outil="salut_" + "x" * 47),
     "pris": code(outil="memoire_lire"),
     "niveau": code().replace("Niveau.N1, dire", "2, dire"),
     "double": code().replace(
@@ -235,6 +237,11 @@ CASSES = {
 }
 
 
+def test_un_nom_d_outil_de_52_caracteres_passe(officiels, perso):
+    deposer(perso, "salut", outil="salut_" + "x" * 46)
+    assert registre(officiels, perso).basculer("salut", True) is True
+
+
 @pytest.mark.parametrize(
     ("cas", "raison"),
     [
@@ -243,6 +250,7 @@ CASSES = {
         ("sortie", "SystemExit : 3"),
         ("outils", "outils() doit rendre une liste d'Outil"),
         ("nom", "nom d'outil invalide : Dire-Bonjour"),
+        ("long", "nom d'outil invalide : salut_" + "x" * 47),
         ("pris", "nom d'outil déjà pris : memoire_lire"),
         ("niveau", "niveau invalide pour salut_dire"),
         ("double", "nom d'outil déjà pris : salut_dire"),

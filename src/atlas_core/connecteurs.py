@@ -45,7 +45,8 @@ API = 1
 FICHIER_MANIFESTE = "connecteur.toml"
 MOTIF_ID = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 ID_MAX = 40
-MOTIF_OUTIL = r"^[a-z][a-z0-9_]{0,63}$"
+# Claude voit l'outil précédé de « mcp__atlas__ », et son API refuse un nom de plus de 64.
+MOTIF_OUTIL = r"^[a-z][a-z0-9_]{0,51}$"
 MOTIF_VARIABLE = r"^ATLAS_[A-Z0-9_]{1,60}$"
 # Une exigence pip : un nom de distribution, des extras et des versions au besoin. Jamais une
 # option (« --index-url … ») ni une adresse : `make install` la passe telle quelle à uv.
