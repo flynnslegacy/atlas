@@ -112,6 +112,20 @@ class FinConfirmation(BaseModel):
     texte: str
 
 
+class MissionEnCours(BaseModel):
+    """À toutes les pages : Atlas pilote le Mac ; `texte` : « Mission en cours : … »."""
+
+    type: Literal["mission"] = "mission"
+    texte: str
+
+
+class FinMission(BaseModel):
+    """À toutes les pages : la mission est finie ; `texte` dit comment."""
+
+    type: Literal["mission_finie"] = "mission_finie"
+    texte: str
+
+
 # --- page vers Core -----------------------------------------------------
 
 
@@ -150,8 +164,14 @@ class Confirmer(BaseModel):
     oui: bool
 
 
+class Arreter(BaseModel):
+    """Le bouton « Stop » de la barre de mission : comme taper « stop »."""
+
+    type: Literal["stop"] = "stop"
+
+
 MessagePage = Annotated[
-    Authentification | Saisie | Muet | DemandeDocuments | LireDocument | Confirmer,
+    Authentification | Saisie | Muet | DemandeDocuments | LireDocument | Confirmer | Arreter,
     Field(discriminator="type"),
 ]
 _adaptateur_page = TypeAdapter(MessagePage)

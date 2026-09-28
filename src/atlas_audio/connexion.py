@@ -113,6 +113,11 @@ async def _traiter_la_file(client: ClientConnecte, file: asyncio.Queue) -> None:
             await client.sur_message(item)
 
 
+class CleNonProuvee(Exception):
+    """Le serveur n'a pas prouvé qu'il connaît la clé (le poste le vérifie) : ce n'est pas le
+    Core, ou pas avec la même clé."""
+
+
 def _code_de_fermeture(e: BaseException) -> int | None:
     """Le code de fermeture envoyé par le Core, si l'exception en porte un."""
     return getattr(getattr(e, "rcvd", None), "code", None)
@@ -143,6 +148,7 @@ async def boucle_de_connexion(
     attendre: Callable[[float], Awaitable[None]] = asyncio.sleep,
     delais: Sequence[float] = DELAIS_RECONNEXION_S,
     pendant_l_absence: Callable[[], Awaitable[None]] | None = None,
+    nom_cle: str = "ATLAS_AUDIO_CLE",
 ) -> None:
     """Garde le client branché au Core : s'il disparaît, on se reconnecte, de plus en
     plus patiemment (1, 2, 4, 8, 16 puis 30 s). Une connexion acceptée remet ce compte à
@@ -152,7 +158,7 @@ async def boucle_de_connexion(
     servie (dès le départ, pendant les tentatives et les attentes) : sans elle, personne
     ne lit le micro entre deux connexions, et le son s'accumule jusqu'au rebranchement.
     Elle est arrêtée juste avant que `servir` ne démarre, et relancée quand il rend la
-    main."""
+    main. `nom_cle` nomme la clé dans les messages : le poste s'en sert aussi."""
     echecs = 0
     absence = _demarrer_absence(pendant_l_absence)
     try:
@@ -171,12 +177,19 @@ async def boucle_de_connexion(
                 raise
             except Exception as e:  # noqa: BLE001 — on se reconnecte, quoi qu'il arrive
                 code = _code_de_fermeture(e)
-                if code == FERMETURE_NON_AUTORISE:
+                if isinstance(e, CleNonProuvee):
                     acceptee = False
-                    _journal.error("le Core refuse la clé : vérifie ATLAS_AUDIO_CLE des deux côtés")
+                    _journal.error(
+                        "ce serveur ne prouve pas qu'il connaît %s : ce n'est pas le Core, ou "
+                        "sa clé diffère",
+                        nom_cle,
+                    )
+                elif code == FERMETURE_NON_AUTORISE:
+                    acceptee = False
+                    _journal.error("le Core refuse la clé : vérifie %s des deux côtés", nom_cle)
                 elif code == FERMETURE_CLE_ABSENTE:
                     acceptee = False
-                    _journal.error("le Core n'a pas de clé : ajoute ATLAS_AUDIO_CLE dans son .env")
+                    _journal.error("le Core n'a pas de clé : ajoute %s dans son .env", nom_cle)
                 elif isinstance(e, _ERREURS_RESEAU):
                     _journal.warning("Core injoignable ou connexion perdue (%s)", type(e).__name__)
                 else:

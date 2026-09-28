@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from atlas_core.protocole import Etat
 from atlas_core.protocole_web import (
     LONGUEUR_MAX_SAISIE,
+    Arreter,
     AttenteConfirmation,
     Authentification,
     Confirmer,
@@ -14,10 +15,12 @@ from atlas_core.protocole_web import (
     DocumentsChanges,
     Echange,
     FinConfirmation,
+    FinMission,
     Historique,
     Latences,
     LireDocument,
     ListeDocuments,
+    MissionEnCours,
     Muet,
     Niveau,
     ResumeDocument,
@@ -156,3 +159,15 @@ def test_les_messages_des_documents_et_de_la_confirmation_vers_les_pages():
     assert DocumentsChanges().model_dump() == {"type": "documents_changes"}
     assert AttenteConfirmation(texte="Q ?").model_dump() == {"type": "confirmation", "texte": "Q ?"}
     assert FinConfirmation(texte="F.").model_dump() == {"type": "confirmation_finie", "texte": "F."}
+
+
+def test_la_mission_et_son_bouton_stop():
+    assert decoder_message_page('{"type":"stop"}') == Arreter()
+    assert MissionEnCours(texte="Mission en cours : écrire bonjour").model_dump() == {
+        "type": "mission",
+        "texte": "Mission en cours : écrire bonjour",
+    }
+    assert FinMission(texte="Mission arrêtée.").model_dump() == {
+        "type": "mission_finie",
+        "texte": "Mission arrêtée.",
+    }

@@ -47,6 +47,15 @@ _COUPE_DOUCE = re.compile(r"[,;:](?=\s)")
 _ESPACE = re.compile(r"\s")
 
 
+def en_phrases(texte: str, limite: int = LIMITE) -> list[str]:
+    """Un texte entier : tel quel s'il tient en une phrase, sinon en phrases de `limite`
+    caractères au plus."""
+    if len(texte) <= limite:
+        return [texte]
+    decoupeur = DecoupeurPhrases(limite)
+    return [*decoupeur.ajouter(texte), *decoupeur.vider()]
+
+
 class DecoupeurPhrases:
     """Accumule du texte et rend les phrases au fur et à mesure."""
 

@@ -27,6 +27,7 @@ from claude_agent_sdk.types import McpSdkServerConfig
 from .cerveau import Confirmation, Note
 from .confirmation import Confirmations
 from .memoire import ErreurMemoire
+from .poste import ErreurPoste
 
 _journal = logging.getLogger(__name__)
 
@@ -49,28 +50,49 @@ class Niveau(enum.IntEnum):
 
 
 @dataclass(frozen=True)
+class Capture:
+    """Une capture de l'écran, pour Claude : un JPEG en base64 et sa taille en pixels."""
+
+    image: str
+    largeur: int
+    hauteur: int
+
+
+@dataclass(frozen=True)
 class Fait:
-    """Le résultat d'un outil N2 : le texte pour Claude, et l'annonce pour David — None si
-    rien n'a changé."""
+    """Le résultat d'un outil N2 : le texte pour Claude, l'annonce pour David — None si
+    rien n'a changé —, et une capture, s'il en porte une."""
 
     texte: str
     annonce: str | None = None
+    image: Capture | None = None
 
 
 @dataclass(frozen=True)
 class Outil:
-    """Un outil et son niveau. Son gestionnaire rend du texte (N1), un `Fait` (N2), ou
-    l'action à confirmer (N3, une `Suppression`)."""
+    """Un outil et son niveau. Son gestionnaire rend du texte ou une `Capture` (N1), un
+    `Fait` (N2), ou l'action à confirmer (N3). `parametres` : les types de ses arguments, ou
+    un schéma JSON quand certains sont facultatifs."""
 
     nom: str
     description: str
-    parametres: dict[str, type]
+    parametres: dict[str, Any]
     niveau: Niveau
     gestionnaire: Callable[[dict[str, Any]], Awaitable[Any]]
 
 
-def _texte(texte: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": texte}]}
+def _texte(texte: str, image: Capture | None = None) -> dict[str, Any]:
+    contenu: list[dict[str, Any]] = [{"type": "text", "text": texte}]
+    if image is not None:
+        vue = {"type": "image", "data": image.image, "mimeType": "image/jpeg"}
+        contenu.insert(0, vue)
+    return {"content": contenu}
+
+
+def _resultat_n1(resultat: str | Capture) -> dict[str, Any]:
+    if isinstance(resultat, Capture):
+        return _texte(f"Capture de l'écran, {resultat.largeur} × {resultat.hauteur}.", resultat)
+    return _texte(resultat)
 
 
 def _refus(texte: str) -> dict[str, Any]:
@@ -143,7 +165,7 @@ class ServeurAtlas:
                 return _refus(PENDANT_LE_RESUME)
             try:
                 resultat = await outil.gestionnaire(arguments)
-            except ErreurMemoire as e:
+            except (ErreurMemoire, ErreurPoste) as e:
                 return _refus(str(e))  # un refus : Claude le dit à David
             except Exception:
                 _journal.exception("l'outil %s a échoué", outil.nom)
@@ -156,7 +178,7 @@ class ServeurAtlas:
             if outil.niveau == Niveau.N2:
                 if resultat.annonce is not None:
                     self._annonces.append((appel, Note(resultat.annonce)))
-                return _texte(resultat.texte)
-            return _texte(resultat)
+                return _texte(resultat.texte, resultat.image)
+            return _resultat_n1(resultat)
 
         return appliquer

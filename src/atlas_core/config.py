@@ -27,6 +27,8 @@ class Config:
     cerveau_modele: str = MODELE_PAR_DEFAUT
     cerveau_oubli_min: float = 30.0  # au-delà, sans échange, la conversation repart de zéro
     audio_cle: str = ""  # vide : /ws/audio refuse tout client audio
+    poste_cle: str = ""  # vide : /ws/poste refuse tout poste
+    mission_min: float = 3.0  # la durée maximale d'une mission sur le Mac
     # La voix des pages (spike S4) : la latence de sortie d'un navigateur, et la porte
     # d'énergie de la coupure à la voix, l'écho résiduel n'étant pas celui du Mac.
     voix_marge_s: float = 0.2
@@ -45,6 +47,8 @@ class Config:
             cerveau_modele=os.environ.get("ATLAS_CERVEAU_MODELE", "").strip() or MODELE_PAR_DEFAUT,
             cerveau_oubli_min=_lire_oubli_min(),
             audio_cle=os.environ.get("ATLAS_AUDIO_CLE", "").strip(),
+            poste_cle=os.environ.get("ATLAS_POSTE_CLE", "").strip(),
+            mission_min=_lire_nombre("ATLAS_MISSION_MIN", "3", 0.5, 30.0),
             voix_marge_s=_lire_nombre("ATLAS_VOIX_MARGE_S", "0.2", 0.0, 2.0),
             voix_bargein_dbfs=_lire_nombre("ATLAS_VOIX_BARGEIN_DBFS", "-40", -120.0, 0.0),
             memoire_dossier=_lire_dossier_memoire(),

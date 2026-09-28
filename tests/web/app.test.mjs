@@ -25,6 +25,7 @@ const IDENTIFIANTS = [
   "message-cle",
   "message-voix",
   "micro",
+  "mission",
   "muet",
   "ouvrir-documents",
   "ouvrir-historique",
@@ -40,7 +41,9 @@ const IDENTIFIANTS = [
   "sous-titres",
   "st-question",
   "st-reponse",
+  "stop-mission",
   "texte-confirmation",
+  "texte-mission",
 ];
 
 // Un contexte 2D qui lève sur le moindre appel : simule un dessin cassé, quelle qu'en
@@ -375,13 +378,46 @@ test("la barre de confirmation : la question, les boutons, puis la fin", async (
   assert.equal($("confirmation").hidden, true);
 });
 
-test("une page qui se reconnecte oublie une question qui n'attend plus", async () => {
+test("une page qui se reconnecte oublie une question qui n'attend plus, et une mission finie", async () => {
   FauxWebSocket.ouvertes = [];
   await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
   const $ = (id) => document.getElementById(id);
   const [web] = FauxWebSocket.ouvertes;
   web.ouvrir();
   web.recevoir({ type: "confirmation", texte: "Je supprime ton profil. Tu confirmes ?" });
+  web.recevoir({ type: "mission", texte: "Mission en cours : écrire bonjour dans une note" });
   web.recevoir({ type: "historique", echanges: [] }); // ce que le Core envoie à chaque connexion
   assert.equal($("confirmation").hidden, true);
+  assert.equal($("mission").hidden, true);
+});
+
+test("la barre de mission : la mission, le bouton Stop, puis la fin", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+
+  web.recevoir({ type: "mission", texte: "Mission en cours : écrire bonjour dans une note" });
+  assert.equal($("mission").hidden, false);
+  assert.equal($("stop-mission").hidden, false);
+  assert.equal($("texte-mission").textContent, "Mission en cours : écrire bonjour dans une note");
+  t.mock.timers.tick(60000);
+  assert.equal($("mission").hidden, false, "une mission en cours reste affichée");
+  $("stop-mission").declencher("click");
+  assert.deepEqual(web.envoyes.at(-1), { type: "stop" });
+
+  web.recevoir({ type: "mission_finie", texte: "Mission arrêtée." });
+  assert.equal($("stop-mission").hidden, true);
+  assert.equal($("texte-mission").textContent, "Mission arrêtée.");
+  t.mock.timers.tick(3999);
+  assert.equal($("mission").hidden, false);
+  web.recevoir({ type: "mission", texte: "Mission en cours : ouvrir la note" });
+  t.mock.timers.tick(10);
+  assert.equal($("mission").hidden, false, "la nouvelle mission reste affichée");
+  web.recevoir({ type: "mission_finie", texte: "Mission terminée." });
+  t.mock.timers.tick(4000);
+  assert.equal($("mission").hidden, true);
+  assert.equal($("confirmation").hidden, false, "la barre de confirmation n'a pas bougé");
 });

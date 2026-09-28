@@ -27,7 +27,7 @@ from .diffuseur import Diffuseur
 from .etat import MachineEtat, Valeur
 from .mise_en_voix import est_hallucination, nettoyer
 from .niveaux import INTERVALLE_S, CalendrierNiveaux, Planifier, niveau
-from .phrases import DecoupeurPhrases
+from .phrases import DecoupeurPhrases, en_phrases
 from .protocole import (
     Abandon,
     Dire,
@@ -390,10 +390,9 @@ class Session:
                         await self._chercher()
                         continue
                     if isinstance(fragment, Note):
-                        # Atlas vient d'écrire dans sa mémoire : il le dit à cet endroit.
-                        for phrase in decoupeur.vider():
+                        # Une note ou une question, dite à cet endroit (une mission, longue).
+                        for phrase in [*decoupeur.vider(), *en_phrases(fragment.annonce)]:
                             await self._phrase(phrase)
-                        await self._phrase(fragment.annonce)
                         continue
                     for phrase in decoupeur.ajouter(fragment):
                         await self._phrase(phrase)

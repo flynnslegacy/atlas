@@ -16,6 +16,8 @@ from .confirmation import Confirmations, Suppression
 from .memoire import DOSSIER_DOCUMENTS, Defait, Memoire
 from .outils import Fait, Niveau, Outil, ServeurAtlas
 from .outils_documents import outils_des_documents
+from .outils_poste import Missions, outils_du_poste
+from .poste import Poste
 
 ANNONCE_PROFIL = "Je le note dans ton profil."
 ANNONCE_RETRAIT = "J'ai retiré ma dernière note."
@@ -70,17 +72,22 @@ def annonce_du_retrait(defait: Defait) -> str:
 
 
 class OutilsMemoire(ServeurAtlas):
-    """Le serveur « atlas » et les outils de la mémoire. `sur_documents` prévient les pages
-    quand un document change ; `confirmations` tient l'action qui attend le « oui »."""
+    """Le serveur « atlas » : les outils de la mémoire, et ceux du poste s'il y en a un.
+    `sur_documents` prévient les pages quand un document change ; `confirmations` tient
+    l'action qui attend le « oui » ; `missions`, la mission en cours sur le Mac."""
 
     def __init__(
         self,
         memoire: Memoire,
         confirmations: Confirmations | None = None,
         sur_documents: Callable[[], None] | None = None,
+        poste: Poste | None = None,
+        missions: Missions | None = None,
     ) -> None:
         self.memoire = memoire
         self.sur_documents = sur_documents or (lambda: None)
+        self.missions = missions or Missions()
+        self.avec_poste = poste is not None
         super().__init__(
             [
                 Outil("memoire_lire", LIRE, {"chemin": str}, Niveau.N1, self._lire),
@@ -95,9 +102,23 @@ class OutilsMemoire(ServeurAtlas):
                 *outils_des_documents(memoire, lambda: self.sur_documents()),
                 Outil("memoire_annuler", ANNULER, {}, Niveau.N2, self._annuler),
                 Outil("memoire_supprimer", SUPPRIMER, {"chemin": str}, Niveau.N3, self._supprimer),
+                *(outils_du_poste(poste, self.missions) if poste is not None else []),
             ],
             confirmations or Confirmations(),
         )
+
+    def fin_du_tour(self, arretee: bool = False) -> None:
+        """La réponse est finie : une mission ne lui survit pas. `arretee` : la réponse a été
+        coupée (David a parlé, ou touché « Stop »)."""
+        self.missions.fermer("Mission arrêtée." if arretee else "Mission terminée.")
+
+    def nouvelle_phrase(self) -> None:
+        """David parle : la mission en cours s'arrête net."""
+        self.missions.fermer("Mission arrêtée.")
+
+    def nouvelle_conversation(self) -> None:
+        super().nouvelle_conversation()
+        self.missions.fermer("Mission arrêtée.")
 
     async def _lire(self, arguments: dict[str, Any]) -> str:
         return await asyncio.to_thread(self.memoire.lire, arguments["chemin"])

@@ -5,8 +5,10 @@ from atlas_core.protocole import Erreur, Etat
 from atlas_core.protocole_web import (
     AttenteConfirmation,
     FinConfirmation,
+    FinMission,
     Historique,
     Latences,
+    MissionEnCours,
     Muet,
     Niveau,
     Question,
@@ -235,5 +237,22 @@ async def test_une_page_ouverte_pendant_une_confirmation_la_recoit_aussi():
     assert tard.types() == ["historique", "muet", "etat"]
     assert page.types()[-1] == "confirmation_finie"
     assert d.historique().echanges == []
+    await abonnement.fermer()
+    await abonnement_tard.fermer()
+
+
+async def test_une_page_ouverte_pendant_une_mission_la_voit():
+    d = _diffuseur()
+    d.publier(MissionEnCours(texte="Mission en cours : écrire bonjour dans une note"))
+    page = Page()
+    abonnement = d.abonner(page.envoyer)
+    await _laisser_passer()
+    assert page.types() == ["historique", "muet", "etat", "mission"]
+    d.publier(FinMission(texte="Mission terminée."))
+    tard = Page()
+    abonnement_tard = d.abonner(tard.envoyer)
+    await _laisser_passer()
+    assert tard.types() == ["historique", "muet", "etat"]
+    assert page.types()[-1] == "mission_finie"
     await abonnement.fermer()
     await abonnement_tard.fermer()

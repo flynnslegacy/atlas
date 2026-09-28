@@ -16,7 +16,13 @@ from atlas_core.protocole import (
     Reveil,
     encoder_audio_entrant,
 )
-from atlas_core.protocole_web import AttenteConfirmation, DocumentsChanges, FinConfirmation
+from atlas_core.protocole_web import (
+    AttenteConfirmation,
+    DocumentsChanges,
+    FinConfirmation,
+    FinMission,
+    MissionEnCours,
+)
 
 CLE_AUDIO = "cle-audio-de-test"
 
@@ -176,11 +182,13 @@ def test_la_memoire_refuse_les_cles_du_core(monkeypatch, tmp_path):
         memoire_dossier=tmp_path / "memoire",
         web_cle="cle-des-pages-de-test",
         audio_cle="cle-audio-de-test-longue",
+        poste_cle="cle-du-poste-de-test-longue",
     )
     outils = hub.ouvrir_la_memoire(config)
     for secret in (
         "cle-des-pages-de-test",
         "cle-audio-de-test-longue",
+        "cle-du-poste-de-test-longue",  # Claude peut la voir à l'écran, dans un .env ouvert
         "jeton-d-abonnement-de-test",
     ):
         with pytest.raises(memoire.ErreurMemoire, match="clé secrète"):
@@ -199,6 +207,27 @@ def test_la_memoire_previent_les_pages(monkeypatch, tmp_path):
         AttenteConfirmation(texte="Je supprime ton profil. Tu confirmes ?"),
         FinConfirmation(texte="Rien n'a été supprimé."),
     ]
+
+
+def test_la_mission_previent_les_pages(monkeypatch, tmp_path):
+    publies: list = []
+    monkeypatch.setattr(hub._regie.diffuseur, "publier", publies.append)
+    outils = hub.ouvrir_la_memoire(replace(hub._config, memoire_dossier=tmp_path / "memoire"))
+    outils.missions.sur_debut("Mission en cours : écrire bonjour dans une note")
+    outils.missions.sur_fin("Mission arrêtée.")
+    assert publies == [
+        MissionEnCours(texte="Mission en cours : écrire bonjour dans une note"),
+        FinMission(texte="Mission arrêtée."),
+    ]
+
+
+def test_avec_la_cle_du_poste_le_cerveau_recoit_les_outils_du_mac(tmp_path):
+    base = replace(hub._config, memoire_dossier=tmp_path / "memoire", mission_min=5.0)
+    avec = hub.ouvrir_la_memoire(replace(base, poste_cle="cle-du-poste"))
+    assert avec.avec_poste and "mcp__atlas__mac_mission" in avec.noms
+    assert avec.missions.duree_s == 300
+    sans = hub.ouvrir_la_memoire(replace(base, poste_cle=""))
+    assert not sans.avec_poste and not any("mac_" in nom for nom in sans.noms)
 
 
 def test_le_core_garde_les_outils_du_cerveau_le_temps_de_sa_vie(monkeypatch, tmp_path):

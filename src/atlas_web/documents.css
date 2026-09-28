@@ -1,4 +1,5 @@
-/* Le panneau « Documents » et la confirmation d'une action (N3) : spec 2c §7. */
+/* Le panneau « Documents » et la confirmation d'une action (N3) : spec 2c §7 ; la barre de
+   mission : spec du poste §5. */
 
 /* Les documents : la liste, puis la lecture d'un document mis en forme. */
 .panneau > header #retour-documents {
@@ -156,6 +157,43 @@
 }
 
 #boutons-confirmation button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* La mission sur le Mac : ce qu'Atlas fait, et le bouton « Stop », sous la barre du haut. */
+#mission {
+  position: fixed;
+  left: 50%;
+  top: calc(max(12px, env(safe-area-inset-top)) + 56px);
+  width: min(760px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  background: var(--verre-fort);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#texte-mission {
+  flex: 1;
+  margin: 0;
+}
+
+#stop-mission {
+  flex: none;
+  padding: 8px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--erreur);
+  background: var(--erreur);
+  color: #02030a;
+}
+
+#stop-mission:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

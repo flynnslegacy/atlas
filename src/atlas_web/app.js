@@ -18,8 +18,8 @@ const CLE_HEY_ATLAS = "atlas.hey_atlas";
 const SEUIL_GLISSEMENT_PX = 60;
 const TOUCHENT_HISTORIQUE = new Set(["question", "reponse", "erreur", "latences", "historique"]);
 const TOUCHENT_DOCUMENTS = new Set(["liste_documents", "document", "documents_changes"]);
-// La fin d'une attente de confirmation reste affichée ce temps-là, puis la barre s'efface.
-const DUREE_FIN_CONFIRMATION_MS = 4000;
+// La fin d'une confirmation ou d'une mission reste affichée ce temps-là, puis sa barre s'efface.
+const DUREE_FIN_MS = 4000;
 const STATUTS = {
   connexion: "Connexion…",
   hors_ligne: "Hors ligne — nouvelle tentative…",
@@ -75,11 +75,17 @@ const connexion = new Connexion({
     }
     if (TOUCHENT_DOCUMENTS.has(message.type)) surDocuments(message);
     if (message.type === "confirmation" || message.type === "confirmation_finie") {
-      afficherConfirmation(message);
+      afficherConfirmation(message.texte, message.type === "confirmation");
     }
-    // Une connexion (re)commence toujours par l'historique : une question affichée avant
-    // n'attend peut-être plus ; si elle attend, le Core la renvoie juste après.
-    if (message.type === "historique") $("confirmation").hidden = true;
+    if (message.type === "mission" || message.type === "mission_finie") {
+      afficherMission(message.texte, message.type === "mission");
+    }
+    // Une connexion (re)commence toujours par l'historique : une question ou une mission
+    // affichée avant est peut-être finie ; sinon, le Core la renvoie juste après.
+    if (message.type === "historique") {
+      $("confirmation").hidden = true;
+      $("mission").hidden = true;
+    }
   },
   surStatut(nouveau) {
     statut = nouveau;
@@ -161,27 +167,33 @@ $("muet").addEventListener("change", () => {
   if (!connexion.envoyer({ type: "muet", actif: $("muet").checked })) $("muet").checked = etat.muet;
 });
 
-// --- La confirmation d'une action (N3) --------------------------------------------
+// --- La confirmation d'une action (N3) et la mission sur le Mac ---------------------
 
-let jetonConfirmation = 0; // la fin d'une attente n'efface pas la question suivante
-
-function afficherConfirmation(message) {
-  const jeton = ++jetonConfirmation;
-  $("texte-confirmation").textContent = message.texte;
-  $("boutons-confirmation").hidden = message.type !== "confirmation";
-  $("confirmation").hidden = false;
-  if (message.type === "confirmation_finie") {
+// Une barre : son texte, ses boutons tant qu'elle attend, puis sa fin, qui reste affichée
+// un moment. La fin d'une attente n'efface pas la suivante.
+function barre(section, texte, boutons) {
+  let jeton = 0;
+  return (message, enCours) => {
+    const courant = ++jeton;
+    texte.textContent = message;
+    boutons.hidden = !enCours;
+    section.hidden = false;
+    if (enCours) return;
     setTimeout(() => {
-      if (jeton === jetonConfirmation) $("confirmation").hidden = true;
-    }, DUREE_FIN_CONFIRMATION_MS);
-  }
+      if (courant === jeton) section.hidden = true;
+    }, DUREE_FIN_MS);
+  };
 }
 
-// Comme taper « oui » ou « non » depuis cette page.
+const afficherConfirmation = barre($("confirmation"), $("texte-confirmation"), $("boutons-confirmation"));
+const afficherMission = barre($("mission"), $("texte-mission"), $("stop-mission"));
+
+// Comme taper « oui », « non » ou « stop » depuis cette page.
 $("confirmer").addEventListener("click", () => connexion.envoyer({ type: "confirmer", oui: true }));
 $("annuler-confirmation").addEventListener("click", () =>
   connexion.envoyer({ type: "confirmer", oui: false }),
 );
+$("stop-mission").addEventListener("click", () => connexion.envoyer({ type: "stop" }));
 
 // --- Les documents ----------------------------------------------------------------
 

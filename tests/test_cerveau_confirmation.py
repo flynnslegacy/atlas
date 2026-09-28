@@ -23,7 +23,7 @@ from test_cerveau_journal import Minuterie, resume
 
 from atlas_core.cerveau import Confirmation
 from atlas_core.cerveau_claude import CerveauClaude
-from atlas_core.confirmation import Confirmations
+from atlas_core.confirmation import Confirmations, Mission
 from atlas_core.consignes import DEMANDE_RESUME
 from atlas_core.memoire import Memoire
 from atlas_core.outils_memoire import OutilsMemoire
@@ -231,3 +231,18 @@ async def test_une_suppression_executee_en_avance_se_pose_apres_le_texte_qui_la_
     ]
     fragments = await _tout(_cerveau(outils, FauxClientClaude(tour)), "Supprime l'offre.")
     assert fragments == ["Bien sûr, ", "je le supprime.", Confirmation(QUESTION)]
+
+
+async def test_le_oui_d_une_mission_part_a_claude_avec_sa_ligne(outils):
+    ouvertes: list[str] = []
+    outils.confirmations.mettre_en_attente(
+        Mission("écrire bonjour dans une nouvelle note", apres=lambda: ouvertes.append("ouverte"))
+    )
+    outils.confirmations.poser()
+    client = FauxClientClaude(reponse("Voilà, c'est écrit."))
+    assert await _tout(_cerveau(outils, client), "Oui.") == ["C'est parti. ", "Voilà, c'est écrit."]
+    assert ouvertes == ["ouverte"]
+    assert client.questions[-1].endswith(
+        "[Confirmé par David : la mission « écrire bonjour dans une nouvelle note » commence.]\n"
+        f"{DATE}\nOui."
+    )

@@ -2,10 +2,10 @@
 -include .env
 export
 
-.PHONY: install test test-web test-swift lint format bench run-core run-audio
+.PHONY: install test test-web test-swift lint format bench run-core run-audio run-poste
 
 install:
-	uv sync --extra core --extra audio --extra dev
+	uv sync --extra core --extra audio --extra dev --extra poste
 
 test:
 	uv run pytest -v
@@ -31,3 +31,7 @@ run-core:
 
 run-audio:
 	uv run python -m atlas_audio.client
+
+# Le poste, sur le Mac de David : ouvre, regarde et pilote pour Atlas.
+run-poste:
+	uv run python -m atlas_poste.client

@@ -168,6 +168,28 @@ def test_les_boutons_repondent_comme_une_saisie_de_leur_page(
     assert regie.saisies == saisies and regie.pages == ["iphone-1"] * len(saisies)
 
 
+class _Mission:
+    def __init__(self, en_cours: str | None) -> None:
+        self.en_cours = en_cours
+
+
+class _OutilsDuPoste:
+    def __init__(self, en_cours: str | None) -> None:
+        self.missions = _Mission(en_cours)
+
+
+@pytest.mark.parametrize(("en_cours", "saisies"), [("écrire bonjour", ["stop"]), (None, [])])
+def test_le_bouton_stop_revient_a_taper_stop_depuis_sa_page(regie, monkeypatch, en_cours, saisies):
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        ws.send_json({"type": "authentification", "cle": CLE, "page": "iphone-1"})
+        [ws.receive_json() for _ in range(3)]
+        monkeypatch.setattr(hub, "_outils", _OutilsDuPoste(en_cours))
+        ws.send_json({"type": "stop"})
+        ws.send_json({"type": "saisie", "texte": ""})  # sa réponse prouve que tout est traité
+        ws.receive_json()
+    assert regie.saisies == saisies and regie.pages == ["iphone-1"] * len(saisies)
+
+
 def test_une_mauvaise_cle_ferme_la_connexion(regie):
     with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
         ws.send_json({"type": "authentification", "cle": "pas-la-bonne"})

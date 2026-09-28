@@ -26,6 +26,8 @@ from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
 from .memoire import ErreurMemoire, Memoire
 from .outils_memoire import OutilsMemoire
+from .outils_poste import Missions
+from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
     AuthentificationVoix,
@@ -37,6 +39,7 @@ from .protocole_voix import (
     verifier_bloc_page,
 )
 from .protocole_web import (
+    Arreter,
     AttenteConfirmation,
     Authentification,
     Confirmer,
@@ -44,8 +47,10 @@ from .protocole_web import (
     Document,
     DocumentsChanges,
     FinConfirmation,
+    FinMission,
     LireDocument,
     ListeDocuments,
+    MissionEnCours,
     Muet,
     ResumeDocument,
     Saisie,
@@ -97,8 +102,10 @@ def creer_cerveau(config: Config) -> Cerveau:
 def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
     """La mémoire d'Atlas et ses outils ; None si elle ne s'ouvre pas (Atlas marche alors
     sans). Les clés du Core sont des secrets qu'elle refuse d'écrire. Les pages sont
-    prévenues quand un document change, et de la question qui attend le « oui » de David."""
-    secrets = [config.web_cle, config.audio_cle, os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")]
+    prévenues quand un document change, de la question qui attend le « oui » de David, et
+    de la mission en cours sur le Mac."""
+    secrets = [config.web_cle, config.audio_cle, config.poste_cle]
+    secrets.append(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
     memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
     if memoire is None:
         return None
@@ -110,7 +117,16 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
         sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
         sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
     )
-    return OutilsMemoire(memoire, confirmations, lambda: publier(DocumentsChanges()))
+    # Le poste du Mac, si sa clé est configurée : ses outils n'existent pas sans elle.
+    poste = _poste if config.poste_cle else None
+    missions = Missions(
+        duree_s=config.mission_min * 60,
+        sur_debut=lambda texte: publier(MissionEnCours(texte=texte)),
+        sur_fin=lambda texte: publier(FinMission(texte=texte)),
+    )
+    return OutilsMemoire(
+        memoire, confirmations, lambda: publier(DocumentsChanges()), poste=poste, missions=missions
+    )
 
 
 async def _liste_documents() -> ListeDocuments:
@@ -194,6 +210,7 @@ def creer_session_ecrite() -> Session:
 
 
 _regie = Regie(Diffuseur(), lambda: creer_session_ecrite())
+_poste = Poste()  # le Mac de David, quand son poste est connecté
 
 
 @app.middleware("http")
@@ -360,6 +377,10 @@ async def ws_web(ws: WebSocket) -> None:
                 # Comme taper « oui » ou « non » depuis cette page ; trop tard, rien.
                 if _outils is not None and _outils.confirmations.en_attente:
                     await _regie.saisie("oui" if msg.oui else "non", demande.page)
+            elif isinstance(msg, Arreter):
+                # Comme taper « stop » depuis cette page ; la mission déjà finie, rien.
+                if _outils is not None and _outils.missions.en_cours is not None:
+                    await _regie.saisie("stop", demande.page)
     except WebSocketDisconnect:
         pass
     finally:
@@ -439,6 +460,12 @@ async def ws_voix(ws: WebSocket) -> None:
             _journal.error("la voix d'une page s'est arrêtée", exc_info=erreur)
         _regie.detacher(page.session)
         await page.session.fermer()
+
+
+@app.websocket("/ws/poste")
+async def ws_poste(ws: WebSocket) -> None:
+    """Le poste du Mac de David : le Core lui fait faire ses gestes (poste.py)."""
+    await servir_poste(ws, _poste, _config.poste_cle)
 
 
 # Toujours en dernier : monté sur « / », il capterait sinon les routes déclarées après lui.
