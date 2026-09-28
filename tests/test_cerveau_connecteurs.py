@@ -45,8 +45,9 @@ async def test_une_bascule_clot_la_conversation_et_la_suivante_part_neuve(
     await _jusqu_a(lambda: ancien.deconnexions == 1, "la conversation ne s'est pas close")
     assert ancien.questions[-1] == DEMANDE_RESUME
     assert "On a parlé de l'heure." in outils.memoire.lire(JOURNAL)
-    assert annonces == ["liste"], "les pages voient que la bascule a pris effet"
+    assert annonces == [], "la bascule prend effet à la question suivante, pas avant"
     assert await _tout(cerveau, "Dis bonjour.") == ["Bonjour David."]
+    assert annonces == ["liste"], "les pages voient que la bascule a pris effet"
     assert neuf.questions[0].startswith("[Mémoire d'Atlas]")
     options = options_cerveau("claude-sonnet-5", tmp_path, outils)
     assert "mcp__atlas__salut_dire" in options.allowed_tools
@@ -90,8 +91,12 @@ async def test_sans_conversation_la_bascule_ne_demande_aucun_resume(outils, anno
     cerveau = _cerveau(outils, client)
     outils.basculer("salut", True)
     cerveau.renouveler()
-    await _jusqu_a(lambda: annonces == ["liste"], "les pages ne sont pas prévenues")
-    assert client.questions == []
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert client.questions == [] and annonces == []
+    assert [f.en_attente for f in outils.registre.fiches] == [True], "jusqu'à la question"
+    assert await _tout(cerveau, "Bonjour ?") == ["Bonjour."]
+    assert annonces == ["liste"] and [f.en_attente for f in outils.registre.fiches] == [False]
     await cerveau.fermer()
 
 

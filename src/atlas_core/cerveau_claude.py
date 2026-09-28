@@ -289,6 +289,7 @@ class CerveauClaude:
             raise
         if amorcer:
             self._client_amorce = client
+            self._outils.conversation_commencee()  # les bascules de connecteurs ont pris effet
 
     async def _amorcage(self) -> str:
         try:

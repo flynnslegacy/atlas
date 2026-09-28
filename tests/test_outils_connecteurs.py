@@ -126,11 +126,13 @@ def test_la_conversation_neuve_dit_aux_pages_que_les_bascules_ont_pris_effet(tmp
     deposer(perso, "agenda", source=temoin("agenda_lire"))
     annonces: list[str] = []
     outils = outils_de(tmp_path, perso, sur_connecteurs=lambda: annonces.append("liste"))
-    outils.nouvelle_conversation()
+    outils.conversation_commencee()
     assert annonces == [], "sans bascule en attente, rien à dire"
     outils.basculer("agenda", True)
     assert [f.en_attente for f in outils.registre.fiches] == [True]
-    outils.nouvelle_conversation()
+    outils.nouvelle_conversation()  # l'ancienne se clôt : la bascule attend encore la question
+    assert annonces == [] and [f.en_attente for f in outils.registre.fiches] == [True]
+    outils.conversation_commencee()  # la première question de la neuve est partie
     assert annonces == ["liste"]
     assert [f.en_attente for f in outils.registre.fiches] == [False]
 

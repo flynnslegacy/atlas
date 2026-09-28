@@ -221,6 +221,19 @@ def test_activer_un_connecteur_renouvelle_la_conversation_et_toutes_les_pages_le
     assert renouvellements == [True], "rien n'a changé : la conversation continue"
 
 
+def test_la_note_d_attente_tient_jusqu_a_la_question_suivante(connecteurs):
+    # Sans doublure du cerveau : la conversation se clôt pour de bon, mais aucune question
+    # n'a encore ouvert la suivante.
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "activer_connecteur", "id": "poste", "actif": True})
+        assert ws.receive_json()["connecteurs"][0]["en_attente"] is True
+        for _ in range(3):
+            ws.send_json({"type": "connecteurs"})
+            fiche = ws.receive_json()["connecteurs"][0]
+        assert (fiche["etat"], fiche["en_attente"]) == ("actif", True)
+
+
 def test_sans_memoire_pas_de_connecteurs(regie, monkeypatch):
     monkeypatch.setattr(hub, "_config", replace(hub._config, web_cle=CLE, cerveau="bouchon"))
     with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:

@@ -150,8 +150,12 @@ class OutilsMemoire(ServeurAtlas):
             self.connecteurs = self.registre.actifs()  # un connecteur retiré du disque
             self._installer(self._tous())
         self._prevenir("nouvelle_conversation")
+
+    def conversation_commencee(self) -> None:
+        """La première question d'une conversation neuve est partie, avec les outils des
+        connecteurs actifs : les bascules ont pris effet, et les pages le voient."""
         if self.registre is not None and self.registre.appliquer():
-            self.sur_connecteurs()  # les bascules ont pris effet : les pages le voient
+            self.sur_connecteurs()
 
     def _prevenir(self, reaction: str, *arguments: object) -> None:
         """Préviens les connecteurs actifs ; celui qui plante ne gêne ni Atlas ni les autres."""

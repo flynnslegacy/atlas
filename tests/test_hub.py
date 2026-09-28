@@ -267,7 +267,7 @@ def test_quand_les_bascules_prennent_effet_les_pages_le_voient(monkeypatch, tmp_
     )
     outils = hub.ouvrir_la_memoire(config)
     outils.basculer("poste", True)
-    outils.nouvelle_conversation()  # la conversation neuve : la bascule a pris effet
+    outils.conversation_commencee()  # la conversation neuve : la bascule a pris effet
     [liste] = [m for m in publies if isinstance(m, ListeConnecteurs)]
     [poste] = liste.connecteurs
     assert (poste.id, poste.etat, poste.en_attente) == ("poste", "actif", False)
