@@ -20,15 +20,12 @@ import asyncio
 import contextlib
 import datetime as dt
 import logging
-import shutil
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
-from pathlib import Path
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol
 
 from claude_agent_sdk import (
     AssistantMessage,
-    ClaudeAgentOptions,
     ClaudeSDKError,
     CLIConnectionError,
     CLINotFoundError,
@@ -40,13 +37,12 @@ from claude_agent_sdk import (
 )
 
 from .cerveau import RECHERCHE, ErreurCerveau, Note, Recherche
-from .consignes import DEMANDE_RESUME, RIEN, consignes_pour, ligne_de_date
-from .outils import SERVEUR
+from .consignes import DEMANDE_RESUME, RIEN, ligne_de_date
+from .options_claude import OUTIL_RECHERCHE
 from .outils_memoire import OutilsMemoire
 
 _journal = logging.getLogger(__name__)
 
-OUTIL_RECHERCHE = "WebSearch"  # le seul outil de Claude en 2a (pas de WebFetch : spec D3)
 DELAI_MENAGE_S = 15.0
 DELAI_RESUME_S = 60.0  # le résumé d'une conversation, à l'échéance de l'oubli
 DELAI_RESUME_ARRET_S = 20.0  # le même, à l'arrêt du Core
@@ -63,39 +59,6 @@ _ERREURS_ASSISTANT = {
     "rate_limit": LIMITE,
     "server_error": INJOIGNABLE,
 }
-
-
-def options_cerveau(
-    modele: str, dossier: Path, outils: OutilsMemoire | None = None
-) -> ClaudeAgentOptions:
-    """Claude enfermé dans son rôle : la recherche web, et ses outils s'il en a (mémoire,
-    poste) ; aucun réglage ni `CLAUDE.md` de la machine, aucun autre MCP, un dossier vide."""
-    return ClaudeAgentOptions(
-        tools=[OUTIL_RECHERCHE],
-        allowed_tools=[OUTIL_RECHERCHE, *(outils.noms if outils else [])],
-        system_prompt=consignes_pour(outils),
-        setting_sources=[],
-        mcp_servers={SERVEUR: outils.serveur()} if outils else {},
-        strict_mcp_config=True,
-        include_partial_messages=True,
-        model=modele,
-        cwd=dossier,
-        # Le CLI installé et connecté à l'abonnement ; sans lui (PATH réduit d'un service
-        # launchd), le SDK prend le CLI qu'il embarque, qui lit la même connexion.
-        cli_path=shutil.which("claude"),
-        # Aucune transcription de conversation écrite sur le disque par le CLI.
-        env={"CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1"},
-    )
-
-
-def purger_cles_api(environnement: MutableMapping[str, str]) -> list[str]:
-    """Retire les variables `ANTHROPIC_*` : le SDK passe tout l'environnement du Core au
-    CLI, et une clé d'API y ferait payer à l'usage au lieu de l'abonnement. Rend les
-    noms retirés (jamais les valeurs). `CLAUDE_CODE_OAUTH_TOKEN`, lui, reste."""
-    retirees = sorted(nom for nom in environnement if nom.startswith("ANTHROPIC_"))
-    for nom in retirees:
-        del environnement[nom]
-    return retirees
 
 
 def _message_exception(e: BaseException) -> str:
@@ -144,6 +107,8 @@ class CerveauClaude:
         self._interrompu = False  # le tour en cours a été coupé par une autre question
         self._fil_perdu = False  # la conversation a été perdue : la réponse suivante le dit
         self._menage: asyncio.Task | None = None
+        self._a_renouveler = False  # des connecteurs ont basculé : la conversation se clôt
+        self._renouvellement: asyncio.Task | None = None
 
     @property
     def outils(self) -> OutilsMemoire | None:
@@ -162,6 +127,7 @@ class CerveauClaude:
             await self._interrompre_le_tour()
         async with self._verrou:
             await self._attendre_le_menage()
+            await self._clore_si_a_renouveler()
             self._interrompu = False
             confirmations = self._outils.confirmations if self._outils is not None else None
             try:
@@ -202,6 +168,10 @@ class CerveauClaude:
                     self._echeance = asyncio.create_task(self._a_l_echeance())
 
     async def fermer(self) -> None:
+        renouvellement, self._renouvellement = self._renouvellement, None
+        if renouvellement is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await renouvellement  # un résumé en cours se finit (son délai le borne)
         echeance, self._echeance = self._echeance, None
         if echeance is not None:
             if not self._resume_en_cours:
@@ -217,6 +187,26 @@ class CerveauClaude:
         await self._jeter_le_client()
 
     # --- la fin d'une conversation -------------------------------------------------
+
+    def renouveler(self) -> None:
+        """Des connecteurs ont basculé : la conversation se clôt (son résumé au journal),
+        une réponse en cours d'abord finie ; la question suivante en ouvre une neuve, avec les
+        outils et les consignes des connecteurs actifs."""
+        self._a_renouveler = True
+        if self._renouvellement is None or self._renouvellement.done():
+            self._renouvellement = asyncio.create_task(self._renouveler())
+
+    async def _renouveler(self) -> None:
+        async with self._verrou:
+            await self._attendre_le_menage()
+            await self._clore_si_a_renouveler()
+
+    async def _clore_si_a_renouveler(self) -> None:
+        """Le verrou tenu : si des connecteurs ont basculé, la conversation se clôt ici."""
+        if not self._a_renouveler:
+            return
+        self._a_renouveler = False
+        await self._clore_la_conversation(DELAI_RESUME_S)
 
     async def _a_l_echeance(self) -> None:
         try:

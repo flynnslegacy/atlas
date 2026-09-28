@@ -30,11 +30,10 @@ from atlas_core.cerveau_claude import (
     LIMITE,
     PHRASE_FIL_PERDU,
     CerveauClaude,
-    options_cerveau,
-    purger_cles_api,
 )
 from atlas_core.consignes import CONSIGNES, CONSIGNES_AVEC_MEMOIRE
 from atlas_core.memoire import Memoire
+from atlas_core.options_claude import options_cerveau, purger_cles_api
 from atlas_core.outils_memoire import OutilsMemoire
 
 MOMENT = dt.datetime(2026, 9, 24, 21, 50)

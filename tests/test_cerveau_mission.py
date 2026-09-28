@@ -22,10 +22,11 @@ from test_cerveau_memoire import AppelOutil
 from test_outils_poste import FauxPoste, outils_avec_le_poste
 
 from atlas_core.cerveau import Confirmation, ErreurCerveau
-from atlas_core.cerveau_claude import CerveauClaude, options_cerveau
+from atlas_core.cerveau_claude import CerveauClaude
 from atlas_core.consignes import CONSIGNES_AVEC_MEMOIRE, consignes_pour
 from atlas_core.memoire import Memoire
 from atlas_core.missions import Missions
+from atlas_core.options_claude import options_cerveau
 from atlas_core.outils_memoire import OutilsMemoire
 from atlas_core.protocole_poste import Cliquer
 

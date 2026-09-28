@@ -19,13 +19,14 @@ from atlas_audio.client import lire_reglages
 from atlas_audio.connexion import PeripheriqueEnPanne
 
 from .cerveau import Cerveau, CerveauBouchon
-from .cerveau_claude import CerveauClaude, options_cerveau, purger_cles_api
+from .cerveau_claude import CerveauClaude
 from .config import Config
 from .confirmation import Confirmations
 from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
 from .memoire import ErreurMemoire, Memoire
 from .missions import Missions
+from .options_claude import options_cerveau, purger_cles_api
 from .outils_memoire import OutilsMemoire
 from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
