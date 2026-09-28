@@ -20,6 +20,7 @@ const IDENTIFIANTS = [
   "hey-atlas",
   "lecture-document",
   "libelle-etat",
+  "liste-connecteurs",
   "liste-documents",
   "liste-historique",
   "message-cle",
@@ -420,4 +421,37 @@ test("la barre de mission : la mission, le bouton Stop, puis la fin", async (t) 
   t.mock.timers.tick(4000);
   assert.equal($("mission").hidden, true);
   assert.equal($("confirmation").hidden, false, "la barre de confirmation n'a pas bougé");
+});
+
+test("les Paramètres demandent les connecteurs, les montrent, et envoient une bascule", async () => {
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+  web.recevoir({ type: "historique", echanges: [] }); // ce que le Core envoie à chaque connexion
+  $("panneau-parametres").hidden = true; // fermé, comme au chargement de la vraie page
+  $("ouvrir-parametres").declencher("click");
+  assert.deepEqual(web.envoyes.at(-1), { type: "connecteurs" });
+  const poste = {
+    id: "poste",
+    nom: "Le poste du Mac",
+    description: "",
+    version: "1.0.0",
+    auteur: "Atlas",
+    origine: "atlas",
+    etat: "coupe",
+    detail: "",
+    en_attente: false,
+  };
+  web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [poste] });
+  const [liste] = $("liste-connecteurs").children;
+  const [tete] = liste.children[0].children;
+  const interrupteur = tete.children[2];
+  interrupteur.checked = true;
+  interrupteur.declencher("change");
+  assert.deepEqual(web.envoyes.at(-1), { type: "activer_connecteur", id: "poste", actif: true });
+  interrupteur.checked = false;
+  interrupteur.declencher("change");
+  assert.deepEqual(web.envoyes.at(-1), { type: "activer_connecteur", id: "poste", actif: false });
 });
