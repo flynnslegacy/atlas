@@ -6,7 +6,9 @@ communauté (`~/.atlas/connecteurs/`). Le registre les relit à la demande en ne
 les manifestes : aucun code n'y tourne. Le code d'un connecteur ne se charge qu'à son
 activation (par David dans la page, ou au démarrage s'il l'avait activé), et un connecteur
 qui plante passe « en erreur » sans jamais faire tomber Atlas. Les interrupteurs sont rangés
-dans un fichier voisin du répertoire (`~/.atlas/connecteurs.json`), lisible par David seul.
+dans un fichier voisin du répertoire (`~/.atlas/connecteurs.json`), lisible par David seul,
+chacun lié à l'origine du connecteur (`communaute:meteo`) : un dossier retiré emporte son
+interrupteur, et un autre code déposé sous le même nom repart coupé.
 
 `python -m atlas_core.registre installer` (dans `make install`) installe les dépendances de
 tous les connecteurs trouvés.
@@ -88,6 +90,7 @@ class ConnecteurActif:
     connecteur: Connecteur
     outils: tuple[Outil, ...]
     consignes: str
+    dossier: Path
 
 
 @dataclass
@@ -146,8 +149,13 @@ class Registre:
         """Relit les deux répertoires, manifestes seuls ; les officiels d'abord."""
         fiches: list[Fiche] = []
         officiels: set[str] = set()
+        lisibles: set[str] = set()
         for origine, racine in (("atlas", self._officiels), ("communaute", self._perso)):
-            for dossier in _sous_dossiers(racine):
+            dossiers = _sous_dossiers(racine)
+            if dossiers is None:
+                continue
+            lisibles.add(origine)
+            for dossier in dossiers:
                 fiches.append(self._fiche(origine, dossier, officiels))
                 if origine == "atlas":
                     officiels.add(dossier.name)
@@ -158,6 +166,13 @@ class Registre:
             del self._charges.actifs[id_]
             _oublier_le_module(id_)
             _journal.info("connecteur %s retiré : déchargé", id_)
+        # Son interrupteur part avec lui ; un répertoire momentanément illisible ne dit
+        # rien de ses dossiers, et garde les siens.
+        actives = self._lire_interrupteurs()
+        presentes = {_cle(f.origine, f.id) for f in fiches}
+        gardees = {c for c in actives if c in presentes or c.split(":")[0] not in lisibles}
+        if gardees != actives:
+            self._ecrire_interrupteurs(gardees)
         self._fiches = fiches
         return list(fiches)
 
@@ -176,7 +191,8 @@ class Registre:
             manifeste = lire_manifeste(dossier)
         except ValueError as e:
             return fiche("en_erreur", str(e))
-        if id_ in self._charges.actifs:
+        charge = self._charges.actifs.get(id_)
+        if charge is not None and charge.dossier == dossier:
             return fiche("actif", manifeste=manifeste)
         echec = self._charges.echecs.get(id_)
         if echec is not None and echec.signature == _signature(dossier):
@@ -200,11 +216,17 @@ class Registre:
 
     def demarrer(self) -> None:
         """Au démarrage du Core : charge les connecteurs que David avait activés, s'ils sont
-        activables ; un échec n'empêche pas les autres."""
+        activables ; un échec n'empêche pas les autres, et coupe le sien : la page le montre
+        en erreur, et un code changé ne s'activera pas sans que David le voie."""
+        fiches = self.decouvrir()
         actives = self._lire_interrupteurs()
-        for fiche in self.decouvrir():
-            if fiche.id in actives and fiche.etat == "coupe":
-                self._charger(fiche)
+        echoues = {
+            _cle(f.origine, f.id)
+            for f in fiches
+            if _cle(f.origine, f.id) in actives and f.etat == "coupe" and not self._charger(f)
+        }
+        if echoues:
+            self._ecrire_interrupteurs(actives - echoues)
         self.decouvrir()
 
     def basculer(self, id_: str, actif: bool) -> bool:
@@ -214,19 +236,19 @@ class Registre:
         fiche = next((f for f in self.decouvrir() if f.id == id_), None)
         if fiche is None:
             return False
-        actives = self._lire_interrupteurs()
+        actives, cle = self._lire_interrupteurs(), _cle(fiche.origine, id_)
         change = False
         if actif and fiche.etat == "coupe":
             change = self._charger(fiche)
             if change:
-                self._ecrire_interrupteurs(actives | {id_})
+                self._ecrire_interrupteurs(actives | {cle})
         elif not actif:
             if id_ in self._charges.actifs:
                 self._charges.actifs.pop(id_)
                 _oublier_le_module(id_)
                 change = True
-            if id_ in actives:
-                self._ecrire_interrupteurs(actives - {id_})
+            if cle in actives:
+                self._ecrire_interrupteurs(actives - {cle})
         if change:
             self._en_attente.add(id_)
         self.decouvrir()
@@ -283,7 +305,9 @@ class Registre:
             self._charges.echecs[fiche.id] = _Echec(raison, _signature(fiche.dossier))
             return False
         self._charges.echecs.pop(fiche.id, None)
-        actif = ConnecteurActif(fiche.id, connecteur, tuple(outils), manifeste.consignes)
+        actif = ConnecteurActif(
+            fiche.id, connecteur, tuple(outils), manifeste.consignes, fiche.dossier
+        )
         self._charges.actifs[fiche.id] = actif
         _journal.info("connecteur %s chargé", fiche.id)
         return True
@@ -357,7 +381,13 @@ def _parametres_valables(parametres: object) -> bool:
     return all(valeur in _TYPES_SIMPLES for valeur in parametres.values())
 
 
-def _sous_dossiers(racine: Path) -> list[Path]:
+def _cle(origine: str, id_: str) -> str:
+    return f"{origine}:{id_}"
+
+
+def _sous_dossiers(racine: Path) -> list[Path] | None:
+    """Les dossiers de connecteurs d'un répertoire ; aucun s'il n'existe pas, None s'il
+    est illisible."""
     try:
         return sorted(
             p for p in racine.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))
@@ -366,7 +396,7 @@ def _sous_dossiers(racine: Path) -> list[Path]:
         return []
     except OSError as e:
         _journal.warning("répertoire des connecteurs illisible : %s (%s)", racine, e)
-        return []
+        return None
 
 
 def _signature(dossier: Path) -> int:

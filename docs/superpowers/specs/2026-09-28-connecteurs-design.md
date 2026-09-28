@@ -127,12 +127,13 @@ changent pas.
 | `a_installer` | Une dépendance n'est pas installée ; le détail dit « lance make install » | Grisé |
 | `en_erreur` | Manifeste invalide, contrat inconnu, doublon, code qui ne se charge pas, nom d'outil déjà pris | Grisé |
 
-- **Les interrupteurs** sont rangés dans `~/.atlas/connecteurs.json` (droits 600) : la liste des connecteurs activés.
-  Tout connecteur qui n'y est pas est coupé, les officiels compris : après la mise à jour, David active le poste une
-  fois.
+- **Les interrupteurs** sont rangés dans `~/.atlas/connecteurs.json` (droits 600) : la liste des connecteurs activés,
+  chacun lié à son origine (`atlas:poste`, `communaute:meteo`). Tout connecteur qui n'y est pas est coupé, les
+  officiels compris : après la mise à jour, David active le poste une fois. Un dossier retiré emporte son interrupteur
+  (un répertoire momentanément illisible garde les siens) : un autre code déposé sous le même nom repart coupé.
 - **L'activation** : le Core charge alors le code du connecteur (jamais avant), appelle `creer`, et vérifie ses
   outils. Un échec le laisse coupé, « en erreur », avec le message. Au démarrage, les connecteurs activés sont chargés
-  de même ; un échec ne bloque pas les autres.
+  de même ; un échec ne bloque pas les autres, et coupe le sien.
 - **La conversation neuve** : dès qu'une bascule change l'ensemble des connecteurs actifs, le Core clôt la
   conversation en cours comme à l'oubli (résumé au journal ; une réponse en cours se finit d'abord), et le serveur
   « atlas » est reconstruit avec le socle et les connecteurs actifs. La question suivante ouvre la conversation neuve,

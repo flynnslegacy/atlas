@@ -161,7 +161,7 @@ async def test_activer_charge_le_code_et_range_l_interrupteur(officiels, perso):
     assert etats(r)["salut"][1] == "actif"
     fichier = fichier_des_interrupteurs(perso)
     assert fichier == perso.parent / "connecteurs.json"
-    assert json.loads(fichier.read_text()) == {"actifs": ["salut"]}
+    assert json.loads(fichier.read_text()) == {"actifs": ["communaute:salut"]}
     assert stat.S_IMODE(fichier.stat().st_mode) == 0o600
     # Au redémarrage du Core, un connecteur activé se recharge seul.
     relu = registre(officiels, perso, environ=environ)
@@ -379,9 +379,68 @@ def test_un_connecteur_actif_retire_du_disque_disparait(officiels, perso):
     shutil.rmtree(dossier)
     assert r.decouvrir() == [] and r.actifs() == []
     assert "atlas_connecteurs.salut.connecteur" not in sys.modules
+    assert json.loads(fichier_des_interrupteurs(perso).read_text()) == {"actifs": []}
     relu = registre(officiels, perso)
-    relu.demarrer()  # son interrupteur reste rangé, mais rien ne se charge
+    relu.demarrer()
     assert relu.actifs() == []
+
+
+def test_un_dossier_redepose_sous_le_meme_nom_redemande_confirmation(officiels, perso):
+    # Un autre code, déposé sous le nom d'un connecteur activé puis retiré, ne s'active
+    # jamais sans que David le voie « Communauté » et le confirme.
+    dossier = deposer(perso, "salut")
+    registre(officiels, perso).basculer("salut", True)
+    shutil.rmtree(dossier)
+    registre(officiels, perso).decouvrir()  # une page ouvre ses Paramètres
+    temoin = perso / "salut" / "importe"
+    deposer(perso, "salut", source=f"open({str(temoin)!r}, 'w').close()\n")
+    relu = registre(officiels, perso)
+    relu.demarrer()
+    assert relu.actifs() == [] and not temoin.exists()
+    assert etats(relu)["salut"][:2] == ("communaute", "coupe")
+
+
+def test_un_officiel_retire_ne_passe_pas_la_main_a_son_homonyme(officiels, perso):
+    officiel = deposer(officiels, "meteo")
+    temoin = perso / "meteo" / "importe"
+    deposer(perso, "meteo", source=f"open({str(temoin)!r}, 'w').close()\n")
+    r = registre(officiels, perso)
+    r.basculer("meteo", True)
+    shutil.rmtree(officiel)  # un git pull l'a retiré
+    assert [(f.origine, f.etat) for f in r.decouvrir()] == [("communaute", "coupe")]
+    assert r.actifs() == []
+    relu = registre(officiels, perso)
+    relu.demarrer()
+    assert relu.actifs() == [] and not temoin.exists()
+
+
+def test_un_connecteur_qui_echoue_au_demarrage_reste_coupe(officiels, perso):
+    dossier = deposer(perso, "salut")
+    registre(officiels, perso).basculer("salut", True)
+    fichier = dossier / "connecteur.py"
+    fichier.write_text(CASSES["import"])
+    relu = registre(officiels, perso)
+    relu.demarrer()
+    assert etats(relu)["salut"][1] == "en_erreur"
+    fichier.write_text(code())  # réparé
+    plus_tard = fichier.stat().st_mtime_ns + 1_000_000_000
+    os.utime(fichier, ns=(plus_tard, plus_tard))
+    encore = registre(officiels, perso)
+    encore.demarrer()
+    assert encore.actifs() == [] and etats(encore)["salut"][1] == "coupe"
+
+
+def test_un_repertoire_momentanement_illisible_garde_les_interrupteurs(officiels, perso):
+    deposer(perso, "salut")
+    registre(officiels, perso).basculer("salut", True)
+    perso.chmod(0o000)
+    try:
+        registre(officiels, perso).decouvrir()
+    finally:
+        perso.chmod(0o755)
+    relu = registre(officiels, perso)
+    relu.demarrer()
+    assert [a.id for a in relu.actifs()] == ["salut"], "le choix de David tient"
 
 
 def test_un_repertoire_illisible_laisse_les_officiels(officiels, perso, caplog):
