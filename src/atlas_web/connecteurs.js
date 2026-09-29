@@ -1,6 +1,8 @@
 // La rubrique « Connecteurs » des Paramètres (spec des connecteurs, §6) : chaque connecteur,
-// son état et son interrupteur. Les textes d'un manifeste viennent d'un tiers : ils ne sont
-// jamais que du texte.
+// son état, son interrupteur et ses réglages. Les textes d'un manifeste viennent d'un tiers :
+// ils ne sont jamais que du texte.
+
+import { REGLAGES, rendreReglages } from "./reglages.js";
 
 export const MEMOIRE_ABSENTE = "La mémoire n'est pas disponible : pas de connecteurs.";
 export const AUCUN_CONNECTEUR = "Aucun connecteur trouvé.";
@@ -30,7 +32,11 @@ function bouton(document, classe, contenu) {
 }
 
 // La liste (message `liste_connecteurs`) ; `surBascule(id, actif)` envoie l'interrupteur au Core.
-export function rendreConnecteurs(document, conteneur, message, surBascule) {
+// `reglages` : `surRegler(id, valeurs, effacer)`, et ce qui survit à un nouveau rendu de la
+// liste : les réglages ouverts (`ouverts`, des identifiants) et les dernières réponses du Core
+// (`resultats`, par identifiant).
+export function rendreConnecteurs(document, conteneur, message, surBascule, reglages = {}) {
+  const { surRegler = () => {}, ouverts = new Set(), resultats = new Map() } = reglages;
   if (!message.disponible) {
     conteneur.replaceChildren(texte(document, "p", "vide", MEMOIRE_ABSENTE));
     return;
@@ -41,8 +47,29 @@ export function rendreConnecteurs(document, conteneur, message, surBascule) {
   }
   const liste = document.createElement("ul");
   liste.className = "connecteurs";
-  liste.append(...message.connecteurs.map((connecteur) => ligne(document, connecteur, surBascule)));
+  for (const connecteur of message.connecteurs) {
+    const element = ligne(document, connecteur, surBascule);
+    if (connecteur.reglages?.length) {
+      element.append(...lesReglages(document, connecteur, surRegler, ouverts, resultats));
+    }
+    liste.append(element);
+  }
   conteneur.replaceChildren(liste);
+}
+
+// Le bouton « Réglages » et son formulaire, ouvert ou fermé comme avant le nouveau rendu.
+function lesReglages(document, connecteur, surRegler, ouverts, resultats) {
+  const ouvrir = bouton(document, "ouvrir-reglages", REGLAGES);
+  const formulaire = rendreReglages(document, connecteur, surRegler, resultats.get(connecteur.id));
+  const montrer = (ouvert) => {
+    formulaire.hidden = !ouvert;
+    ouvrir.setAttribute("aria-expanded", String(ouvert));
+    if (ouvert) ouverts.add(connecteur.id);
+    else ouverts.delete(connecteur.id);
+  };
+  montrer(ouverts.has(connecteur.id));
+  ouvrir.addEventListener("click", () => montrer(formulaire.hidden));
+  return [ouvrir, formulaire];
 }
 
 function ligne(document, connecteur, surBascule) {

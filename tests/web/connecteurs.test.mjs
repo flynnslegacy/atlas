@@ -137,3 +137,35 @@ test("sans mémoire, ou sans connecteur, la rubrique le dit", () => {
   assert.equal(rendre([], false).conteneur.children[0].textContent, MEMOIRE_ABSENTE);
   assert.equal(rendre([]).conteneur.children[0].textContent, AUCUN_CONNECTEUR);
 });
+
+test("un connecteur qui a des réglages les ouvre d'un bouton, et les garde ouverts d'un rendu à l'autre", () => {
+  const document = fauxDocument();
+  const conteneur = document.createElement("div");
+  const reglage = { variable: "ATLAS_BONJOUR_NOM", description: "Le nom", secret: false, defini: false, modifiable: true, valeur: "" };
+  const bonjour = { ...METEO, id: "bonjour", reglages: [reglage] };
+  const envois = [];
+  const etat = { ouverts: new Set(), resultats: new Map(), surRegler: (...envoi) => envois.push(envoi) };
+  const rendu = () => {
+    rendreConnecteurs(document, conteneur, { disponible: true, connecteurs: [POSTE, bonjour] }, () => {}, etat);
+    return lignes(conteneur).map(morceaux);
+  };
+  let [poste, ligne] = rendu();
+  assert.ok(!poste.reste.some((e) => e.className === "ouvrir-reglages"), "sans réglages, pas de bouton");
+  let [ouvrir, formulaire] = ligne.reste.slice(-2);
+  assert.deepEqual([ouvrir.textContent, ouvrir.type, formulaire.tagName], ["Réglages", "button", "FORM"]);
+  assert.deepEqual([formulaire.hidden, ouvrir.attributs["aria-expanded"]], [true, "false"]);
+  ouvrir.declencher("click");
+  assert.deepEqual([formulaire.hidden, ouvrir.attributs["aria-expanded"]], [false, "true"]);
+  etat.resultats.set("bonjour", { ok: true, message: "Enregistré." });
+  [, ligne] = rendu();
+  [ouvrir, formulaire] = ligne.reste.slice(-2);
+  assert.equal(formulaire.hidden, false, "toujours ouvert après un nouveau rendu");
+  assert.equal(formulaire.children.at(-1).textContent, "Enregistré.");
+  formulaire.children[0].children[0].children[2].value = "David";
+  formulaire.declencher("submit", { preventDefault() {} });
+  assert.deepEqual(envois, [["bonjour", { ATLAS_BONJOUR_NOM: "David" }, []]]);
+  ouvrir.declencher("click");
+  assert.equal(etat.ouverts.has("bonjour"), false);
+  [, ligne] = rendu();
+  assert.equal(ligne.reste.at(-1).hidden, true, "refermé, il le reste");
+});

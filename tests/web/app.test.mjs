@@ -455,3 +455,52 @@ test("les Paramètres demandent les connecteurs, les montrent, et envoient une b
   interrupteur.declencher("change");
   assert.deepEqual(web.envoyes.at(-1), { type: "activer_connecteur", id: "poste", actif: false });
 });
+
+test("les réglages d'un connecteur partent au Core, et sa réponse s'affiche jusqu'à la réouverture", async () => {
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage: fauxStockage({ "atlas.cle": "cle" }), FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+  web.recevoir({ type: "historique", echanges: [] });
+  $("panneau-parametres").hidden = true;
+  $("ouvrir-parametres").declencher("click");
+  const nom = { variable: "ATLAS_BONJOUR_NOM", description: "Le nom", secret: false, defini: false, modifiable: true, valeur: "" };
+  const bonjour = {
+    id: "bonjour",
+    nom: "Bonjour",
+    description: "",
+    version: "0.1",
+    auteur: "Quelqu'un",
+    origine: "communaute",
+    etat: "a_configurer",
+    detail: "il manque ATLAS_BONJOUR_NOM dans le .env du Core",
+    en_attente: false,
+    reglages: [nom],
+  };
+  const regle = { ...bonjour, etat: "coupe", detail: "", reglages: [{ ...nom, defini: true, valeur: "David" }] };
+  const derniers = () => $("liste-connecteurs").children[0].children[0].children.slice(-2);
+  web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [bonjour] });
+  let [ouvrir, formulaire] = derniers();
+  ouvrir.declencher("click");
+  formulaire.children[0].children[0].children[2].value = "David";
+  formulaire.declencher("submit", { preventDefault() {} });
+  assert.deepEqual(web.envoyes.at(-1), {
+    type: "regler_connecteur",
+    id: "bonjour",
+    valeurs: { ATLAS_BONJOUR_NOM: "David" },
+    effacer: [],
+  });
+  web.recevoir({ type: "resultat_reglage", id: "bonjour", ok: true, message: "Enregistré." });
+  [, formulaire] = derniers();
+  assert.deepEqual([formulaire.hidden, formulaire.children.at(-1).textContent], [false, "Enregistré."]);
+  web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [regle] });
+  [, formulaire] = derniers();
+  assert.equal(formulaire.children.at(-1).textContent, "Enregistré.", "toujours là, la liste à jour");
+  $("ouvrir-parametres").declencher("click"); // referme les Paramètres
+  $("ouvrir-parametres").declencher("click"); // les rouvre
+  web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [regle] });
+  [, formulaire] = derniers();
+  assert.equal(formulaire.hidden, true, "une liste fermée");
+  assert.ok(!formulaire.children.some((e) => e.className.startsWith("resultat")), "sans vieux message");
+});

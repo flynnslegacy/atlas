@@ -64,6 +64,20 @@ const sousTitres = { conteneur: $("sous-titres"), question: $("st-question"), re
 
 // --- La connexion -----------------------------------------------------------------
 
+// Les réglages des connecteurs : ceux qui sont ouverts, et la dernière réponse du Core pour
+// chacun, survivent aux nouveaux rendus de la liste (après chaque bascule ou réglage).
+const reglages = {
+  ouverts: new Set(),
+  resultats: new Map(),
+  surRegler: (id, valeurs, effacer) => connexion.envoyer({ type: "regler_connecteur", id, valeurs, effacer }),
+};
+let listeConnecteurs = null;
+
+function montrerConnecteurs() {
+  const surBascule = (id, actif) => connexion.envoyer({ type: "activer_connecteur", id, actif });
+  rendreConnecteurs(document, $("liste-connecteurs"), listeConnecteurs, surBascule, reglages);
+}
+
 const connexion = new Connexion({
   url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/web`,
   lireCle: () => cleEnMemoire ?? lireStockage(stockage, CLE_STOCKAGE),
@@ -76,9 +90,12 @@ const connexion = new Connexion({
     }
     if (TOUCHENT_DOCUMENTS.has(message.type)) surDocuments(message);
     if (message.type === "liste_connecteurs") {
-      rendreConnecteurs(document, $("liste-connecteurs"), message, (id, actif) =>
-        connexion.envoyer({ type: "activer_connecteur", id, actif }),
-      );
+      listeConnecteurs = message;
+      montrerConnecteurs();
+    }
+    if (message.type === "resultat_reglage") {
+      reglages.resultats.set(message.id, message);
+      if (listeConnecteurs) montrerConnecteurs();
     }
     if (message.type === "confirmation" || message.type === "confirmation_finie") {
       afficherConfirmation(message.texte, message.type === "confirmation");
@@ -240,6 +257,8 @@ $("retour-documents").addEventListener("click", montrerLaListe);
 
 function ouvrirParametres() {
   connexion.envoyer({ type: "connecteurs" }); // relus à chaque ouverture : un dossier a pu être déposé
+  reglages.ouverts.clear(); // chaque ouverture repart d'une liste fermée, sans vieux message
+  reglages.resultats.clear();
   const commun = { document, stockage, scene: () => sceneCourante };
   galeries = [
     ouvrirGalerie({
