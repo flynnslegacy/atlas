@@ -36,10 +36,16 @@ bench:
 # Le Core, relancé par un make neuf, qui relit le .env, chaque fois qu'il le demande en
 # laissant la marque donnees/redemarrer (le bouton « Redémarrer » de la page) ; sinon, la
 # boucle s'arrête avec lui (Ctrl-C, ou le Core qui tombe : launchd le relance sur le néo).
+# Le SIGTERM de launchd (kickstart -k, bootout) passe au Core, que la boucle attend : il
+# s'arrête proprement, sans orphelin. Un Ctrl-C, le Core le reçoit déjà du Terminal : la
+# boucle l'attend sans rien lui renvoyer (un second signal lui ferait sauter son arrêt propre).
 run-core:
-	@while :; do \
+	@trap 'kill -TERM $$enfant 2>/dev/null; wait $$enfant; exit 143' TERM; \
+	trap 'wait $$enfant; exit 130' INT; \
+	while :; do \
 	  rm -f donnees/redemarrer; \
-	  env $(addprefix -u ,$(CLES_DU_ENV)) $(MAKE) --no-print-directory core; code=$$?; \
+	  env $(addprefix -u ,$(CLES_DU_ENV)) $(MAKE) --no-print-directory core & enfant=$$!; \
+	  wait $$enfant; code=$$?; \
 	  [ -f donnees/redemarrer ] || exit $$code; \
 	done
 
