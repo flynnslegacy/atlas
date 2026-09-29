@@ -6,19 +6,23 @@ from pydantic import ValidationError
 from atlas_core.protocole import Etat
 from atlas_core.protocole_web import (
     LONGUEUR_MAX_SAISIE,
+    ActiverConnecteur,
     Arreter,
     AttenteConfirmation,
     Authentification,
     Confirmer,
+    DemandeConnecteurs,
     DemandeDocuments,
     Document,
     DocumentsChanges,
     Echange,
+    FicheConnecteur,
     FinConfirmation,
     FinMission,
     Historique,
     Latences,
     LireDocument,
+    ListeConnecteurs,
     ListeDocuments,
     MissionEnCours,
     Muet,
@@ -171,3 +175,33 @@ def test_la_mission_et_son_bouton_stop():
         "type": "mission_finie",
         "texte": "Mission arrêtée.",
     }
+
+
+def test_une_page_demande_les_connecteurs_et_en_bascule_un():
+    assert decoder_message_page('{"type":"connecteurs"}') == DemandeConnecteurs()
+    brut = '{"type":"activer_connecteur","id":"agenda-icloud","actif":true}'
+    assert decoder_message_page(brut) == ActiverConnecteur(id="agenda-icloud", actif=True)
+    fiche = FicheConnecteur(id="poste", nom="Le poste du Mac", origine="atlas", etat="coupe")
+    assert ListeConnecteurs(connecteurs=[fiche]).model_dump() == {
+        "type": "liste_connecteurs",
+        "disponible": True,
+        "connecteurs": [
+            {
+                "id": "poste",
+                "nom": "Le poste du Mac",
+                "description": "",
+                "version": "",
+                "auteur": "",
+                "origine": "atlas",
+                "etat": "coupe",
+                "detail": "",
+                "en_attente": False,
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("id_", ["../memoire", "Poste", "agenda_icloud", "", "a" * 41])
+def test_une_page_ne_nomme_qu_un_identifiant_de_connecteur(id_):
+    with pytest.raises(ValueError):
+        decoder_message_page(json.dumps({"type": "activer_connecteur", "id": id_, "actif": True}))

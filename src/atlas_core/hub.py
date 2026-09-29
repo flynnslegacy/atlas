@@ -19,14 +19,15 @@ from atlas_audio.client import lire_reglages
 from atlas_audio.connexion import PeripheriqueEnPanne
 
 from .cerveau import Cerveau, CerveauBouchon
-from .cerveau_claude import CerveauClaude, options_cerveau, purger_cles_api
+from .cerveau_claude import CerveauClaude
 from .config import Config
 from .confirmation import Confirmations
-from .consignes import date_en_lettres, heure_en_chiffres
 from .diffuseur import Diffuseur
-from .memoire import ErreurMemoire, Memoire
+from .memoire import Memoire
+from .missions import Missions
+from .options_claude import options_cerveau, purger_cles_api
 from .outils_memoire import OutilsMemoire
-from .outils_poste import Missions
+from .pages import lire_document, liste_connecteurs, liste_documents
 from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
@@ -39,24 +40,24 @@ from .protocole_voix import (
     verifier_bloc_page,
 )
 from .protocole_web import (
+    ActiverConnecteur,
     Arreter,
     AttenteConfirmation,
     Authentification,
     Confirmer,
+    DemandeConnecteurs,
     DemandeDocuments,
-    Document,
     DocumentsChanges,
     FinConfirmation,
     FinMission,
     LireDocument,
-    ListeDocuments,
     MissionEnCours,
     Muet,
-    ResumeDocument,
     Saisie,
     decoder_message_page,
 )
 from .regie import Regie
+from .registre import OFFICIELS, Registre
 from .session import Session, sans_destinataire
 from .synthese import ClientSynthese
 from .transcription import ClientTranscription
@@ -79,7 +80,6 @@ FERMETURE_CLE_ABSENTE = 4000
 FERMETURE_NON_AUTORISE = 4401
 FERMETURE_ORIGINE = 1008  # « policy violation », avant même d'accepter la connexion
 FERMETURE_PANNE = 1011  # « internal error » : la voix d'une page s'est arrêtée, elle se rebranche
-MEMOIRE_ABSENTE = "La mémoire n'est pas disponible."
 
 
 def creer_cerveau(config: Config) -> Cerveau:
@@ -100,61 +100,40 @@ def creer_cerveau(config: Config) -> Cerveau:
 
 
 def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
-    """La mémoire d'Atlas et ses outils ; None si elle ne s'ouvre pas (Atlas marche alors
-    sans). Les clés du Core sont des secrets qu'elle refuse d'écrire. Les pages sont
-    prévenues quand un document change, de la question qui attend le « oui » de David, et
-    de la mission en cours sur le Mac."""
-    secrets = [config.web_cle, config.audio_cle, config.poste_cle]
-    secrets.append(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
-    memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
-    if memoire is None:
-        return None
+    """La mémoire d'Atlas, ses outils et ses connecteurs ; None si elle ne s'ouvre pas (Atlas
+    marche alors sans). Les clés du Core et les secrets des connecteurs sont des secrets
+    qu'elle refuse d'écrire. Les pages sont prévenues quand un document change, de la
+    question qui attend le « oui » de David, et de la mission en cours sur le Mac."""
 
     def publier(msg) -> None:
         _regie.diffuseur.publier(msg)
 
-    confirmations = Confirmations(
-        sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
-        sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
-    )
-    # Le poste du Mac, si sa clé est configurée : ses outils n'existent pas sans elle.
-    poste = _poste if config.poste_cle else None
     missions = Missions(
         duree_s=config.mission_min * 60,
         sur_debut=lambda texte: publier(MissionEnCours(texte=texte)),
         sur_fin=lambda texte: publier(FinMission(texte=texte)),
     )
-    return OutilsMemoire(
-        memoire, confirmations, lambda: publier(DocumentsChanges()), poste=poste, missions=missions
+    registre = Registre(OFFICIELS, config.connecteurs_dossier, poste=_poste, missions=missions)
+    registre.decouvrir()
+    secrets = [config.web_cle, config.audio_cle, config.poste_cle, *registre.secrets()]
+    secrets.append(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
+    memoire = Memoire.ouvrir(config.memoire_dossier, secrets)
+    if memoire is None:
+        return None
+
+    confirmations = Confirmations(
+        sur_question=lambda texte: publier(AttenteConfirmation(texte=texte)),
+        sur_fin=lambda texte: publier(FinConfirmation(texte=texte)),
     )
-
-
-async def _liste_documents() -> ListeDocuments:
-    if _outils is None:
-        return ListeDocuments(disponible=False)
-    infos = await asyncio.to_thread(_outils.memoire.documents)
-    return ListeDocuments(
-        documents=[
-            ResumeDocument(
-                chemin=info.chemin,
-                titre=info.titre,
-                resume=info.resume,
-                modifie=f"{date_en_lettres(info.modifie)}, {heure_en_chiffres(info.modifie)}",
-            )
-            for info in infos
-        ]
+    outils = OutilsMemoire(
+        memoire,
+        confirmations,
+        lambda: publier(DocumentsChanges()),
+        missions=missions,
+        registre=registre,
     )
-
-
-async def _lire_document(chemin: str) -> Document:
-    if _outils is None:
-        return Document(chemin=chemin, erreur=MEMOIRE_ABSENTE)
-    try:
-        contenu = await asyncio.to_thread(_outils.memoire.lire, chemin)
-    except (ErreurMemoire, OSError) as e:
-        return Document(chemin=chemin, erreur=str(e))
-    titre = contenu.split("\n", 1)[0].lstrip("#").strip()
-    return Document(chemin=chemin, titre=titre, contenu=contenu)
+    outils.sur_connecteurs = lambda: publier(liste_connecteurs(outils))
+    return outils
 
 
 @asynccontextmanager
@@ -370,9 +349,9 @@ async def ws_web(ws: WebSocket) -> None:
             elif isinstance(msg, Muet):
                 await _regie.basculer_muet(msg.actif)
             elif isinstance(msg, DemandeDocuments):
-                abonnement.envoyer_prive(await _liste_documents())
+                abonnement.envoyer_prive(await liste_documents(_outils))
             elif isinstance(msg, LireDocument):
-                abonnement.envoyer_prive(await _lire_document(msg.chemin))
+                abonnement.envoyer_prive(await lire_document(_outils, msg.chemin))
             elif isinstance(msg, Confirmer):
                 # Comme taper « oui » ou « non » depuis cette page ; trop tard, rien.
                 if _outils is not None and _outils.confirmations.en_attente:
@@ -381,6 +360,13 @@ async def ws_web(ws: WebSocket) -> None:
                 # Comme taper « stop » depuis cette page ; la mission déjà finie, rien.
                 if _outils is not None and _outils.missions.en_cours is not None:
                     await _regie.saisie("stop", demande.page)
+            elif isinstance(msg, DemandeConnecteurs):
+                abonnement.envoyer_prive(liste_connecteurs(_outils))
+            elif isinstance(msg, ActiverConnecteur):
+                # La conversation se clôt ; la suivante porte les connecteurs actifs.
+                if _outils is not None and _outils.basculer(msg.id, msg.actif):
+                    _cerveau.renouveler()
+                _regie.diffuseur.publier(liste_connecteurs(_outils))  # toutes les pages
     except WebSocketDisconnect:
         pass
     finally:

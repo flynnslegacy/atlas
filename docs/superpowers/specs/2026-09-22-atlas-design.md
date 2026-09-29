@@ -405,6 +405,12 @@ outil » attendra que les outils soient plus nombreux.
 **Amendé le 26/09/2026 (le poste).** Une famille d'outils « poste » (`mac_…`), servie par
 le programme du M5, qui se connecte au Core : ouvrir une app ou une page, regarder
 l'écran, et les gestes d'une mission.
+**Amendé le 28/09/2026 (les connecteurs).** Les outils se répartissent entre le socle
+(mémoire, documents, recherche web) et des connecteurs : un dossier chacun, avec un
+manifeste lu sans exécuter de code, découvert automatiquement dans `connecteurs/` ou
+`~/.atlas/connecteurs/`, et activé depuis la page. C'est ainsi que se réalise « un fichier
+par outil, découverte automatique ». Le poste est le premier connecteur. Voir
+`2026-09-28-connecteurs-design.md`.
 
 Familles d'outils en v1 : n8n, mémoire et documents, veille. Home Assistant et agenda/mail
 viennent après la v1.
@@ -556,6 +562,9 @@ un workflow se déclenche à la voix.
 quotidien (`2026-09-26-poste-mac-design.md`, §1) : le poste, l'agenda et le mail, Home
 Assistant, joindre David, les réseaux sociaux. La supervision n8n reste parmi les idées ;
 le routeur d'intention et Ollama ne sont pas replanifiés pour l'instant.
+**Amendé le 28/09/2026.** L'étape 2 de la feuille de route (l'agenda et le mail) commence
+par le cadre des connecteurs (`2026-09-28-connecteurs-design.md`) : chaque lien vers
+l'extérieur devient un connecteur activable depuis la page.
 
 **Phase 4 — Présence et accès.** Tableau de bord, Hermes en porte mobile. L'orbe et la
 conversation ont été avancées (`2026-09-24-interface-orbe-design.md`).

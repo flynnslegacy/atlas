@@ -1,31 +1,27 @@
-"""Les outils du poste : ouvrir et regarder sur le Mac de David, et piloter ses apps dans une
-mission qu'il confirme (spec du poste, §5).
+"""Le poste du Mac de David, en connecteur (spec du poste, §5 ; spec des connecteurs, §4) :
+ouvrir et regarder, et piloter ses apps dans une mission qu'il confirme.
 
 `mac_ouvrir` et `mac_regarder` sont N2 : faits, puis annoncés. `mac_mission` est N3 : la
 tâche entière attend le « oui » de David ; ce « oui » ouvre la mission et part à Claude, qui
 pilote dans la réponse qui suit. Les gestes (`mac_capture`, `mac_cliquer`…) n'existent que
-pendant une mission : hors mission, ils refusent. Une mission s'arrête quand Claude la
-termine, au bout de sa durée, quand David parle, quand la réponse se termine, ou quand la
-conversation se ferme.
+pendant une mission : hors mission, ils refusent. Le lien avec le Mac et les missions sont des
+services du Core (service « poste » du manifeste).
 """
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
-from .confirmation import Mission
-from .outils import Capture, Fait, Niveau, Outil
-from .poste import ABSENT, ErreurPoste, Poste
-from .protocole_poste import Capturer, Cliquer, Defiler, Geste, Ouvrir, Taper, Touches
+from atlas_core.confirmation import Mission
+from atlas_core.connecteurs import Capture, Connecteur, Contexte, Fait, Niveau, Outil
+from atlas_core.missions import Missions
+from atlas_core.poste import ABSENT, ErreurPoste, Poste
+from atlas_core.protocole_poste import Capturer, Cliquer, Defiler, Geste, Ouvrir, Taper, Touches
 
-DUREE_S = 180.0
-AUCUNE_MISSION = "Aucune mission en cours : demande d'abord à David avec mac_mission."
-TEMPS_ECOULE = "Le temps de la mission est écoulé."
 FAIT = "Fait."
 
 OUVRIR = (
@@ -80,59 +76,6 @@ _SCHEMA_CLIQUER = {
     },
     "required": ["x", "y"],
 }
-
-
-class Missions:
-    """La mission en cours : ouverte par le « oui » de David, fermée par sa fin, sa durée, une
-    phrase de David, la fin de la réponse ou celle de la conversation. `sur_debut` et
-    `sur_fin` préviennent les pages."""
-
-    def __init__(
-        self,
-        duree_s: float = DUREE_S,
-        attendre: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        sur_debut: Callable[[str], None] | None = None,
-        sur_fin: Callable[[str], None] | None = None,
-    ) -> None:
-        self.duree_s = duree_s
-        self._attendre = attendre
-        self.sur_debut = sur_debut or (lambda texte: None)
-        self.sur_fin = sur_fin or (lambda texte: None)
-        self.en_cours: str | None = None
-        self._expiree = False
-        self._minuterie: asyncio.Task | None = None
-
-    def ouvrir(self, description: str) -> None:
-        self.fermer("Mission arrêtée.")
-        self.en_cours, self._expiree = description, False
-        self._minuterie = asyncio.create_task(self._expirer())
-        self.sur_debut(f"Mission en cours : {description}")
-
-    def fermer(self, fin: str) -> None:
-        """Ferme la mission en cours, s'il y en a une, et le dit aux pages."""
-        self._expiree = False
-        if self.en_cours is None:
-            return
-        self._arreter_la_minuterie()
-        self.en_cours = None
-        self.sur_fin(fin)
-
-    def verifier(self) -> None:
-        """Un geste n'a lieu que pendant une mission ; sinon `ErreurPoste`, pour Claude."""
-        if self.en_cours is None:
-            raise ErreurPoste(TEMPS_ECOULE if self._expiree else AUCUNE_MISSION)
-
-    async def _expirer(self) -> None:
-        await self._attendre(self.duree_s)
-        self._minuterie = None  # c'est elle qui sonne : rien à annuler
-        if self.en_cours is not None:
-            self.en_cours, self._expiree = None, True
-            self.sur_fin("Temps de la mission écoulé.")
-
-    def _arreter_la_minuterie(self) -> None:
-        if self._minuterie is not None:
-            self._minuterie.cancel()
-            self._minuterie = None
 
 
 def _domaine(adresse: str) -> str:
@@ -234,3 +177,16 @@ def outils_du_poste(poste: Poste, missions: Missions) -> list[Outil]:
         Outil("mac_defiler", DEFILER, {"sens": str, "quantite": int}, Niveau.N1, defiler),
         Outil("mac_fin_de_mission", FIN, {"bilan": str}, Niveau.N1, fin),
     ]
+
+
+class PosteDuMac(Connecteur):
+    def __init__(self, contexte: Contexte) -> None:
+        assert contexte.poste is not None and contexte.missions is not None
+        self._outils = outils_du_poste(contexte.poste, contexte.missions)
+
+    def outils(self) -> list[Outil]:
+        return self._outils
+
+
+def creer(contexte: Contexte) -> PosteDuMac:
+    return PosteDuMac(contexte)

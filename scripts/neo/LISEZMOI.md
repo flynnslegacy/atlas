@@ -184,8 +184,8 @@ n'y touche que si tu le lui demandes, et pour cliquer ou taper, il te demande d'
 confirmer la mission entière ; ton moindre mot, ou le bouton « Stop » de la page, l'arrête.
 
 1. Génère une clé (commande de l'étape 4) et mets-la dans `ATLAS_POSTE_CLE`, dans le
-   `.env` du Core et dans celui du M5 ; redémarre le Core. Sans elle, Atlas n'a aucun
-   outil pour le Mac.
+   `.env` du Core et dans celui du M5 ; redémarre le Core. Puis, dans la page, active « Le
+   poste du Mac » (Paramètres › Connecteurs) : sans clé, il reste « à configurer ».
 2. Dans le `.env` du M5 : `ATLAS_POSTE_URL=ws://neo.local:8080/ws/poste` (à laisser vide
    si le Core tourne sur le M5 lui-même).
 3. Sur le M5 : `make install`, puis, dans le Terminal, `make run-poste`.
@@ -196,3 +196,21 @@ confirmer la mission entière ; ton moindre mot, ou le bouton « Stop » de la p
    Terminal, puis relance `make run-poste`. Tant qu'une manque, Atlas dit laquelle.
 
 `ATLAS_MISSION_MIN` (trois minutes par défaut, côté Core) borne la durée d'une mission.
+
+## 13. Les connecteurs
+
+Chaque lien d'Atlas vers l'extérieur (le poste du Mac, puis l'agenda, le mail…) est un
+connecteur : un dossier, que tu actives ou coupes dans la page (Paramètres › Connecteurs).
+Une bascule prend effet à ta question suivante, dans une conversation neuve ; celle en cours
+se résume d'abord au journal.
+
+- Les connecteurs d'Atlas sont dans `connecteurs/` du dépôt. Les tiens, et ceux de la
+  communauté, se déposent dans `~/.atlas/connecteurs/` sur la machine du Core (réglage
+  `ATLAS_CONNECTEURS_DOSSIER`) ; ils apparaissent dans la page, coupés.
+- Un connecteur « à configurer » attend une variable dans le `.env` du Core, qu'il nomme ;
+  ajoute-la et redémarre le Core. Un connecteur « à installer » attend ses dépendances :
+  lance `make install`, puis redémarre le Core.
+- Un connecteur de la communauté fait tourner son code dans Atlas : n'active que ce en quoi
+  tu as confiance. Pour en écrire un : `connecteurs/LISEZMOI.md`.
+- Les interrupteurs sont rangés dans `~/.atlas/connecteurs.json`. Sans mémoire, pas de
+  connecteurs.

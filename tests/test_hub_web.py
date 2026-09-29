@@ -143,6 +143,108 @@ def test_sans_memoire_la_page_le_sait(regie, monkeypatch):
     assert document["erreur"] == "La mémoire n'est pas disponible."
 
 
+@pytest.fixture
+def connecteurs(memoire, monkeypatch, tmp_path):
+    dossier = tmp_path / "connecteurs"
+    (dossier / "casse").mkdir(parents=True)  # un dossier sans manifeste
+    monkeypatch.setattr(hub, "_config", replace(hub._config, connecteurs_dossier=dossier))
+    monkeypatch.setenv("ATLAS_POSTE_CLE", "cle-du-poste-de-test")
+
+
+def test_une_page_liste_les_connecteurs_meme_casses(connecteurs):
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "connecteurs"})
+        liste = ws.receive_json()
+    assert (liste["type"], liste["disponible"]) == ("liste_connecteurs", True)
+    poste, casse = liste["connecteurs"]
+    assert (poste["id"], poste["nom"], poste["origine"], poste["etat"]) == (
+        "poste",
+        "Le poste du Mac",
+        "atlas",
+        "coupe",
+    )
+    assert (poste["version"], poste["auteur"]) == ("1.0.0", "Atlas")
+    assert casse == {
+        "id": "casse",
+        "nom": "casse",
+        "description": "",
+        "version": "",
+        "auteur": "",
+        "origine": "communaute",
+        "etat": "en_erreur",
+        "detail": "connecteur.toml absent",
+        "en_attente": False,
+    }
+
+
+def test_la_liste_demandee_ne_va_qu_a_la_page_qui_la_demande(connecteurs):
+    with (
+        TestClient(hub.app) as client,
+        client.websocket_connect("/ws/web", headers=ORIGINE) as ws,
+        client.websocket_connect("/ws/web", headers=ORIGINE) as autre,
+    ):
+        _entrer(ws)
+        _entrer(autre)
+        ws.send_json({"type": "connecteurs"})
+        assert ws.receive_json()["type"] == "liste_connecteurs"
+        autre.send_json({"type": "saisie", "texte": ""})  # sa réponse suit tout ce qu'elle a reçu
+        assert autre.receive_json()["type"] == "erreur"
+
+
+def test_activer_un_connecteur_renouvelle_la_conversation_et_toutes_les_pages_le_voient(
+    connecteurs, monkeypatch
+):
+    with (
+        TestClient(hub.app) as client,
+        client.websocket_connect("/ws/web", headers=ORIGINE) as ws,
+        client.websocket_connect("/ws/web", headers=ORIGINE) as autre,
+    ):
+        _entrer(ws)
+        _entrer(autre)
+        renouvellements: list[bool] = []
+        monkeypatch.setattr(hub._cerveau, "renouveler", lambda: renouvellements.append(True))
+        ws.send_json({"type": "activer_connecteur", "id": "poste", "actif": True})
+        autre.send_json(
+            {"type": "activer_connecteur", "id": "poste", "actif": True}
+        )  # en même temps
+        for page in (ws, autre, ws, autre):
+            fiche = page.receive_json()["connecteurs"][0]
+            assert (fiche["id"], fiche["etat"], fiche["en_attente"]) == ("poste", "actif", True)
+        assert renouvellements == [True], "une seule conversation neuve"
+        assert "mcp__atlas__mac_mission" in hub._outils.noms
+        ws.send_json({"type": "activer_connecteur", "id": "inconnu", "actif": True})
+        assert [f["id"] for f in ws.receive_json()["connecteurs"]] == ["poste", "casse"]
+        ws.send_json({"type": "activer_connecteur", "id": "../memoire", "actif": True})
+        erreur = ws.receive_json()
+    assert (erreur["type"], erreur["code"]) == ("erreur", "message_invalide")
+    assert renouvellements == [True], "rien n'a changé : la conversation continue"
+
+
+def test_la_note_d_attente_tient_jusqu_a_la_question_suivante(connecteurs):
+    # Sans doublure du cerveau : la conversation se clôt pour de bon, mais aucune question
+    # n'a encore ouvert la suivante.
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "activer_connecteur", "id": "poste", "actif": True})
+        assert ws.receive_json()["connecteurs"][0]["en_attente"] is True
+        for _ in range(3):
+            ws.send_json({"type": "connecteurs"})
+            fiche = ws.receive_json()["connecteurs"][0]
+        assert (fiche["etat"], fiche["en_attente"]) == ("actif", True)
+
+
+def test_sans_memoire_pas_de_connecteurs(regie, monkeypatch):
+    monkeypatch.setattr(hub, "_config", replace(hub._config, web_cle=CLE, cerveau="bouchon"))
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "connecteurs"})
+        liste = ws.receive_json()
+        ws.send_json({"type": "activer_connecteur", "id": "poste", "actif": True})
+        apres = ws.receive_json()
+    assert liste == apres == {"type": "liste_connecteurs", "disponible": False, "connecteurs": []}
+
+
 class _Attente:
     def __init__(self, en_attente: bool) -> None:
         self.en_attente = en_attente

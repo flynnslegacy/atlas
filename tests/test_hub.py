@@ -10,6 +10,8 @@ from starlette.websockets import WebSocketDisconnect
 from atlas_core import hub, memoire
 from atlas_core.cerveau import CerveauBouchon
 from atlas_core.cerveau_claude import CerveauClaude
+from atlas_core.outils_memoire import OutilsMemoire
+from atlas_core.pages import liste_connecteurs
 from atlas_core.protocole import (
     TAILLE_BLOC_OCTETS,
     Bonjour,
@@ -21,6 +23,7 @@ from atlas_core.protocole_web import (
     DocumentsChanges,
     FinConfirmation,
     FinMission,
+    ListeConnecteurs,
     MissionEnCours,
 )
 
@@ -221,13 +224,59 @@ def test_la_mission_previent_les_pages(monkeypatch, tmp_path):
     ]
 
 
-def test_avec_la_cle_du_poste_le_cerveau_recoit_les_outils_du_mac(tmp_path):
-    base = replace(hub._config, memoire_dossier=tmp_path / "memoire", mission_min=5.0)
-    avec = hub.ouvrir_la_memoire(replace(base, poste_cle="cle-du-poste"))
-    assert avec.avec_poste and "mcp__atlas__mac_mission" in avec.noms
-    assert avec.missions.duree_s == 300
-    sans = hub.ouvrir_la_memoire(replace(base, poste_cle=""))
-    assert not sans.avec_poste and not any("mac_" in nom for nom in sans.noms)
+def test_un_connecteur_active_donne_ses_outils_au_cerveau(monkeypatch, tmp_path):
+    base = replace(
+        hub._config,
+        memoire_dossier=tmp_path / "memoire",
+        connecteurs_dossier=tmp_path / "connecteurs",
+        mission_min=5.0,
+    )
+    monkeypatch.setenv("ATLAS_POSTE_CLE", "cle-du-poste-de-test")
+    outils = hub.ouvrir_la_memoire(base)
+    assert not any("mac_" in nom for nom in outils.noms), "un connecteur neuf commence coupé"
+    assert outils.basculer("poste", True)
+    assert "mcp__atlas__mac_mission" in outils.noms and outils.missions.duree_s == 300
+    relu = hub.ouvrir_la_memoire(base)
+    assert "mcp__atlas__mac_mission" in relu.noms, "au redémarrage, l'interrupteur tient"
+    monkeypatch.delenv("ATLAS_POSTE_CLE")
+    sans_cle = hub.ouvrir_la_memoire(base)
+    assert not any("mac_" in nom for nom in sans_cle.noms)
+
+
+def test_la_memoire_refuse_aussi_les_secrets_des_connecteurs(monkeypatch, tmp_path):
+    monkeypatch.setenv("ATLAS_POSTE_CLE", "cle-du-poste-lue-par-son-connecteur")
+    config = replace(
+        hub._config,
+        memoire_dossier=tmp_path / "memoire",
+        connecteurs_dossier=tmp_path / "connecteurs",
+        poste_cle="",
+    )
+    outils = hub.ouvrir_la_memoire(config)
+    with pytest.raises(memoire.ErreurMemoire, match="clé secrète"):
+        outils.memoire.ecrire(
+            "profil.md", "# Profil\n\nDavid.\n\ncle-du-poste-lue-par-son-connecteur\n"
+        )
+
+
+def test_quand_les_bascules_prennent_effet_les_pages_le_voient(monkeypatch, tmp_path):
+    publies: list = []
+    monkeypatch.setattr(hub._regie.diffuseur, "publier", publies.append)
+    monkeypatch.setenv("ATLAS_POSTE_CLE", "cle-du-poste-de-test")
+    config = replace(
+        hub._config, memoire_dossier=tmp_path / "memoire", connecteurs_dossier=tmp_path / "c"
+    )
+    outils = hub.ouvrir_la_memoire(config)
+    outils.basculer("poste", True)
+    outils.conversation_commencee()  # la conversation neuve : la bascule a pris effet
+    [liste] = [m for m in publies if isinstance(m, ListeConnecteurs)]
+    [poste] = liste.connecteurs
+    assert (poste.id, poste.etat, poste.en_attente) == ("poste", "actif", False)
+
+
+def test_sans_registre_une_page_n_a_pas_de_connecteurs(tmp_path):
+    sans_registre = OutilsMemoire(memoire.Memoire.ouvrir(tmp_path / "memoire"))
+    assert liste_connecteurs(sans_registre) == ListeConnecteurs(disponible=False)
+    assert liste_connecteurs(None) == ListeConnecteurs(disponible=False)
 
 
 def test_le_core_garde_les_outils_du_cerveau_le_temps_de_sa_vie(monkeypatch, tmp_path):

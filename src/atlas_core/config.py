@@ -14,6 +14,7 @@ from pathlib import Path
 CERVEAUX = ("claude", "bouchon")
 MODELE_PAR_DEFAUT = "claude-sonnet-5"
 MEMOIRE_PAR_DEFAUT = Path.home() / ".atlas" / "memoire"
+CONNECTEURS_PAR_DEFAUT = Path.home() / ".atlas" / "connecteurs"
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class Config:
     voix_marge_s: float = 0.2
     voix_bargein_dbfs: float = -40.0
     memoire_dossier: Path = MEMOIRE_PAR_DEFAUT  # le dépôt git local de la mémoire, jamais poussé
+    # Les connecteurs de David et de la communauté ; leurs interrupteurs dans le fichier voisin.
+    connecteurs_dossier: Path = CONNECTEURS_PAR_DEFAUT
 
     @staticmethod
     def depuis_environnement() -> Config:
@@ -52,6 +55,7 @@ class Config:
             voix_marge_s=_lire_nombre("ATLAS_VOIX_MARGE_S", "0.2", 0.0, 2.0),
             voix_bargein_dbfs=_lire_nombre("ATLAS_VOIX_BARGEIN_DBFS", "-40", -120.0, 0.0),
             memoire_dossier=_lire_dossier_memoire(),
+            connecteurs_dossier=_lire_dossier_connecteurs(),
         )
 
 
@@ -92,3 +96,8 @@ def _lire_nombre(nom: str, defaut: str, mini: float, maxi: float) -> float:
 def _lire_dossier_memoire() -> Path:
     brute = os.environ.get("ATLAS_MEMOIRE_DOSSIER", "").strip()
     return Path(brute).expanduser() if brute else MEMOIRE_PAR_DEFAUT
+
+
+def _lire_dossier_connecteurs() -> Path:
+    brute = os.environ.get("ATLAS_CONNECTEURS_DOSSIER", "").strip()
+    return Path(brute).expanduser() if brute else CONNECTEURS_PAR_DEFAUT

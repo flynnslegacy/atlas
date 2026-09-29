@@ -1,5 +1,6 @@
 // Le démarrage de la page : relie la connexion, la voix, l'état, l'orbe, le fond et les panneaux.
 
+import { rendreConnecteurs } from "./connecteurs.js";
 import { Connexion, identifiantDePage } from "./connexion.js";
 import { dimensionner, rgba } from "./dessin.js";
 import { rendreDocument, rendreListeDocuments } from "./documents.js";
@@ -74,6 +75,11 @@ const connexion = new Connexion({
       rendreHistorique(document, $("liste-historique"), etat.historique);
     }
     if (TOUCHENT_DOCUMENTS.has(message.type)) surDocuments(message);
+    if (message.type === "liste_connecteurs") {
+      rendreConnecteurs(document, $("liste-connecteurs"), message, (id, actif) =>
+        connexion.envoyer({ type: "activer_connecteur", id, actif }),
+      );
+    }
     if (message.type === "confirmation" || message.type === "confirmation_finie") {
       afficherConfirmation(message.texte, message.type === "confirmation");
     }
@@ -233,6 +239,7 @@ $("retour-documents").addEventListener("click", montrerLaListe);
 // --- Les panneaux -----------------------------------------------------------------
 
 function ouvrirParametres() {
+  connexion.envoyer({ type: "connecteurs" }); // relus à chaque ouverture : un dossier a pu être déposé
   const commun = { document, stockage, scene: () => sceneCourante };
   galeries = [
     ouvrirGalerie({

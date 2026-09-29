@@ -10,6 +10,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
+from .connecteurs import ID_MAX, MOTIF_ID
+
 LONGUEUR_MAX_SAISIE = 1000
 TAILLE_MAX_CLE = 256
 # L'identifiant qu'une page tire au hasard à son ouverture, le même sur /ws/web et sur
@@ -126,6 +128,28 @@ class FinMission(BaseModel):
     texte: str
 
 
+class FicheConnecteur(BaseModel):
+    """Un connecteur tel que la page le montre (spec des connecteurs, §6)."""
+
+    id: str
+    nom: str
+    description: str = ""
+    version: str = ""
+    auteur: str = ""
+    origine: Literal["atlas", "communaute"]
+    etat: Literal["actif", "coupe", "a_configurer", "a_installer", "en_erreur"]
+    detail: str = ""
+    en_attente: bool = False  # basculé : prend effet à la question suivante
+
+
+class ListeConnecteurs(BaseModel):
+    """Les connecteurs trouvés, officiels d'abord ; `disponible` est faux sans mémoire."""
+
+    type: Literal["liste_connecteurs"] = "liste_connecteurs"
+    disponible: bool = True
+    connecteurs: list[FicheConnecteur] = []
+
+
 # --- page vers Core -----------------------------------------------------
 
 
@@ -170,8 +194,28 @@ class Arreter(BaseModel):
     type: Literal["stop"] = "stop"
 
 
+class DemandeConnecteurs(BaseModel):
+    type: Literal["connecteurs"] = "connecteurs"
+
+
+class ActiverConnecteur(BaseModel):
+    """L'interrupteur d'un connecteur, dans les Paramètres."""
+
+    type: Literal["activer_connecteur"] = "activer_connecteur"
+    id: str = Field(pattern=MOTIF_ID, max_length=ID_MAX)
+    actif: bool
+
+
 MessagePage = Annotated[
-    Authentification | Saisie | Muet | DemandeDocuments | LireDocument | Confirmer | Arreter,
+    Authentification
+    | Saisie
+    | Muet
+    | DemandeDocuments
+    | LireDocument
+    | Confirmer
+    | Arreter
+    | DemandeConnecteurs
+    | ActiverConnecteur,
     Field(discriminator="type"),
 ]
 _adaptateur_page = TypeAdapter(MessagePage)

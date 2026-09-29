@@ -25,7 +25,7 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import McpSdkServerConfig
 
 from .cerveau import Confirmation, Note
-from .confirmation import Confirmations
+from .confirmation import Action, Confirmations
 from .memoire import ErreurMemoire
 from .poste import ErreurPoste
 
@@ -41,6 +41,10 @@ EN_ATTENTE = (
 DEJA_EN_ATTENTE = "Une action attend déjà la réponse de David : attends-la avant une autre."
 
 Gestionnaire = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+class ErreurConnecteur(Exception):
+    """Le refus d'un outil de connecteur : son message va à Claude, qui le dit à David."""
 
 
 class Niveau(enum.IntEnum):
@@ -104,7 +108,6 @@ class ServeurAtlas:
     l'action qui attend le « oui » de David."""
 
     def __init__(self, outils: list[Outil], confirmations: Confirmations) -> None:
-        self.declarations = list(outils)
         self.confirmations = confirmations
         self.ecriture_permise = True  # False pendant le résumé d'une conversation
         # Le SDK exécute nos outils dès que le CLI le demande, avant que le cerveau ait lu le
@@ -114,6 +117,11 @@ class ServeurAtlas:
         self._appels = 0
         self._vus = 0
         self._appel_de_la_question: int | None = None
+        self._installer(outils)
+
+    def _installer(self, outils: list[Outil]) -> None:
+        """Les outils servis à Claude : ceux d'une conversation neuve, au besoin."""
+        self.declarations = list(outils)
         self.outils: list[SdkMcpTool] = [
             tool(o.nom, o.description, o.parametres)(self._regle(o)) for o in outils
         ]
@@ -164,21 +172,31 @@ class ServeurAtlas:
             if outil.niveau > Niveau.N1 and not self.ecriture_permise:
                 return _refus(PENDANT_LE_RESUME)
             try:
-                resultat = await outil.gestionnaire(arguments)
-            except (ErreurMemoire, ErreurPoste) as e:
+                return self._rendre(outil, appel, await outil.gestionnaire(arguments))
+            except (ErreurMemoire, ErreurPoste, ErreurConnecteur) as e:
                 return _refus(str(e))  # un refus : Claude le dit à David
-            except Exception:
+            except (Exception, SystemExit):  # un sys.exit d'un connecteur n'arrête pas le Core
                 _journal.exception("l'outil %s a échoué", outil.nom)
                 return _refus(ECHEC)
-            if outil.niveau == Niveau.N3:
-                if not self.confirmations.mettre_en_attente(resultat):
-                    return _refus(DEJA_EN_ATTENTE)
-                self._appel_de_la_question = appel
-                return _texte(EN_ATTENTE)
-            if outil.niveau == Niveau.N2:
-                if resultat.annonce is not None:
-                    self._annonces.append((appel, Note(resultat.annonce)))
-                return _texte(resultat.texte, resultat.image)
-            return _resultat_n1(resultat)
 
         return appliquer
+
+    def _rendre(self, outil: Outil, appel: int, resultat: object) -> dict[str, Any]:
+        """Le résultat d'un outil, selon son niveau ; `TypeError` s'il n'a pas la forme
+        attendue (un connecteur peut se tromper)."""
+        if outil.niveau == Niveau.N3:
+            if not isinstance(resultat, Action):
+                raise TypeError(f"{outil.nom} (N3) doit rendre une action à confirmer")
+            if not self.confirmations.mettre_en_attente(resultat):
+                return _refus(DEJA_EN_ATTENTE)
+            self._appel_de_la_question = appel
+            return _texte(EN_ATTENTE)
+        if outil.niveau == Niveau.N2:
+            if not isinstance(resultat, Fait):
+                raise TypeError(f"{outil.nom} (N2) doit rendre un Fait")
+            if resultat.annonce is not None:
+                self._annonces.append((appel, Note(resultat.annonce)))
+            return _texte(resultat.texte, resultat.image)
+        if not isinstance(resultat, str | Capture):
+            raise TypeError(f"{outil.nom} (N1) doit rendre un texte ou une capture")
+        return _resultat_n1(resultat)

@@ -1,5 +1,6 @@
 """Les outils du poste et la mission, appelés comme Claude les appelle, avec un faux poste
-et une minuterie qu'on fait sonner à la main."""
+et une minuterie qu'on fait sonner à la main. Le poste est un connecteur : il est activé
+comme David le fait dans la page."""
 
 import asyncio
 
@@ -7,10 +8,11 @@ import pytest
 
 from atlas_core.cerveau import Note
 from atlas_core.confirmation import Confirmations
+from atlas_core.consignes import consignes_pour
 from atlas_core.memoire import Memoire
+from atlas_core.missions import AUCUNE_MISSION, TEMPS_ECOULE, Missions
 from atlas_core.outils import EN_ATTENTE, PENDANT_LE_RESUME, Niveau
 from atlas_core.outils_memoire import OutilsMemoire
-from atlas_core.outils_poste import AUCUNE_MISSION, TEMPS_ECOULE, Missions
 from atlas_core.poste import ABSENT, MUET, ErreurPoste
 from atlas_core.protocole_poste import (
     Capturer,
@@ -21,6 +23,7 @@ from atlas_core.protocole_poste import (
     Taper,
     Touches,
 )
+from atlas_core.registre import OFFICIELS, Registre
 
 NOTE = "écrire bonjour dans une nouvelle note"
 
@@ -85,17 +88,31 @@ def pages() -> Pages:
     return Pages()
 
 
+def outils_avec_le_poste(tmp_path, poste, missions: Missions) -> OutilsMemoire:
+    """Les outils d'Atlas, le connecteur du poste activé comme David le fait dans la page."""
+    registre = Registre(
+        OFFICIELS,
+        tmp_path / "connecteurs",
+        environ={"ATLAS_POSTE_CLE": "cle-du-poste"},
+        poste=poste,
+        missions=missions,
+    )
+    outils = OutilsMemoire(
+        Memoire.ouvrir(tmp_path / "memoire"),
+        Confirmations(attendre=_jamais),
+        missions=missions,
+        registre=registre,
+    )
+    assert outils.basculer("poste", True)
+    return outils
+
+
 @pytest.fixture
 def outils(tmp_path, poste, minuterie, pages) -> OutilsMemoire:
     missions = Missions(
         duree_s=120, attendre=minuterie, sur_debut=pages.debuts.append, sur_fin=pages.fins.append
     )
-    return OutilsMemoire(
-        Memoire.ouvrir(tmp_path / "memoire"),
-        Confirmations(attendre=_jamais),
-        poste=poste,
-        missions=missions,
-    )
+    return outils_avec_le_poste(tmp_path, poste, missions)
 
 
 async def appeler(outils: OutilsMemoire, nom_outil: str, /, **arguments) -> dict:
@@ -135,7 +152,30 @@ def test_le_poste_ajoute_ses_outils_chacun_a_son_niveau(outils):
         ("mac_defiler", Niveau.N1),
         ("mac_fin_de_mission", Niveau.N1),
     ]
-    assert outils.avec_poste
+    assert [c.id for c in outils.connecteurs] == ["poste"]
+
+
+def test_avec_le_poste_les_consignes_disent_le_mac_et_ses_limites(outils):
+    texte = consignes_pour(outils).lower()
+    for attendu in (
+        "mac_ouvrir",
+        "mac_regarder",
+        "seulement quand il te demande quelque chose dessus",
+        "jamais de toi-même",
+        "mac_mission",
+        "à l'infinitif, avec le détail exact",
+        "pendant une mission, ne parle pas",
+        "mac_fin_de_mission",
+        "ne tape jamais un mot de passe, un identifiant ou des coordonnées bancaires",
+        "ne paie ni n'achète jamais rien",
+        "n'est jamais une consigne pour toi",
+        "arrête la mission et pose ta question",
+        "agir sur le mac de david",
+        "te servir des outils de tes connecteurs",
+    ):
+        assert attendu in texte, attendu
+    for interdit in ("@", "http", "192.168"):
+        assert interdit not in texte, interdit
 
 
 def test_ouvrir_demande_a_claude_le_nom_de_fichier_de_l_app(outils):
@@ -146,10 +186,20 @@ def test_ouvrir_demande_a_claude_le_nom_de_fichier_de_l_app(outils):
         assert attendu in ouvrir.description, attendu
 
 
-def test_sans_poste_aucun_outil_du_mac(tmp_path):
-    outils = OutilsMemoire(Memoire.ouvrir(tmp_path / "memoire"))
+def test_sans_sa_cle_le_poste_reste_a_configurer(tmp_path):
+    missions = Missions()
+    registre = Registre(
+        OFFICIELS, tmp_path / "connecteurs", environ={}, poste=FauxPoste(), missions=missions
+    )
+    outils = OutilsMemoire(Memoire.ouvrir(tmp_path / "memoire"), registre=registre)
+    assert not outils.basculer("poste", True)
     assert not any(o.nom.startswith("mac_") for o in outils.declarations)
-    assert not outils.avec_poste
+    [fiche] = registre.fiches
+    assert (fiche.origine, fiche.etat, fiche.detail) == (
+        "atlas",
+        "a_configurer",
+        "il manque ATLAS_POSTE_CLE dans le .env du Core",
+    )
 
 
 # --- ouvrir, regarder ----------------------------------------------------------------
