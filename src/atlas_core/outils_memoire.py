@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 from .confirmation import Confirmations, Suppression
@@ -19,6 +20,7 @@ from .missions import Missions
 from .outils import Fait, Niveau, Outil, ServeurAtlas
 from .outils_documents import outils_des_documents
 from .registre import ConnecteurActif, Registre
+from .reglages import ReglageRefuse, changements_permis, ecrire_env
 
 _journal = logging.getLogger(__name__)
 
@@ -78,7 +80,8 @@ class OutilsMemoire(ServeurAtlas):
     """Le serveur « atlas » : le socle (la mémoire et les documents), et les outils des
     connecteurs actifs du `registre`. `sur_documents` prévient les pages quand un document
     change, `sur_connecteurs` quand des bascules ont pris effet ; `confirmations` tient
-    l'action qui attend le « oui » ; `missions`, la mission en cours sur le Mac."""
+    l'action qui attend le « oui » ; `missions`, la mission en cours sur le Mac ;
+    `fichier_env`, le .env où s'écrivent les réglages des connecteurs saisis dans la page."""
 
     def __init__(
         self,
@@ -88,8 +91,10 @@ class OutilsMemoire(ServeurAtlas):
         missions: Missions | None = None,
         registre: Registre | None = None,
         sur_connecteurs: Callable[[], None] | None = None,
+        fichier_env: Path | None = None,
     ) -> None:
         self.memoire = memoire
+        self.fichier_env = fichier_env
         self.sur_documents = sur_documents or (lambda: None)
         self.sur_connecteurs = sur_connecteurs or (lambda: None)
         self.missions = missions or Missions()
@@ -128,6 +133,33 @@ class OutilsMemoire(ServeurAtlas):
         neuve : celle en cours garde les siens jusqu'à sa clôture."""
         if self.registre is None or not self.registre.basculer(id_, actif):
             return False
+        self.connecteurs = self.registre.actifs()
+        self._installer(self._tous())
+        return True
+
+    def regler(self, id_: str, valeurs: Mapping[str, str], effacer: Iterable[str]) -> bool:
+        """Écrit des réglages d'un connecteur dans le .env et les applique aussitôt : un
+        connecteur actif se recharge avec eux, comme après deux bascules (rend vrai : la
+        conversation se renouvelle). `ReglageRefuse` si rien ne convient : rien n'a changé."""
+        if self.registre is None or self.fichier_env is None:
+            raise ReglageRefuse("Les réglages ne s'écrivent pas ici.")
+        fiche = next((f for f in self.registre.decouvrir() if f.id == id_), None)
+        if fiche is None or fiche.manifeste is None:
+            raise ReglageRefuse("Ce connecteur n'a pas de réglages.")
+        changements = changements_permis(fiche.manifeste, valeurs, effacer)
+        ecrire_env(self.fichier_env, changements)
+        environ = self.registre.environ
+        for variable, valeur in changements.items():
+            if valeur is None:
+                environ.pop(variable, None)
+            else:
+                environ[variable] = valeur
+        secrets = {r.variable for r in fiche.manifeste.reglages if r.secret}
+        self.memoire.ajouter_secrets(v for k, v in changements.items() if v and k in secrets)
+        if fiche.etat != "actif":
+            return False
+        self.registre.basculer(id_, False)
+        self.registre.basculer(id_, True)  # s'il ne se recharge pas : « en erreur »
         self.connecteurs = self.registre.actifs()
         self._installer(self._tous())
         return True

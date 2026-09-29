@@ -26,7 +26,7 @@ import subprocess
 import sys
 import tempfile
 import types
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -126,7 +126,7 @@ class Registre:
         officiels: Path,
         perso: Path,
         *,
-        environ: Mapping[str, str] | None = None,
+        environ: MutableMapping[str, str] | None = None,
         poste: Poste | None = None,
         missions: Missions | None = None,
         installe: Callable[[str], bool] = _installe,
@@ -140,6 +140,11 @@ class Registre:
         self._charges = _Charges()
         self._en_attente: set[str] = set()
         self._fiches: list[Fiche] = []
+
+    @property
+    def environ(self) -> MutableMapping[str, str]:
+        """Où se lisent les réglages des connecteurs : l'environnement du Core."""
+        return self._environ
 
     def reserver(self, noms: Iterable[str]) -> None:
         """Les noms des outils du socle, qu'aucun connecteur ne peut prendre."""

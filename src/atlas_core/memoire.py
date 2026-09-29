@@ -207,6 +207,10 @@ class Memoire:
         self._secrets = [s for s in secrets if len(s) >= SECRET_MIN]
         self._verrou = threading.Lock()  # une écriture à la fois
 
+    def ajouter_secrets(self, secrets: Iterable[str]) -> None:
+        """Un réglage secret saisi dans la page : refusé dès maintenant, lui aussi."""
+        self._secrets.extend(s for s in secrets if len(s) >= SECRET_MIN)
+
     @classmethod
     def ouvrir(cls, racine: Path, secrets: Iterable[str] = ()) -> Memoire | None:
         """Crée le dossier et son dépôt au besoin. None si c'est impossible (git absent,
