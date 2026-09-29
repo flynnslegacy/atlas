@@ -53,12 +53,16 @@ function ligne(document, connecteur, surBascule) {
   interrupteur.checked = connecteur.etat === "actif";
   interrupteur.disabled = connecteur.etat !== "actif" && connecteur.etat !== "coupe";
   interrupteur.setAttribute("aria-label", `Activer ${connecteur.nom}`);
+  // Habillé comme « Muet » et « Hey Atlas » : une glissière, pas une case.
+  const bascule = document.createElement("label");
+  bascule.className = "interrupteur";
+  bascule.append(interrupteur);
   const tete = document.createElement("div");
   tete.className = "tete";
   tete.append(
     texte(document, "span", "nom", connecteur.nom),
     texte(document, "span", `badge ${connecteur.origine}`, ORIGINES[connecteur.origine]),
-    interrupteur,
+    bascule,
   );
   element.append(tete);
   if (connecteur.description) element.append(texte(document, "p", "description", connecteur.description));

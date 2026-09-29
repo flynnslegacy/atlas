@@ -151,7 +151,7 @@ button {
   outline-offset: 4px;
 }
 
-/* Les interrupteurs « muet » et « Hey Atlas » : une case à cocher habillée. */
+/* Les interrupteurs « muet », « Hey Atlas » et des connecteurs : une case à cocher habillée. */
 .interrupteur {
   display: flex;
   align-items: center;
@@ -193,6 +193,11 @@ button {
 
 .interrupteur input:checked::after {
   transform: translateX(16px);
+}
+
+.interrupteur input:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .interrupteur input:focus-visible {
