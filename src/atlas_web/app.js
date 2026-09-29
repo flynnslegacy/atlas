@@ -284,6 +284,7 @@ const rubriques = new Rubriques({
   },
   panneau: $("panneau-parametres"),
   contenu: $("contenu-parametres"),
+  menu: $("menu-parametres"),
   boutonRetour: $("retour-parametres"),
   stockage,
   estEtroit: () => ecranEtroit.matches,

@@ -10,7 +10,7 @@ export const PAR_DEFAUT = "connecteurs";
 export const CLE_RUBRIQUE = "atlas.rubrique";
 
 // `boutons` : ceux de la colonne, chacun avec `data-rubrique` ; `pages` : la section de chaque
-// rubrique ; `contenu` : ce qui défile ; `boutonRetour` : « ‹ Paramètres » ; `estEtroit()` :
+// rubrique ; `contenu` et `menu` : ce qui défile ; `boutonRetour` : « ‹ Paramètres » ; `estEtroit()` :
 // l'écran montre-t-il une seule colonne ? `surChoix(id)` : la rubrique affichée (null : aucune,
 // la liste seule).
 export class Rubriques {
@@ -19,6 +19,7 @@ export class Rubriques {
     pages,
     panneau,
     contenu,
+    menu = null,
     boutonRetour = null,
     stockage,
     estEtroit = () => false,
@@ -28,6 +29,7 @@ export class Rubriques {
     this._pages = pages;
     this._panneau = panneau;
     this._contenu = contenu;
+    this._menu = menu;
     this._boutonRetour = boutonRetour;
     this._stockage = stockage;
     this._estEtroit = estEtroit;
@@ -44,6 +46,8 @@ export class Rubriques {
     const retenue = lireStockage(this._stockage, CLE_RUBRIQUE);
     this._afficher(RUBRIQUES.includes(retenue) ? retenue : PAR_DEFAUT);
     this._panneau.dataset.vue = "menu";
+    this._contenu.scrollTop = 0; // rouverts, ils repartent en haut, comme avant
+    if (this._menu) this._menu.scrollTop = 0;
     this._surChoix(this._estEtroit() ? null : this.courante);
     this._boutonCourant()?.focus(); // le focus entre dans les Paramètres
   }

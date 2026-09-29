@@ -17,6 +17,7 @@ function monter({ stockage = fauxStockage(), etroit = false } = {}) {
   const pages = Object.fromEntries(RUBRIQUES.map((id) => [id, fauxElement("section")]));
   const panneau = fauxElement("section");
   const contenu = fauxElement("div");
+  const menu = fauxElement("nav");
   const choix = [];
   const ecran = { etroit };
   const rubriques = new Rubriques({
@@ -24,6 +25,7 @@ function monter({ stockage = fauxStockage(), etroit = false } = {}) {
     pages,
     panneau,
     contenu,
+    menu,
     boutonRetour,
     stockage,
     estEtroit: () => ecran.etroit,
@@ -31,7 +33,7 @@ function monter({ stockage = fauxStockage(), etroit = false } = {}) {
   });
   const visibles = () => RUBRIQUES.filter((id) => !pages[id].hidden);
   const courants = () => boutons.filter((b) => b.attributs["aria-current"] === "page").map((b) => b.dataset.rubrique);
-  return { rubriques, boutons, pages, panneau, contenu, stockage, choix, ecran, focus, visibles, courants };
+  return { rubriques, boutons, pages, panneau, contenu, menu, stockage, choix, ecran, focus, visibles, courants };
 }
 
 test("cinq rubriques, dans l'ordre de la spec", () => {
@@ -134,4 +136,13 @@ test("sur un écran large, le bouton cliqué garde le focus", () => {
   rubriques.ouvrir();
   boutons[1].declencher("click");
   assert.deepEqual(focus, ["connecteurs"], "seule l'ouverture le déplace");
+});
+
+test("rouverts, les Paramètres repartent en haut, la colonne comme la rubrique", () => {
+  // Comme avant la refonte ; sinon, le geste vers le bas ne les fermerait plus.
+  const { rubriques, contenu, menu } = monter();
+  contenu.scrollTop = 500;
+  menu.scrollTop = 120;
+  rubriques.ouvrir();
+  assert.deepEqual([contenu.scrollTop, menu.scrollTop], [0, 0]);
 });
