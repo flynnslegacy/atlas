@@ -18,16 +18,18 @@ from fastapi.staticfiles import StaticFiles
 from atlas_audio.client import lire_reglages
 from atlas_audio.connexion import PeripheriqueEnPanne
 
+from . import reglages
 from .cerveau import Cerveau, CerveauBouchon
 from .cerveau_claude import CerveauClaude
 from .config import Config
 from .confirmation import Confirmations
 from .diffuseur import Diffuseur
+from .entretien import Entretien
 from .memoire import Memoire
 from .missions import Missions
 from .options_claude import options_cerveau, purger_cles_api
 from .outils_memoire import OutilsMemoire
-from .pages import lire_document, liste_connecteurs, liste_documents
+from .pages import liste_connecteurs
 from .poste import Poste, servir_poste
 from .protocole import Bonjour, Erreur, decoder_audio_entrant, decoder_message
 from .protocole_voix import (
@@ -40,24 +42,17 @@ from .protocole_voix import (
     verifier_bloc_page,
 )
 from .protocole_web import (
-    ActiverConnecteur,
-    Arreter,
     AttenteConfirmation,
     Authentification,
-    Confirmer,
-    DemandeConnecteurs,
-    DemandeDocuments,
     DocumentsChanges,
     FinConfirmation,
     FinMission,
-    LireDocument,
     MissionEnCours,
-    Muet,
-    Saisie,
     decoder_message_page,
 )
 from .regie import Regie
 from .registre import OFFICIELS, Registre
+from .routage_pages import Contexte, traiter
 from .session import Session, sans_destinataire
 from .synthese import ClientSynthese
 from .transcription import ClientTranscription
@@ -71,6 +66,7 @@ _reglages = lire_reglages()
 _http: httpx.AsyncClient | None = None
 _cerveau: Cerveau | None = None
 _outils: OutilsMemoire | None = None  # la mémoire et ses outils, le temps de la vie du Core
+_entretien: Entretien | None = None  # le redémarrage et la mise à jour, depuis la page
 
 RACINE_WEB = Path(__file__).resolve().parent.parent / "atlas_web"
 # Le dossier de travail de Claude : vide, à lui seul, hors de tout projet.
@@ -131,6 +127,7 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
         lambda: publier(DocumentsChanges()),
         missions=missions,
         registre=registre,
+        fichier_env=reglages.FICHIER_ENV,  # lu ici : les tests le remplacent
     )
     outils.sur_connecteurs = lambda: publier(liste_connecteurs(outils))
     return outils
@@ -138,7 +135,9 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
 
 @asynccontextmanager
 async def _cycle_de_vie(app: FastAPI):
-    global _http, _cerveau, _outils
+    global _http, _cerveau, _outils, _entretien
+    _entretien = Entretien(_regie.diffuseur.publier)
+    _entretien.effacer_la_marque()  # celle qui a fait revenir ce Core
     _http = httpx.AsyncClient()
     _cerveau = creer_cerveau(_config)
     _outils = _cerveau.outils if isinstance(_cerveau, CerveauClaude) else None
@@ -148,9 +147,10 @@ async def _cycle_de_vie(app: FastAPI):
         # Le cerveau dans son propre `try` : s'il lève (ou est annulé), le client HTTP se
         # ferme quand même, dans le `finally` qui l'entoure.
         try:
+            await _entretien.fermer()  # une mise à jour en cours s'arrête, sa commande comprise
             await _cerveau.fermer()
         finally:
-            _cerveau = _outils = None
+            _cerveau = _outils = _entretien = None
             await _http.aclose()
             _http = None
 
@@ -344,29 +344,8 @@ async def ws_web(ws: WebSocket) -> None:
             except ValueError as e:
                 abonnement.envoyer_prive(Erreur(code="message_invalide", message=str(e)))
                 continue
-            if isinstance(msg, Saisie):
-                await _regie.saisie(msg.texte, demande.page)
-            elif isinstance(msg, Muet):
-                await _regie.basculer_muet(msg.actif)
-            elif isinstance(msg, DemandeDocuments):
-                abonnement.envoyer_prive(await liste_documents(_outils))
-            elif isinstance(msg, LireDocument):
-                abonnement.envoyer_prive(await lire_document(_outils, msg.chemin))
-            elif isinstance(msg, Confirmer):
-                # Comme taper « oui » ou « non » depuis cette page ; trop tard, rien.
-                if _outils is not None and _outils.confirmations.en_attente:
-                    await _regie.saisie("oui" if msg.oui else "non", demande.page)
-            elif isinstance(msg, Arreter):
-                # Comme taper « stop » depuis cette page ; la mission déjà finie, rien.
-                if _outils is not None and _outils.missions.en_cours is not None:
-                    await _regie.saisie("stop", demande.page)
-            elif isinstance(msg, DemandeConnecteurs):
-                abonnement.envoyer_prive(liste_connecteurs(_outils))
-            elif isinstance(msg, ActiverConnecteur):
-                # La conversation se clôt ; la suivante porte les connecteurs actifs.
-                if _outils is not None and _outils.basculer(msg.id, msg.actif):
-                    _cerveau.renouveler()
-                _regie.diffuseur.publier(liste_connecteurs(_outils))  # toutes les pages
+            contexte = Contexte(_regie, _outils, _cerveau, abonnement, demande.page, _entretien)
+            await traiter(msg, contexte)
     except WebSocketDisconnect:
         pass
     finally:

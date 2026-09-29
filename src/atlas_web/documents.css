@@ -279,3 +279,130 @@
   border-color: var(--accent);
   color: #02030a;
 }
+
+/* Les réglages d'un connecteur : un champ chacun ; la valeur d'un secret n'y est jamais. */
+#liste-connecteurs .ouvrir-reglages {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+#liste-connecteurs .reglages {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--bord);
+}
+
+#liste-connecteurs .reglage label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+#liste-connecteurs .reglage + .reglage {
+  margin-top: 10px;
+}
+
+#liste-connecteurs .reglage .variable,
+#liste-connecteurs .reglage .statut {
+  font-size: 11px;
+  color: var(--texte-doux);
+}
+
+#liste-connecteurs .reglage input {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--bord);
+  background: var(--verre);
+  color: var(--texte);
+  font: inherit;
+}
+
+#liste-connecteurs .reglage input:focus {
+  outline: none;
+  border-color: rgba(251, 191, 36, 0.6);
+}
+
+#liste-connecteurs .reglages button {
+  margin: 8px 8px 0 0;
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--bord);
+}
+
+#liste-connecteurs .reglages .enregistrer {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #02030a;
+}
+
+#liste-connecteurs .reglages .resultat {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+#liste-connecteurs .reglages .resultat.refus {
+  color: var(--erreur);
+}
+
+/* La rubrique « Le Core » : sa version, ses deux boutons, leur confirmation, et les étapes
+   d'un redémarrage ou d'une mise à jour. */
+#rubrique-core p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+#rubrique-core .version,
+#rubrique-core .raison,
+#rubrique-core .nouveautes {
+  font-size: 12px;
+  color: var(--texte-doux);
+}
+
+#rubrique-core button {
+  margin: 8px 8px 0 0;
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--bord);
+}
+
+#rubrique-core button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#rubrique-core .confirmation-core {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+}
+
+#rubrique-core .confirmer {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #02030a;
+}
+
+#rubrique-core .etape,
+#rubrique-core .fin.ok {
+  color: var(--accent);
+}
+
+#rubrique-core .fin.refus {
+  color: var(--erreur);
+}
+
+#rubrique-core .nouveautes {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+#rubrique-core .details {
+  margin: 6px 0 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--texte-doux);
+}

@@ -11,22 +11,31 @@ from atlas_core.protocole_web import (
     AttenteConfirmation,
     Authentification,
     Confirmer,
+    CoreEnCours,
     DemandeConnecteurs,
+    DemandeCore,
     DemandeDocuments,
     Document,
     DocumentsChanges,
     Echange,
+    EtatCore,
     FicheConnecteur,
     FinConfirmation,
+    FinCore,
     FinMission,
     Historique,
     Latences,
     LireDocument,
     ListeConnecteurs,
     ListeDocuments,
+    MettreAJourCore,
     MissionEnCours,
     Muet,
     Niveau,
+    RedemarrerCore,
+    ReglageConnecteur,
+    ReglerConnecteur,
+    ResultatReglage,
     ResumeDocument,
     Saisie,
     decoder_message_page,
@@ -196,6 +205,7 @@ def test_une_page_demande_les_connecteurs_et_en_bascule_un():
                 "etat": "coupe",
                 "detail": "",
                 "en_attente": False,
+                "reglages": [],
             }
         ],
     }
@@ -205,3 +215,80 @@ def test_une_page_demande_les_connecteurs_et_en_bascule_un():
 def test_une_page_ne_nomme_qu_un_identifiant_de_connecteur(id_):
     with pytest.raises(ValueError):
         decoder_message_page(json.dumps({"type": "activer_connecteur", "id": id_, "actif": True}))
+
+
+def test_une_page_regle_un_connecteur():
+    brut = json.dumps(
+        {
+            "type": "regler_connecteur",
+            "id": "bonjour",
+            "valeurs": {"ATLAS_BONJOUR_NOM": "David"},
+            "effacer": ["ATLAS_BONJOUR_CLE"],
+        }
+    )
+    assert decoder_message_page(brut) == ReglerConnecteur(
+        id="bonjour", valeurs={"ATLAS_BONJOUR_NOM": "David"}, effacer=["ATLAS_BONJOUR_CLE"]
+    )
+    assert decoder_message_page('{"type":"regler_connecteur","id":"bonjour"}') == (
+        ReglerConnecteur(id="bonjour")
+    )
+    reglage = ReglageConnecteur(variable="ATLAS_BONJOUR_CLE", description="La clé", secret=True)
+    assert reglage.model_dump() == {
+        "variable": "ATLAS_BONJOUR_CLE",
+        "description": "La clé",
+        "secret": True,
+        "defini": False,
+        "modifiable": True,
+        "valeur": "",
+    }
+    assert ResultatReglage(id="bonjour", ok=True, message="Enregistré.").model_dump() == {
+        "type": "resultat_reglage",
+        "id": "bonjour",
+        "ok": True,
+        "message": "Enregistré.",
+    }
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"id": "../memoire", "valeurs": {"ATLAS_BONJOUR_NOM": "x"}},
+        {"id": "bonjour", "valeurs": {"PATH": "/tmp"}},
+        {"id": "bonjour", "valeurs": {"ATLAS_BONJOUR_NOM": 42}},
+        {"id": "bonjour", "effacer": ["HOME"]},
+        {"id": "bonjour", "valeurs": {f"ATLAS_V{i}": "x" for i in range(51)}},
+    ],
+)
+def test_un_reglage_ne_nomme_qu_une_variable_d_atlas(message):
+    with pytest.raises(ValueError):
+        decoder_message_page(json.dumps({"type": "regler_connecteur", **message}))
+
+
+def test_les_messages_du_core_vers_les_pages():
+    assert EtatCore(version="ce65d2a", date="2026-09-29").model_dump() == {
+        "type": "etat_core",
+        "version": "ce65d2a",
+        "date": "2026-09-29",
+        "occupe": False,
+        "mise_a_jour_possible": False,
+        "raison": "",
+    }
+    en_cours = CoreEnCours(etape="installation", texte="Installation…", nouveautes=["Un"])
+    assert en_cours.model_dump() == {
+        "type": "core_en_cours",
+        "etape": "installation",
+        "texte": "Installation…",
+        "nouveautes": ["Un"],
+    }
+    assert FinCore(ok=True, texte="Atlas est déjà à jour.").model_dump() == {
+        "type": "fin_core",
+        "ok": True,
+        "texte": "Atlas est déjà à jour.",
+        "details": [],
+    }
+
+
+def test_les_boutons_du_core():
+    assert decoder_message_page('{"type":"demande_core"}') == DemandeCore()
+    assert decoder_message_page('{"type":"redemarrer_core"}') == RedemarrerCore()
+    assert decoder_message_page('{"type":"mettre_a_jour_core"}') == MettreAJourCore()

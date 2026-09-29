@@ -86,9 +86,12 @@ Le script vérifie le `.env`, demande ton mot de passe (sudo) et installe le ser
 session ouverte ; launchd le relance s'il tombe.
 
 - Le journal : `tail -f ~/atlas/donnees/logs/core.log`
-- Redémarrer le Core : `sudo launchctl kickstart -k system/fr.atlas.core`
+- Redémarrer le Core : dans la page, Paramètres › Le Core › « Redémarrer » ; ou
+  `sudo launchctl kickstart -k system/fr.atlas.core`
 - Arrêter le service : `sudo launchctl bootout system/fr.atlas.core`
-- Mettre Atlas à jour : `git pull && make install`, puis redémarrer le Core.
+- Mettre Atlas à jour : dans la page, « Mettre à jour et redémarrer » (le dépôt doit être sur
+  `main`, sans modification : sinon la page dit pourquoi) ; ou `git pull && make install`,
+  puis redémarrer le Core.
 
 ## 7. Brancher le M5 sur le néo
 
@@ -207,9 +210,11 @@ se résume d'abord au journal.
 - Les connecteurs d'Atlas sont dans `connecteurs/` du dépôt. Les tiens, et ceux de la
   communauté, se déposent dans `~/.atlas/connecteurs/` sur la machine du Core (réglage
   `ATLAS_CONNECTEURS_DOSSIER`) ; ils apparaissent dans la page, coupés.
-- Un connecteur « à configurer » attend une variable dans le `.env` du Core, qu'il nomme ;
-  ajoute-la et redémarre le Core. Un connecteur « à installer » attend ses dépendances :
-  lance `make install`, puis redémarre le Core.
+- Un connecteur « à configurer » attend une variable, qu'il nomme : saisis-la dans ses
+  réglages, dans la page (elle prend effet aussitôt), ou ajoute-la dans le `.env` du Core et
+  redémarre-le. Les clés d'Atlas, comme `ATLAS_POSTE_CLE`, se changent au Terminal. Un
+  connecteur « à installer » attend ses dépendances : « Mettre à jour et redémarrer », ou
+  `make install` puis redémarrer le Core.
 - Un connecteur de la communauté fait tourner son code dans Atlas : n'active que ce en quoi
   tu as confiance. Pour en écrire un : `connecteurs/LISEZMOI.md`.
 - Les interrupteurs sont rangés dans `~/.atlas/connecteurs.json`. Sans mémoire, pas de

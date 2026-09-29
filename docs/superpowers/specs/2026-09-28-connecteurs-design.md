@@ -34,7 +34,9 @@ spec, comme connecteurs officiels.
 - **D1. Les connecteurs sont les liens vers l'extérieur** : le poste du Mac, l'agenda, le mail, Home Assistant, les
   appels, les réseaux sociaux. La mémoire, les documents et la recherche web restent le socle d'Atlas, toujours actifs.
 - **D2. Les secrets restent dans le `.env` du Core.** Chaque connecteur déclare ses variables ; la page dit seulement
-  lesquelles manquent. Aucun secret ne passe jamais par la page.
+  lesquelles manquent. Amendé le 29 septembre (`2026-09-29-reglages-et-core-design.md`, §4) : la page modifie les
+  réglages déclarés par un connecteur, jamais une clé d'Atlas ; un secret va de la page au Core, jamais dans l'autre
+  sens.
 - **D3. Un connecteur est un dossier** : un manifeste `connecteur.toml`, lisible et lu sans exécuter aucun code, et
   le code Python de ses outils (`connecteur.py`, et d'autres fichiers au besoin).
 - **D4. Deux répertoires** : les connecteurs officiels dans le dépôt (`connecteurs/`), mis à jour par `git pull` ;
@@ -182,6 +184,8 @@ changent pas.
   note.
 - **Un identifiant ou un nom d'outil hors motif** est refusé ; un chemin n'est jamais construit à partir d'un texte
   venu de la page sans passer par la liste des connecteurs découverts.
+- **Les réglages saisis dans la page** (`2026-09-29-reglages-et-core-design.md`, §4) : seulement les variables que
+  déclare le connecteur, jamais une clé d'Atlas ; la valeur d'un secret ne revient jamais vers une page.
 
 ## 8. Fichiers et réglages
 

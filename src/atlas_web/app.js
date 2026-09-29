@@ -2,6 +2,7 @@
 
 import { rendreConnecteurs } from "./connecteurs.js";
 import { Connexion, identifiantDePage } from "./connexion.js";
+import { SuiviCore, rendreCore } from "./core.js";
 import { dimensionner, rgba } from "./dessin.js";
 import { rendreDocument, rendreListeDocuments } from "./documents.js";
 import { LIBELLES, appliquerMessage, avancer, creerEtat, sceneDe } from "./etat.js";
@@ -64,21 +65,46 @@ const sousTitres = { conteneur: $("sous-titres"), question: $("st-question"), re
 
 // --- La connexion -----------------------------------------------------------------
 
+// Les réglages des connecteurs : ceux qui sont ouverts, et la dernière réponse du Core pour
+// chacun, survivent aux nouveaux rendus de la liste (après chaque bascule ou réglage).
+const reglages = {
+  ouverts: new Set(),
+  resultats: new Map(),
+  surRegler: (id, valeurs, effacer) => connexion.envoyer({ type: "regler_connecteur", id, valeurs, effacer }),
+};
+let listeConnecteurs = null;
+
+function montrerConnecteurs() {
+  const surBascule = (id, actif) => connexion.envoyer({ type: "activer_connecteur", id, actif });
+  rendreConnecteurs(document, $("liste-connecteurs"), listeConnecteurs, surBascule, reglages);
+}
+
+// Le Core : sa version, ses deux boutons, les étapes ; et son retour, attendu après un redémarrage.
+const suiviCore = new SuiviCore({ envoyer: (message) => connexion.envoyer(message), surChangement: montrerCore });
+
+function montrerCore() {
+  rendreCore(document, $("rubrique-core"), suiviCore.etat, (type) => connexion.envoyer({ type }));
+}
+
 const connexion = new Connexion({
   url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/web`,
   lireCle: () => cleEnMemoire ?? lireStockage(stockage, CLE_STOCKAGE),
   entree: () => ({ page }),
   surMessage(message) {
     appliquerMessage(etat, message, Date.now());
+    suiviCore.recevoir(message);
     if (message.type === "muet") $("muet").checked = message.actif;
     if (TOUCHENT_HISTORIQUE.has(message.type) && !$("panneau-historique").hidden) {
       rendreHistorique(document, $("liste-historique"), etat.historique);
     }
     if (TOUCHENT_DOCUMENTS.has(message.type)) surDocuments(message);
     if (message.type === "liste_connecteurs") {
-      rendreConnecteurs(document, $("liste-connecteurs"), message, (id, actif) =>
-        connexion.envoyer({ type: "activer_connecteur", id, actif }),
-      );
+      listeConnecteurs = message;
+      montrerConnecteurs();
+    }
+    if (message.type === "resultat_reglage") {
+      reglages.resultats.set(message.id, message);
+      if (listeConnecteurs) montrerConnecteurs();
     }
     if (message.type === "confirmation" || message.type === "confirmation_finie") {
       afficherConfirmation(message.texte, message.type === "confirmation");
@@ -95,6 +121,7 @@ const connexion = new Connexion({
   },
   surStatut(nouveau) {
     statut = nouveau;
+    suiviCore.surStatut(nouveau);
     etat.enLigne = nouveau === "en_ligne";
     if (nouveau in MESSAGES_CLE) demanderCle(MESSAGES_CLE[nouveau]);
   },
@@ -240,6 +267,10 @@ $("retour-documents").addEventListener("click", montrerLaListe);
 
 function ouvrirParametres() {
   connexion.envoyer({ type: "connecteurs" }); // relus à chaque ouverture : un dossier a pu être déposé
+  reglages.ouverts.clear(); // chaque ouverture repart d'une liste fermée, sans vieux message
+  reglages.resultats.clear();
+  suiviCore.demander();
+  montrerCore();
   const commun = { document, stockage, scene: () => sceneCourante };
   galeries = [
     ouvrirGalerie({
@@ -340,7 +371,7 @@ function image(ms) {
     fond.dessiner(t, sceneCourante);
     orbe.dessiner(t, sceneCourante);
     $("pastille").style.backgroundColor = rgba(etat.couleur, 1);
-    const libelle = etat.enLigne ? LIBELLES[etat.etat] : (STATUTS[statut] ?? "");
+    const libelle = etat.enLigne ? LIBELLES[etat.etat] : (suiviCore.libelle() ?? STATUTS[statut] ?? "");
     if ($("libelle-etat").textContent !== libelle) $("libelle-etat").textContent = libelle;
     afficherSousTitres(sousTitres, etat, Date.now());
   } catch (e) {

@@ -31,8 +31,11 @@ Atlas le lit sans exécuter aucun code, pour lister le connecteur dans la page.
 | `[[reglages]]` | non | Chacun : `variable` (`ATLAS_…`, dans le `.env` du Core), `description`, `secret` (vrai ou faux) |
 
 Tant qu'un réglage manque dans le `.env`, le connecteur est « à configurer » ; tant qu'une
-dépendance manque, « à installer ». Un réglage `secret` n'est jamais écrit dans la mémoire
-d'Atlas.
+dépendance manque, « à installer ». David saisit les réglages dans la page (Paramètres ›
+Connecteurs › Réglages) ou dans le `.env` ; ils prennent effet aussitôt, sans redémarrer. La
+page ne reçoit jamais la valeur d'un réglage `secret`, qui n'est jamais écrit non plus dans la
+mémoire d'Atlas. Une variable qu'Atlas lit lui-même (`ATLAS_WEB_CLE`, `ATLAS_POSTE_CLE`…) ne
+s'écrit jamais depuis la page, même déclarée par un connecteur : elle se change au Terminal.
 
 ## Le code : `connecteur.py`
 
@@ -104,8 +107,9 @@ def creer(contexte: Contexte) -> Bonjour:
     return Bonjour(contexte)
 ```
 
-Mets `ATLAS_BONJOUR_NOM=David` dans le `.env` du Core, redémarre-le, active « Bonjour » dans
-la page, puis demande à Atlas de te saluer.
+Dans la page, ouvre les réglages de « Bonjour », saisis `David` pour `ATLAS_BONJOUR_NOM` (ou
+mets `ATLAS_BONJOUR_NOM=David` dans le `.env` du Core, puis redémarre-le), active « Bonjour »,
+puis demande à Atlas de te saluer.
 
 ## Tester son connecteur
 

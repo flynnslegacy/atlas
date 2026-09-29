@@ -4,6 +4,7 @@ document (spec 2c, §7), et la liste des connecteurs (spec des connecteurs, §6)
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 
 from .consignes import date_en_lettres, heure_en_chiffres
 from .memoire import ErreurMemoire
@@ -13,9 +14,11 @@ from .protocole_web import (
     FicheConnecteur,
     ListeConnecteurs,
     ListeDocuments,
+    ReglageConnecteur,
     ResumeDocument,
 )
 from .registre import Fiche
+from .reglages import modifiable, secretes
 
 MEMOIRE_ABSENTE = "La mémoire n'est pas disponible."
 
@@ -52,11 +55,30 @@ def liste_connecteurs(outils: OutilsMemoire | None) -> ListeConnecteurs:
     """Les connecteurs trouvés, relus à l'instant (manifestes seuls) ; sans mémoire, aucun."""
     if outils is None or outils.registre is None:
         return ListeConnecteurs(disponible=False)
-    return ListeConnecteurs(connecteurs=[_pour_la_page(f) for f in outils.registre.decouvrir()])
+    environ = outils.registre.environ
+    fiches = outils.registre.decouvrir()
+    secrets = secretes(f.manifeste for f in fiches)
+    return ListeConnecteurs(connecteurs=[_pour_la_page(f, environ, secrets) for f in fiches])
 
 
-def _pour_la_page(fiche: Fiche) -> FicheConnecteur:
+def _pour_la_page(fiche: Fiche, environ: Mapping[str, str], secrets: set[str]) -> FicheConnecteur:
     manifeste = fiche.manifeste
+    reglages = []
+    for r in manifeste.reglages if manifeste else ():
+        secret = r.secret or r.variable in secrets
+        # Jamais la valeur d'un secret, ni celle d'une clé d'Atlas, même déclarée « ordinaire »
+        # par un manifeste.
+        montree = not secret and modifiable(r.variable)
+        reglages.append(
+            ReglageConnecteur(
+                variable=r.variable,
+                description=r.description,
+                secret=secret,
+                defini=bool(environ.get(r.variable, "").strip()),
+                modifiable=modifiable(r.variable),
+                valeur=environ.get(r.variable, "") if montree else "",
+            )
+        )
     return FicheConnecteur(
         id=fiche.id,
         nom=manifeste.nom if manifeste else fiche.id,
@@ -67,4 +89,5 @@ def _pour_la_page(fiche: Fiche) -> FicheConnecteur:
         etat=fiche.etat,
         detail=fiche.detail,
         en_attente=fiche.en_attente,
+        reglages=reglages,
     )
