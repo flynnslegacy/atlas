@@ -554,9 +554,9 @@ test("le Core se redémarre depuis les Paramètres, et la barre du haut suit son
     mise_a_jour_possible: true,
     raison: "",
   });
-  const [version, boutons, confirmation] = $("rubrique-core").children;
-  assert.equal(version.textContent, "Version ce65d2a, du 2026-09-29");
-  boutons.children[0].declencher("click"); // « Redémarrer »
+  const [groupe, confirmation] = $("rubrique-core").children;
+  assert.equal(groupe.children[0].children[1].textContent, "ce65d2a, du 2026-09-29");
+  groupe.children[1].children[1].declencher("click"); // « Redémarrer… »
   confirmation.children[1].declencher("click"); // « Confirmer »
   assert.deepEqual(web.envoyes.at(-1), { type: "redemarrer_core" });
 

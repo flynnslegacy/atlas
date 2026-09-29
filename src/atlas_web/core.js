@@ -2,8 +2,16 @@
 // qui tourne, « Redémarrer » et « Mettre à jour et redémarrer », chacun confirmé ; les étapes et
 // la fin, que toutes les pages voient ; et, pendant un redémarrage, le retour du Core attendu.
 
-export const REDEMARRER = "Redémarrer";
-export const METTRE_A_JOUR = "Mettre à jour et redémarrer";
+export const REDEMARRER = "Redémarrer…";
+export const METTRE_A_JOUR = "Mettre à jour…";
+// Chaque action de la carte : son titre, et ce qu'elle fait.
+export const ACTIONS = {
+  redemarrer_core: ["Redémarrer", "La conversation en cours se clôt, avec son résumé au journal."],
+  mettre_a_jour_core: [
+    "Mettre à jour et redémarrer",
+    "Récupère la dernière version, installe ce qui manque, puis redémarre.",
+  ],
+};
 export const CONFIRMATIONS = {
   redemarrer_core:
     "Redémarrer le Core ? La conversation en cours se clôt, avec son résumé au journal. Atlas revient dans une dizaine de secondes.",
@@ -102,23 +110,42 @@ function bouton(document, classe, contenu) {
   return element;
 }
 
+function ligneAction(document, [titre, phrase], action) {
+  const libelles = document.createElement("span");
+  libelles.className = "texte";
+  libelles.append(texte(document, "span", "titre", titre), texte(document, "span", "detail", phrase));
+  const ligne = document.createElement("div");
+  ligne.className = "ligne";
+  ligne.append(libelles, action);
+  return ligne;
+}
+
 // La rubrique ; `surAction(type)` envoie « redemarrer_core » ou « mettre_a_jour_core », une
 // fois confirmé.
 export function rendreCore(document, conteneur, etat, surAction) {
   const { version, enCours, fin } = etat;
   const elements = [];
   const quand = version?.date ? `, du ${version.date}` : "";
-  elements.push(texte(document, "p", "version", version ? `Version ${version.version}${quand}` : "Version…"));
-
   const occupe = Boolean(enCours) || Boolean(version?.occupe);
   const redemarrer = bouton(document, "redemarrer", REDEMARRER);
   const mettreAJour = bouton(document, "mettre-a-jour", METTRE_A_JOUR);
   redemarrer.disabled = !version || occupe;
   mettreAJour.disabled = !version || occupe || !version.mise_a_jour_possible;
-  const boutons = document.createElement("div");
-  boutons.className = "boutons";
-  boutons.append(redemarrer, mettreAJour);
-  elements.push(boutons);
+  // Une carte : la version, puis une ligne par action, sa phrase à gauche, son bouton à droite.
+  const ligneVersion = document.createElement("div");
+  ligneVersion.className = "ligne version";
+  ligneVersion.append(
+    texte(document, "span", "", "Version"),
+    texte(document, "span", "valeur", version ? `${version.version}${quand}` : "…"),
+  );
+  const groupe = document.createElement("div");
+  groupe.className = "groupe";
+  groupe.append(
+    ligneVersion,
+    ligneAction(document, ACTIONS.redemarrer_core, redemarrer),
+    ligneAction(document, ACTIONS.mettre_a_jour_core, mettreAJour),
+  );
+  elements.push(groupe);
   if (version && !version.mise_a_jour_possible && version.raison) {
     elements.push(texte(document, "p", "raison", version.raison));
   }
