@@ -55,7 +55,9 @@ test("un réglage ordinaire montre sa valeur ; un secret, jamais", () => {
   assert.deepEqual([nom.type, nom.value], ["text", "David"]);
   assert.deepEqual([cle.type, cle.value], ["password", ""]);
   assert.equal(cle.attributs.placeholder, GARDER);
-  assert.equal(cle.attributs.autocomplete, "off");
+  // Le navigateur ne doit pas y remplir de lui-même un mot de passe enregistré (la clé de la page).
+  assert.equal(cle.attributs.autocomplete, "new-password");
+  assert.equal(nom.attributs.autocomplete, "off");
   const [description, variable] = formulaire.children[0].children[0].children;
   assert.deepEqual([description.textContent, variable.textContent], ["Le nom à saluer", "ATLAS_BONJOUR_NOM"]);
   assert.equal(formulaire.children.at(-1).textContent, ENREGISTRER);

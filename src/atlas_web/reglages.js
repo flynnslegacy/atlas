@@ -42,7 +42,9 @@ export function rendreReglages(document, connecteur, surRegler, resultat = null)
     const champ = document.createElement("input");
     champ.type = reglage.secret ? "password" : "text";
     champ.value = reglage.secret ? "" : reglage.valeur;
-    champ.setAttribute("autocomplete", "off");
+    // « new-password » : un navigateur n'y remplit jamais un mot de passe enregistré (la clé de
+    // la page), qui partirait vers le connecteur.
+    champ.setAttribute("autocomplete", reglage.secret ? "new-password" : "off");
     champ.setAttribute("spellcheck", "false");
     if (reglage.secret) champ.setAttribute("placeholder", reglage.defini ? GARDER : A_DEFINIR);
     etiquette.append(champ);
