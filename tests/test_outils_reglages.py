@@ -8,6 +8,7 @@ from test_registre import MANIFESTE, code, deposer
 
 from atlas_core.memoire import ErreurMemoire, Memoire
 from atlas_core.outils_memoire import OutilsMemoire
+from atlas_core.pages import liste_connecteurs
 from atlas_core.registre import Registre, fichier_des_interrupteurs
 from atlas_core.reglages import ReglageRefuse
 
@@ -126,6 +127,29 @@ def test_un_nouveau_secret_est_refuse_par_la_memoire(tmp_path, perso, env):
     outils.memoire.ecrire("profil.md", "# Profil\n\nDavid.\n\nIl salue Léa-Marie Dupont.\n")
     outils.regler("salut", {"ATLAS_BONJOUR_CLE": "court"}, [])
     outils.memoire.ecrire("profil.md", "# Profil\n\nDavid.\n\nUn court séjour.\n")
+
+
+MOT_DE_PASSE = """
+[[reglages]]
+variable = "ATLAS_ICLOUD_MOT_DE_PASSE"
+description = "Le mot de passe d'app iCloud"
+"""
+
+
+def test_un_secret_d_un_connecteur_reste_secret_dans_un_autre(tmp_path, perso, env):
+    # Deux connecteurs qui partagent un mot de passe : l'un le déclare secret, l'autre non.
+    agenda = MANIFESTE.format(nom="Agenda") + MOT_DE_PASSE + "secret = true\n"
+    deposer(perso, "agenda", agenda, source=code("agenda_lire"))
+    deposer(perso, "mail", MANIFESTE.format(nom="Mail") + MOT_DE_PASSE, source=code("mail_lire"))
+    environ = {"ATLAS_ICLOUD_MOT_DE_PASSE": "sesame-du-nuage-2026"}
+    outils = outils_de(tmp_path, perso, env, environ)
+    liste = liste_connecteurs(outils)
+    [reglage] = next(f for f in liste.connecteurs if f.id == "mail").reglages
+    assert (reglage.secret, reglage.valeur, reglage.defini) == (True, "", True)
+    assert "sesame-du-nuage-2026" not in liste.model_dump_json()
+    outils.regler("mail", {"ATLAS_ICLOUD_MOT_DE_PASSE": "sesame-du-ciel-2027"}, [])
+    with pytest.raises(ErreurMemoire, match="mot de passe"):
+        outils.memoire.ecrire("profil.md", "# Profil\n\nDavid.\n\nsesame-du-ciel-2027\n")
 
 
 def test_un_refus_ne_change_rien(tmp_path, perso, env):

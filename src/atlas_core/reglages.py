@@ -62,6 +62,12 @@ class ReglageRefuse(ValueError):
     """Un réglage que le Core n'écrit pas : la raison se lit telle quelle dans la page."""
 
 
+def secretes(manifestes: Iterable[Manifeste | None]) -> set[str]:
+    """Les variables qu'au moins un manifeste déclare secrètes : secrètes pour tous les
+    connecteurs qui les déclarent (deux connecteurs iCloud qui partagent un mot de passe)."""
+    return {r.variable for m in manifestes if m is not None for r in m.reglages if r.secret}
+
+
 def modifiable(variable: str) -> bool:
     """Faux pour une clé d'Atlas : elle se change au Terminal."""
     return variable not in CLES_D_ATLAS

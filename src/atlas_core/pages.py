@@ -18,7 +18,7 @@ from .protocole_web import (
     ResumeDocument,
 )
 from .registre import Fiche
-from .reglages import modifiable
+from .reglages import modifiable, secretes
 
 MEMOIRE_ABSENTE = "La mémoire n'est pas disponible."
 
@@ -57,24 +57,28 @@ def liste_connecteurs(outils: OutilsMemoire | None) -> ListeConnecteurs:
         return ListeConnecteurs(disponible=False)
     environ = outils.registre.environ
     fiches = outils.registre.decouvrir()
-    return ListeConnecteurs(connecteurs=[_pour_la_page(f, environ) for f in fiches])
+    secrets = secretes(f.manifeste for f in fiches)
+    return ListeConnecteurs(connecteurs=[_pour_la_page(f, environ, secrets) for f in fiches])
 
 
-def _pour_la_page(fiche: Fiche, environ: Mapping[str, str]) -> FicheConnecteur:
+def _pour_la_page(fiche: Fiche, environ: Mapping[str, str], secrets: set[str]) -> FicheConnecteur:
     manifeste = fiche.manifeste
-    reglages = [
-        ReglageConnecteur(
-            variable=r.variable,
-            description=r.description,
-            secret=r.secret,
-            defini=bool(environ.get(r.variable, "").strip()),
-            modifiable=modifiable(r.variable),
-            # Jamais la valeur d'un secret, ni celle d'une clé d'Atlas, même déclarée
-            # « ordinaire » par un manifeste.
-            valeur=environ.get(r.variable, "") if not r.secret and modifiable(r.variable) else "",
+    reglages = []
+    for r in manifeste.reglages if manifeste else ():
+        secret = r.secret or r.variable in secrets
+        # Jamais la valeur d'un secret, ni celle d'une clé d'Atlas, même déclarée « ordinaire »
+        # par un manifeste.
+        montree = not secret and modifiable(r.variable)
+        reglages.append(
+            ReglageConnecteur(
+                variable=r.variable,
+                description=r.description,
+                secret=secret,
+                defini=bool(environ.get(r.variable, "").strip()),
+                modifiable=modifiable(r.variable),
+                valeur=environ.get(r.variable, "") if montree else "",
+            )
         )
-        for r in (manifeste.reglages if manifeste else ())
-    ]
     return FicheConnecteur(
         id=fiche.id,
         nom=manifeste.nom if manifeste else fiche.id,

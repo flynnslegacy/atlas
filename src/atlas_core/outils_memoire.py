@@ -20,7 +20,7 @@ from .missions import Missions
 from .outils import Fait, Niveau, Outil, ServeurAtlas
 from .outils_documents import outils_des_documents
 from .registre import ConnecteurActif, Registre
-from .reglages import ReglageRefuse, changements_permis, ecrire_env
+from .reglages import ReglageRefuse, changements_permis, ecrire_env, secretes
 
 _journal = logging.getLogger(__name__)
 
@@ -143,7 +143,8 @@ class OutilsMemoire(ServeurAtlas):
         conversation se renouvelle). `ReglageRefuse` si rien ne convient : rien n'a changé."""
         if self.registre is None or self.fichier_env is None:
             raise ReglageRefuse("Les réglages ne s'écrivent pas ici.")
-        fiche = next((f for f in self.registre.decouvrir() if f.id == id_), None)
+        fiches = self.registre.decouvrir()
+        fiche = next((f for f in fiches if f.id == id_), None)
         if fiche is None or fiche.manifeste is None:
             raise ReglageRefuse("Ce connecteur n'a pas de réglages.")
         changements = changements_permis(fiche.manifeste, valeurs, effacer)
@@ -154,7 +155,7 @@ class OutilsMemoire(ServeurAtlas):
                 environ.pop(variable, None)
             else:
                 environ[variable] = valeur
-        secrets = {r.variable for r in fiche.manifeste.reglages if r.secret}
+        secrets = secretes(f.manifeste for f in fiches)
         self.memoire.ajouter_secrets(v for k, v in changements.items() if v and k in secrets)
         self.registre.oublier_l_echec(id_)  # « en erreur » à cause d'un réglage : il réessaiera
         if fiche.etat != "actif":
