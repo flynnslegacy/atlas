@@ -31,6 +31,14 @@ function bouton(document, classe, contenu) {
   return element;
 }
 
+// La valeur de « Connecteurs » dans la liste des rubriques (écran étroit) : combien sont actifs.
+export function resumeConnecteurs(message) {
+  if (!message?.disponible) return "";
+  const actifs = message.connecteurs.filter((connecteur) => connecteur.etat === "actif").length;
+  if (actifs === 0) return "Aucun actif";
+  return actifs === 1 ? "1 actif" : `${actifs} actifs`;
+}
+
 // La liste (message `liste_connecteurs`) ; `surBascule(id, actif)` envoie l'interrupteur au Core.
 // `reglages` : `surRegler(id, valeurs, effacer)`, et ce qui survit à un nouveau rendu de la
 // liste : les réglages ouverts (`ouverts`, des identifiants) et les dernières réponses du Core

@@ -1,6 +1,6 @@
 // Le démarrage de la page : relie la connexion, la voix, l'état, l'orbe, le fond et les panneaux.
 
-import { rendreConnecteurs } from "./connecteurs.js";
+import { rendreConnecteurs, resumeConnecteurs } from "./connecteurs.js";
 import { Connexion, identifiantDePage } from "./connexion.js";
 import { SuiviCore, rendreCore } from "./core.js";
 import { dimensionner, rgba } from "./dessin.js";
@@ -11,6 +11,7 @@ import { rendreHistorique } from "./historique.js";
 import { orbes } from "./orbes/index.js";
 import { ouvrirGalerie } from "./parametres.js";
 import { ecrireStockage, lireStockage } from "./registre.js";
+import { Rubriques } from "./rubriques.js";
 import { afficherSousTitres } from "./sous_titres.js";
 import { Voix } from "./voix.js";
 
@@ -77,6 +78,7 @@ let listeConnecteurs = null;
 function montrerConnecteurs() {
   const surBascule = (id, actif) => connexion.envoyer({ type: "activer_connecteur", id, actif });
   rendreConnecteurs(document, $("liste-connecteurs"), listeConnecteurs, surBascule, reglages);
+  $("valeur-connecteurs").textContent = resumeConnecteurs(listeConnecteurs);
 }
 
 // Le Core : sa version, ses deux boutons, les étapes ; et son retour, attendu après un redémarrage.
@@ -84,6 +86,7 @@ const suiviCore = new SuiviCore({ envoyer: (message) => connexion.envoyer(messag
 
 function montrerCore() {
   rendreCore(document, $("rubrique-core"), suiviCore.etat, (type) => connexion.envoyer({ type }));
+  $("valeur-core").textContent = suiviCore.etat.version?.version ?? "";
 }
 
 const connexion = new Connexion({
@@ -164,9 +167,11 @@ $("message-voix").addEventListener("click", () => {
   if (voix.statut === "a_reactiver") voix.reactiver();
 });
 $("hey-atlas").checked = lireStockage(stockage, CLE_HEY_ATLAS) === "1";
+$("valeur-voix").textContent = $("hey-atlas").checked ? "Hey Atlas" : "";
 $("hey-atlas").addEventListener("change", () => {
   ecrireStockage(stockage, CLE_HEY_ATLAS, $("hey-atlas").checked ? "1" : "0");
   voix.changerHeyAtlas($("hey-atlas").checked);
+  $("valeur-voix").textContent = $("hey-atlas").checked ? "Hey Atlas" : "";
 });
 
 function demanderCle(message) {
@@ -265,31 +270,54 @@ $("retour-documents").addEventListener("click", montrerLaListe);
 
 // --- Les panneaux -----------------------------------------------------------------
 
+// Les rubriques des Paramètres : une colonne à gauche, la rubrique à droite ; sur un écran
+// étroit, la liste puis la rubrique. Chacune dit sa valeur dans la liste.
+const rubriques = new Rubriques({
+  boutons: [...document.querySelectorAll("#menu-parametres [data-rubrique]")],
+  pages: {
+    connecteurs: $("page-connecteurs"),
+    voix: $("page-voix"),
+    orbe: $("page-orbe"),
+    fond: $("page-fond"),
+    core: $("page-core"),
+  },
+  panneau: $("panneau-parametres"),
+  contenu: $("contenu-parametres"),
+  stockage,
+  estEtroit: () => window.matchMedia("(max-width: 719px)").matches,
+  surChoix: montrerGalerie,
+});
+$("retour-parametres").addEventListener("click", () => rubriques.retour());
+$("valeur-orbe").textContent = orbes.choisi(stockage).nom;
+$("valeur-fond").textContent = fonds.choisi(stockage).nom;
+
 function ouvrirParametres() {
   connexion.envoyer({ type: "connecteurs" }); // relus à chaque ouverture : un dossier a pu être déposé
   reglages.ouverts.clear(); // chaque ouverture repart d'une liste fermée, sans vieux message
   reglages.resultats.clear();
   suiviCore.demander();
   montrerCore();
+  rubriques.ouvrir();
+}
+
+// Une galerie n'anime ses aperçus que tant que sa rubrique est affichée (`id`, ou null : aucune).
+function montrerGalerie(id) {
+  for (const galerie of galeries) galerie.fermer();
+  galeries = [];
   const commun = { document, stockage, scene: () => sceneCourante };
-  galeries = [
-    ouvrirGalerie({
-      ...commun,
-      conteneur: $("galerie-orbes"),
-      registre: orbes,
-      surChoix: (choix) => {
-        orbe = choix.creer($("orbe"));
-      },
-    }),
-    ouvrirGalerie({
-      ...commun,
-      conteneur: $("galerie-fonds"),
-      registre: fonds,
-      surChoix: (choix) => {
-        fond = choix.creer($("fond"));
-      },
-    }),
-  ];
+  if (id === "orbe") {
+    const surChoix = (choix) => {
+      orbe = choix.creer($("orbe"));
+      $("valeur-orbe").textContent = choix.nom;
+    };
+    galeries = [ouvrirGalerie({ ...commun, conteneur: $("galerie-orbes"), registre: orbes, surChoix })];
+  } else if (id === "fond") {
+    const surChoix = (choix) => {
+      fond = choix.creer($("fond"));
+      $("valeur-fond").textContent = choix.nom;
+    };
+    galeries = [ouvrirGalerie({ ...commun, conteneur: $("galerie-fonds"), registre: fonds, surChoix })];
+  }
 }
 
 function ouvrirPanneau(panneau) {
@@ -322,6 +350,12 @@ document.addEventListener("keydown", (evenement) => {
 });
 
 // Glisser vers le haut ouvre l'historique ; vers le bas, depuis le haut d'un panneau, le ferme.
+// Les Paramètres ne défilent pas eux-mêmes : leur colonne et leur rubrique, si.
+function enHautDe(panneau) {
+  if (panneau !== $("panneau-parametres")) return panneau.scrollTop === 0;
+  return $("menu-parametres").scrollTop === 0 && $("contenu-parametres").scrollTop === 0;
+}
+
 let depart = null;
 document.addEventListener(
   "touchstart",
@@ -331,7 +365,7 @@ document.addEventListener(
       return;
     }
     const ouvert = document.querySelector(".panneau:not([hidden])");
-    depart = { y: evenement.touches[0].clientY, ouvert, enHaut: !ouvert || ouvert.scrollTop === 0 };
+    depart = { y: evenement.touches[0].clientY, ouvert, enHaut: !ouvert || enHautDe(ouvert) };
   },
   { passive: true },
 );

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { fauxNavigateurAudio } from "./faux_audio.mjs";
+import { fonds } from "../../src/atlas_web/fonds/index.js";
+import { orbes } from "../../src/atlas_web/orbes/index.js";
 import { fauxElement, fauxStockage } from "./faux_dom.mjs";
 
 // Tous les identifiants cherchés par app.js via $("…") (voir tests/web/page.test.mjs).
@@ -14,6 +16,7 @@ const IDENTIFIANTS = [
   "champ-cle",
   "confirmation",
   "confirmer",
+  "contenu-parametres",
   "formulaire-cle",
   "galerie-fonds",
   "galerie-orbes",
@@ -23,6 +26,7 @@ const IDENTIFIANTS = [
   "liste-connecteurs",
   "liste-documents",
   "liste-historique",
+  "menu-parametres",
   "message-cle",
   "message-voix",
   "micro",
@@ -34,10 +38,16 @@ const IDENTIFIANTS = [
   "panneau-cle",
   "panneau-documents",
   "panneau-historique",
+  "page-connecteurs",
+  "page-core",
+  "page-fond",
+  "page-orbe",
+  "page-voix",
   "panneau-parametres",
   "parler",
   "pastille",
   "retour-documents",
+  "retour-parametres",
   "rubrique-core",
   "saisie",
   "sous-titres",
@@ -46,7 +56,13 @@ const IDENTIFIANTS = [
   "stop-mission",
   "texte-confirmation",
   "texte-mission",
+  "valeur-connecteurs",
+  "valeur-core",
+  "valeur-fond",
+  "valeur-orbe",
+  "valeur-voix",
 ];
+const RUBRIQUES = ["connecteurs", "voix", "orbe", "fond", "core"];
 
 // Un contexte 2D qui lève sur le moindre appel : simule un dessin cassé, quelle qu'en
 // soit la cause (canevas absent, valeur invalide, bogue dans une orbe…).
@@ -94,6 +110,13 @@ function fauxDocumentDeLaPage({ fondSain = false } = {}) {
   }
   elements.fond = fondSain ? canevasSain() : canevasQuiLeve();
   elements.orbe = canevasSain();
+  // Les boutons de la colonne des Paramètres, que app.js cherche par leur data-rubrique.
+  const boutonsRubriques = RUBRIQUES.map((id) => {
+    const bouton = fauxElement("button");
+    bouton.dataset.rubrique = id;
+    return bouton;
+  });
+  const panneaux = ["panneau-historique", "panneau-documents", "panneau-parametres"];
   const ecouteurs = {};
   return {
     hidden: false,
@@ -103,8 +126,9 @@ function fauxDocumentDeLaPage({ fondSain = false } = {}) {
       return element;
     },
     createElement: (tag) => (fondSain && tag === "canvas" ? canevasSain() : fauxElement(tag)),
-    querySelectorAll: () => [],
-    querySelector: () => null,
+    querySelectorAll: (selecteur) => (selecteur === "#menu-parametres [data-rubrique]" ? boutonsRubriques : []),
+    querySelector: (selecteur) =>
+      selecteur === ".panneau:not([hidden])" ? (panneaux.map((id) => elements[id]).find((e) => !e.hidden) ?? null) : null,
     addEventListener(type, rappel) {
       (ecouteurs[type] ??= []).push(rappel);
     },
@@ -550,4 +574,93 @@ test("le Core se redémarre depuis les Paramètres, et la barre du haut suit son
   assert.deepEqual(nouvelle.envoyes.at(-1), { type: "demande_core" }, "la version, revenue");
   image();
   assert.notEqual($("libelle-etat").textContent, "Le Core ne revient pas");
+});
+
+async function ouvrirLesParametres(stockage) {
+  FauxWebSocket.ouvertes = [];
+  await chargerPage({ stockage, FabriqueWebSocket: FauxWebSocket });
+  const $ = (id) => document.getElementById(id);
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+  web.recevoir({ type: "historique", echanges: [] });
+  for (const id of ["panneau-historique", "panneau-documents", "panneau-parametres", "panneau-cle"]) {
+    $(id).hidden = true; // fermés, comme au chargement de la vraie page
+  }
+  $("ouvrir-parametres").declencher("click");
+  return { $, web };
+}
+
+test("les Paramètres s'ouvrent sur la dernière rubrique ; une galerie ne tourne que dans la sienne", async () => {
+  const stockage = fauxStockage({ "atlas.cle": "cle", "atlas.rubrique": "orbe" });
+  const { $ } = await ouvrirLesParametres(stockage);
+  const visibles = () => RUBRIQUES.filter((id) => !$(`page-${id}`).hidden);
+  assert.deepEqual(visibles(), ["orbe"]);
+  assert.ok($("galerie-orbes").children.length > 0, "la galerie des orbes tourne");
+  assert.equal($("galerie-fonds").children.length, 0, "celle des fonds attend sa rubrique");
+  const fond = document.querySelectorAll("#menu-parametres [data-rubrique]")[3];
+  fond.declencher("click");
+  assert.deepEqual(visibles(), ["fond"]);
+  assert.ok($("galerie-fonds").children.length > 0);
+  assert.equal($("galerie-orbes").children.length, 0, "la galerie des orbes s'est arrêtée");
+  assert.equal(stockage.getItem("atlas.rubrique"), "fond");
+  assert.equal($("panneau-parametres").dataset.vue, "rubrique");
+  $("retour-parametres").declencher("click");
+  assert.equal($("panneau-parametres").dataset.vue, "menu", "« ‹ Paramètres » revient à la liste");
+});
+
+test("la liste des rubriques dit la valeur de chacune, à jour", async () => {
+  const stockage = fauxStockage({ "atlas.cle": "cle", "atlas.hey_atlas": "1", "atlas.rubrique": "voix" });
+  const { $, web } = await ouvrirLesParametres(stockage);
+  assert.equal($("page-connecteurs").hidden, true, "la rubrique Voix est affichée");
+  assert.equal($("valeur-voix").textContent, "Hey Atlas");
+  assert.equal($("valeur-orbe").textContent, orbes.choisi(stockage).nom);
+  assert.equal($("valeur-fond").textContent, fonds.choisi(stockage).nom);
+  const connecteur = { id: "a", nom: "A", origine: "atlas", etat: "actif", reglages: [] };
+  const connecteurs = [connecteur, { ...connecteur, id: "b" }, { ...connecteur, id: "c", etat: "coupe" }];
+  web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs });
+  assert.equal($("valeur-connecteurs").textContent, "2 actifs");
+  assert.equal($("liste-connecteurs").children[0].children.length, 3, "à jour, même cachée");
+  web.recevoir({
+    type: "etat_core",
+    version: "ce65d2a",
+    date: "2026-09-29",
+    occupe: false,
+    mise_a_jour_possible: true,
+    raison: "",
+  });
+  assert.equal($("valeur-core").textContent, "ce65d2a");
+  $("hey-atlas").checked = false;
+  $("hey-atlas").declencher("change");
+  assert.equal($("valeur-voix").textContent, "");
+  const orbe = document.querySelectorAll("#menu-parametres [data-rubrique]")[2];
+  orbe.declencher("click");
+  const autre = orbes.tous.find((o) => o.nom !== $("valeur-orbe").textContent);
+  $("galerie-orbes").children[orbes.tous.indexOf(autre)].declencher("click");
+  assert.equal($("valeur-orbe").textContent, autre.nom);
+});
+
+test("remonter une rubrique au doigt ne ferme pas les Paramètres", async () => {
+  const { $ } = await ouvrirLesParametres(fauxStockage({ "atlas.cle": "cle" }));
+  const glisser = () => {
+    document.declencher("touchstart", { touches: [{ clientY: 100 }] });
+    document.declencher("touchend", { changedTouches: [{ clientY: 300 }] });
+  };
+  $("menu-parametres").scrollTop = 0;
+  $("contenu-parametres").scrollTop = 300;
+  glisser();
+  assert.equal($("panneau-parametres").hidden, false, "la rubrique défile vers le haut");
+  $("contenu-parametres").scrollTop = 0;
+  $("menu-parametres").scrollTop = 120;
+  glisser();
+  assert.equal($("panneau-parametres").hidden, false, "la colonne aussi");
+  $("menu-parametres").scrollTop = 0;
+  glisser();
+  assert.equal($("panneau-parametres").hidden, true, "tout en haut, le geste ferme");
+  $("ouvrir-documents").declencher("click"); // un autre panneau défile, lui, tout entier
+  $("panneau-documents").scrollTop = 200;
+  glisser();
+  assert.equal($("panneau-documents").hidden, false);
+  $("panneau-documents").scrollTop = 0;
+  glisser();
+  assert.equal($("panneau-documents").hidden, true);
 });

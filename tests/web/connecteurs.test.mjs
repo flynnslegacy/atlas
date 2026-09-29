@@ -7,6 +7,7 @@ import {
   EN_ATTENTE,
   MEMOIRE_ABSENTE,
   rendreConnecteurs,
+  resumeConnecteurs,
 } from "../../src/atlas_web/connecteurs.js";
 import { fauxDocument } from "./faux_dom.mjs";
 
@@ -168,4 +169,13 @@ test("un connecteur qui a des réglages les ouvre d'un bouton, et les garde ouve
   assert.equal(etat.ouverts.has("bonjour"), false);
   [, ligne] = rendu();
   assert.equal(ligne.reste.at(-1).hidden, true, "refermé, il le reste");
+});
+
+test("le résumé des connecteurs, pour la liste des rubriques", () => {
+  const liste = (...etats) => ({ disponible: true, connecteurs: etats.map((etat, i) => ({ ...POSTE, id: `c${i}`, etat })) });
+  assert.equal(resumeConnecteurs({ disponible: false, connecteurs: [] }), "");
+  assert.equal(resumeConnecteurs(null), "", "avant la première liste");
+  assert.equal(resumeConnecteurs(liste("coupe", "en_erreur")), "Aucun actif");
+  assert.equal(resumeConnecteurs(liste("actif", "coupe")), "1 actif");
+  assert.equal(resumeConnecteurs(liste("actif", "actif", "actif")), "3 actifs");
 });
