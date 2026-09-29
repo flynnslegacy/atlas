@@ -156,6 +156,7 @@ class OutilsMemoire(ServeurAtlas):
                 environ[variable] = valeur
         secrets = {r.variable for r in fiche.manifeste.reglages if r.secret}
         self.memoire.ajouter_secrets(v for k, v in changements.items() if v and k in secrets)
+        self.registre.oublier_l_echec(id_)  # « en erreur » à cause d'un réglage : il réessaiera
         if fiche.etat != "actif":
             return False
         self.registre.basculer(id_, False)

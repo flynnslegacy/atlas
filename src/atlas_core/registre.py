@@ -261,6 +261,10 @@ class Registre:
         self.decouvrir()
         return change
 
+    def oublier_l_echec(self, id_: str) -> None:
+        """Ses réglages ont changé : un échec de chargement ne tient plus."""
+        self._charges.echecs.pop(id_, None)
+
     def appliquer(self) -> bool:
         """La conversation neuve a commencé : les bascules ont pris effet. Rend vrai s'il y
         en avait en attente."""

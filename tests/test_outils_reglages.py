@@ -100,6 +100,21 @@ def test_un_connecteur_actif_qui_ne_se_recharge_plus_passe_en_erreur(tmp_path, p
     assert outils.connecteurs == []
 
 
+async def test_un_reglage_corrige_rend_un_connecteur_en_erreur_activable(tmp_path, perso, env):
+    # Un connecteur qui ne se charge pas avec un réglage : le corriger dans la page suffit,
+    # sans redémarrer le Core.
+    deposer(perso, "salut", MANIFESTE.format(nom="Salut") + ORDINAIRE, source=CAPRICIEUX)
+    outils = outils_de(tmp_path, perso, env, {"ATLAS_BONJOUR_NOM": "David"})
+    outils.basculer("salut", True)
+    outils.regler("salut", {"ATLAS_BONJOUR_NOM": "Boum"}, [])
+    assert etat(outils).etat == "en_erreur"
+    assert outils.regler("salut", {"ATLAS_BONJOUR_NOM": "Camille"}, []) is False
+    assert (etat(outils).etat, etat(outils).detail) == ("coupe", "")
+    assert outils.basculer("salut", True) is True
+    outils.registre.appliquer()
+    assert await dire(outils) == "Bonjour Camille."
+
+
 def test_un_nouveau_secret_est_refuse_par_la_memoire(tmp_path, perso, env):
     deposer(perso, "salut", MANIFESTE.format(nom="Salut") + ORDINAIRE + SECRET)
     outils = outils_de(tmp_path, perso, env, {})
