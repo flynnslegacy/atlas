@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -94,7 +95,9 @@ def _verifier(variable: str, valeur: str) -> None:
         raise ReglageRefuse(f"{variable} : une valeur vide ; « Effacer » le retire.")
     if len(valeur) > VALEUR_MAX:
         raise ReglageRefuse(f"{variable} : {VALEUR_MAX} caractères au plus.")
-    if re.search(r"[\x00-\x1f\x7f]", valeur):
+    # Un caractère de contrôle (C0, C1) ou un séparateur de ligne Unicode : à la relecture, le
+    # .env pourrait se couper en deux lignes, et la seconde devenir une variable.
+    if any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in valeur):
         raise ReglageRefuse(f"{variable} : une seule ligne, sans caractère de contrôle.")
     if valeur != valeur.strip():
         raise ReglageRefuse(f"{variable} : pas d'espace au début ni à la fin.")
@@ -120,7 +123,9 @@ def ecrire_env(fichier: Path, changements: Mapping[str, str | None]) -> None:
         texte = fichier.read_text(encoding="utf-8") if fichier.exists() else ""
     except (OSError, UnicodeDecodeError) as e:
         raise ReglageRefuse(f"Le .env ne se lit pas : {type(e).__name__}.") from e
-    lignes = texte.splitlines()
+    lignes = texte.split("\n")  # « \n » seul, comme make : jamais un séparateur Unicode
+    if lignes[-1] == "":
+        lignes.pop()
     for variable, valeur in changements.items():
         motif = re.compile(_AFFECTATION.format(re.escape(variable)))
         nouvelle = None if valeur is None else f"{variable}={pour_make(valeur)}"

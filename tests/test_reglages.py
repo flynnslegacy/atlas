@@ -99,6 +99,16 @@ def test_le_reste_du_env_ne_bouge_pas(tmp_path):
     assert "ATLAS_WEB_CLE=cle-de-la-page\n" in env.read_text(encoding="utf-8")
 
 
+def test_une_ligne_avec_un_separateur_unicode_passe_telle_quelle(tmp_path):
+    # Seul « \n » sépare les lignes du .env, comme pour make : une ligne de David qui contient
+    # un séparateur Unicode ne se coupe jamais en deux.
+    env = tmp_path / ".env"
+    ligne = "# une note\u2028ATLAS_WEB_CLE=prise\x85fin"
+    env.write_text(f"{ligne}\nATLAS_BONJOUR_NOM=Ancien\n", encoding="utf-8")
+    ecrire_env(env, {"ATLAS_BONJOUR_NOM": "David"})
+    assert env.read_text(encoding="utf-8") == f"{ligne}\nATLAS_BONJOUR_NOM=David\n"
+
+
 def test_une_retouche_a_la_main_entre_deux_enregistrements_reste(tmp_path):
     # Review Focus 2 : David modifie le .env pendant que le Core tourne.
     env = tmp_path / ".env"
@@ -172,6 +182,10 @@ def test_les_changements_permis_ecrivent_et_effacent():
         ("a\nb", "une seule ligne"),
         ("a\tb", "une seule ligne"),
         ("a\x00b", "une seule ligne"),
+        ("x\u2028ATLAS_WEB_CLE=prise", "une seule ligne"),  # un séparateur de ligne Unicode
+        ("x\u2029y", "une seule ligne"),
+        ("y\x85z", "une seule ligne"),  # un caractère de contrôle C1
+        ("a\x0cb", "une seule ligne"),
         (" David", "pas d'espace au début ni à la fin"),
         ("David ", "pas d'espace au début ni à la fin"),
         ("fin\\", "finir par une barre oblique inverse"),
