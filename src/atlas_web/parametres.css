@@ -14,7 +14,8 @@
   overflow: hidden;
   border-bottom: 1px solid var(--bord);
   border-radius: 18px;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  /* L'orbe reste visible autour, assombrie : une ombre sans flou qui couvre tout l'écran. */
+  box-shadow: 0 0 0 100vmax rgba(2, 3, 10, 0.55), 0 30px 80px rgba(0, 0, 0, 0.6);
 }
 
 #menu-parametres {
