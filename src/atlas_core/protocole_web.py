@@ -10,9 +10,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
-from .connecteurs import ID_MAX, MOTIF_ID
+from .connecteurs import ID_MAX, MOTIF_ID, MOTIF_VARIABLE
 
 LONGUEUR_MAX_SAISIE = 1000
+REGLAGES_MAX = 50  # par message : bien plus qu'un manifeste n'en déclare
 TAILLE_MAX_CLE = 256
 # L'identifiant qu'une page tire au hasard à son ouverture, le même sur /ws/web et sur
 # /ws/voix : une question tapée trouve ainsi la voix de sa page.
@@ -128,6 +129,18 @@ class FinMission(BaseModel):
     texte: str
 
 
+class ReglageConnecteur(BaseModel):
+    """Un réglage d'un connecteur tel que la page le montre : la valeur d'un réglage
+    ordinaire seulement, jamais celle d'un secret ni d'une clé d'Atlas."""
+
+    variable: str
+    description: str
+    secret: bool = False
+    defini: bool = False
+    modifiable: bool = True  # faux pour une clé d'Atlas : elle se change au Terminal
+    valeur: str = ""
+
+
 class FicheConnecteur(BaseModel):
     """Un connecteur tel que la page le montre (spec des connecteurs, §6)."""
 
@@ -140,6 +153,7 @@ class FicheConnecteur(BaseModel):
     etat: Literal["actif", "coupe", "a_configurer", "a_installer", "en_erreur"]
     detail: str = ""
     en_attente: bool = False  # basculé : prend effet à la question suivante
+    reglages: list[ReglageConnecteur] = []
 
 
 class ListeConnecteurs(BaseModel):
@@ -148,6 +162,15 @@ class ListeConnecteurs(BaseModel):
     type: Literal["liste_connecteurs"] = "liste_connecteurs"
     disponible: bool = True
     connecteurs: list[FicheConnecteur] = []
+
+
+class ResultatReglage(BaseModel):
+    """À la page qui a enregistré des réglages : faits, ou pourquoi pas."""
+
+    type: Literal["resultat_reglage"] = "resultat_reglage"
+    id: str
+    ok: bool
+    message: str
 
 
 # --- page vers Core -----------------------------------------------------
@@ -206,6 +229,19 @@ class ActiverConnecteur(BaseModel):
     actif: bool
 
 
+Variable = Annotated[str, Field(pattern=MOTIF_VARIABLE)]
+
+
+class ReglerConnecteur(BaseModel):
+    """« Enregistrer » ou « Effacer » dans les réglages d'un connecteur. Le Core vérifie
+    chaque variable et chaque valeur ; la page ne décide rien."""
+
+    type: Literal["regler_connecteur"] = "regler_connecteur"
+    id: str = Field(pattern=MOTIF_ID, max_length=ID_MAX)
+    valeurs: dict[Variable, str] = Field(default={}, max_length=REGLAGES_MAX)
+    effacer: list[Variable] = Field(default=[], max_length=REGLAGES_MAX)
+
+
 MessagePage = Annotated[
     Authentification
     | Saisie
@@ -215,7 +251,8 @@ MessagePage = Annotated[
     | Confirmer
     | Arreter
     | DemandeConnecteurs
-    | ActiverConnecteur,
+    | ActiverConnecteur
+    | ReglerConnecteur,
     Field(discriminator="type"),
 ]
 _adaptateur_page = TypeAdapter(MessagePage)
