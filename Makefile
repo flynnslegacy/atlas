@@ -2,7 +2,12 @@
 -include .env
 export
 
-.PHONY: install test test-web test-swift lint format bench run-core run-audio run-poste
+# Les variables que le .env a données à ce make : `run-core` ne les passe pas au make neuf qui
+# relance le Core, pour qu'une variable retirée du .env ne survive pas à un redémarrage.
+CLES_DU_ENV := $(shell sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*[:?+]\{0,2\}=.*/\2/p' .env 2>/dev/null)
+COMMANDE_CORE ?= uv run uvicorn atlas_core.hub:app --host 0.0.0.0 --port 8080
+
+.PHONY: install test test-web test-swift lint format bench run-core core run-audio run-poste
 
 # Les dépendances des connecteurs (connecteurs/ et ~/.atlas/connecteurs/) s'installent après.
 install:
@@ -28,8 +33,18 @@ format:
 bench:
 	uv run python bench/bench.py
 
+# Le Core, relancé par un make neuf, qui relit le .env, chaque fois qu'il le demande en
+# laissant la marque donnees/redemarrer (le bouton « Redémarrer » de la page) ; sinon, la
+# boucle s'arrête avec lui (Ctrl-C, ou le Core qui tombe : launchd le relance sur le néo).
 run-core:
-	uv run uvicorn atlas_core.hub:app --host 0.0.0.0 --port 8080
+	@while :; do \
+	  rm -f donnees/redemarrer; \
+	  env $(addprefix -u ,$(CLES_DU_ENV)) $(MAKE) --no-print-directory core; code=$$?; \
+	  [ -f donnees/redemarrer ] || exit $$code; \
+	done
+
+core:
+	$(COMMANDE_CORE)
 
 run-audio:
 	uv run python -m atlas_audio.client

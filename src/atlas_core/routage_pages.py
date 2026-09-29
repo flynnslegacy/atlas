@@ -1,5 +1,6 @@
 """Ce que le Core fait d'un message d'une page authentifiée, sur /ws/web : une question tapée,
-le mode muet, les documents, les boutons des barres, les connecteurs et leurs réglages."""
+le mode muet, les documents, les boutons des barres, les connecteurs et leurs réglages, et
+l'entretien du Core (sa version, le redémarrage, la mise à jour)."""
 
 from __future__ import annotations
 
@@ -12,10 +13,13 @@ from .protocole_web import (
     Arreter,
     Confirmer,
     DemandeConnecteurs,
+    DemandeCore,
     DemandeDocuments,
     LireDocument,
     MessagePage,
+    MettreAJourCore,
     Muet,
+    RedemarrerCore,
     ReglerConnecteur,
     ResultatReglage,
     Saisie,
@@ -25,6 +29,7 @@ from .reglages import ReglageRefuse
 if TYPE_CHECKING:
     from .cerveau import Cerveau
     from .diffuseur import Abonnement
+    from .entretien import Entretien
     from .outils_memoire import OutilsMemoire
     from .regie import Regie
 
@@ -35,13 +40,14 @@ SANS_MEMOIRE = "La mémoire n'est pas disponible : pas de connecteurs."
 @dataclass
 class Contexte:
     """Ce dont un message a besoin : la régie, la mémoire et ses outils (None sans elle), le
-    cerveau, et la page qui l'a envoyé (son abonnement, son identifiant)."""
+    cerveau, la page qui l'a envoyé (son abonnement, son identifiant), et l'entretien."""
 
     regie: Regie
     outils: OutilsMemoire | None
     cerveau: Cerveau | None
     abonnement: Abonnement
     page: str | None
+    entretien: Entretien | None = None
 
 
 async def traiter(msg: MessagePage, ctx: Contexte) -> None:
@@ -71,6 +77,20 @@ async def traiter(msg: MessagePage, ctx: Contexte) -> None:
         ctx.regie.diffuseur.publier(liste_connecteurs(outils))  # toutes les pages
     elif isinstance(msg, ReglerConnecteur):
         _regler(msg, ctx)
+    elif ctx.entretien is not None:
+        await _entretenir(msg, ctx.entretien, ctx.abonnement)
+
+
+async def _entretenir(msg: MessagePage, entretien: Entretien, abonnement: Abonnement) -> None:
+    """La version pour la page qui la demande ; un refus aussi ; les étapes, à toutes."""
+    if isinstance(msg, DemandeCore):
+        abonnement.envoyer_prive(await entretien.etat())
+    elif isinstance(msg, RedemarrerCore):
+        if (refus := entretien.demander_redemarrage()) is not None:
+            abonnement.envoyer_prive(refus)
+    elif isinstance(msg, MettreAJourCore):
+        if (refus := await entretien.demander_mise_a_jour()) is not None:
+            abonnement.envoyer_prive(refus)
 
 
 def _regler(msg: ReglerConnecteur, ctx: Contexte) -> None:

@@ -260,6 +260,20 @@ class ActiverConnecteur(BaseModel):
     actif: bool
 
 
+class DemandeCore(BaseModel):
+    """La rubrique « Le Core » des Paramètres, ouverte : sa version, et la mise à jour."""
+
+    type: Literal["demande_core"] = "demande_core"
+
+
+class RedemarrerCore(BaseModel):
+    type: Literal["redemarrer_core"] = "redemarrer_core"
+
+
+class MettreAJourCore(BaseModel):
+    type: Literal["mettre_a_jour_core"] = "mettre_a_jour_core"
+
+
 Variable = Annotated[str, Field(pattern=MOTIF_VARIABLE)]
 
 
@@ -283,7 +297,10 @@ MessagePage = Annotated[
     | Arreter
     | DemandeConnecteurs
     | ActiverConnecteur
-    | ReglerConnecteur,
+    | ReglerConnecteur
+    | DemandeCore
+    | RedemarrerCore
+    | MettreAJourCore,
     Field(discriminator="type"),
 ]
 _adaptateur_page = TypeAdapter(MessagePage)

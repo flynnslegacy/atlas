@@ -13,6 +13,7 @@ from atlas_core.protocole_web import (
     Confirmer,
     CoreEnCours,
     DemandeConnecteurs,
+    DemandeCore,
     DemandeDocuments,
     Document,
     DocumentsChanges,
@@ -27,9 +28,11 @@ from atlas_core.protocole_web import (
     LireDocument,
     ListeConnecteurs,
     ListeDocuments,
+    MettreAJourCore,
     MissionEnCours,
     Muet,
     Niveau,
+    RedemarrerCore,
     ReglageConnecteur,
     ReglerConnecteur,
     ResultatReglage,
@@ -283,3 +286,9 @@ def test_les_messages_du_core_vers_les_pages():
         "texte": "Atlas est déjà à jour.",
         "details": [],
     }
+
+
+def test_les_boutons_du_core():
+    assert decoder_message_page('{"type":"demande_core"}') == DemandeCore()
+    assert decoder_message_page('{"type":"redemarrer_core"}') == RedemarrerCore()
+    assert decoder_message_page('{"type":"mettre_a_jour_core"}') == MettreAJourCore()

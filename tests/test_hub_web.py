@@ -1,5 +1,7 @@
 import json
+import os
 import re
+import subprocess
 from dataclasses import replace
 
 import pytest
@@ -7,7 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from test_registre import deposer
 
-from atlas_core import hub, reglages
+from atlas_core import entretien, hub, reglages
 from atlas_core.diffuseur import Diffuseur
 from atlas_core.protocole import Bonjour
 
@@ -351,6 +353,88 @@ def test_regler_un_connecteur_actif_renouvelle_la_conversation(reglables, monkey
         fiche = bonjour(ws.receive_json())
     assert (fiche["etat"], fiche["en_attente"]) == ("actif", True)
     assert renouvellements == [True, True]
+
+
+@pytest.fixture
+def depot(regie, monkeypatch, tmp_path):
+    """Un dépôt git sur main, un commit : celui du Core, le temps du test."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    for cle, valeur in {"NAME": "Test", "EMAIL": "test@example.com"}.items():
+        monkeypatch.setenv(f"GIT_AUTHOR_{cle}", valeur)
+        monkeypatch.setenv(f"GIT_COMMITTER_{cle}", valeur)
+    dossier = tmp_path / "depot"
+    for commande in (["init", "-q", "-b", "main", str(dossier)], ["-C", str(dossier), "commit",
+                     "-q", "--allow-empty", "-m", "Premier"]):  # fmt: skip
+        subprocess.run(["git", *commande], check=True)
+    monkeypatch.setattr(entretien, "DEPOT", dossier)
+    monkeypatch.setattr(entretien, "DELAI_ARRET_S", 0)
+    return dossier
+
+
+def test_la_page_demande_la_version_du_core(depot):
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "demande_core"})
+        etat = ws.receive_json()
+    version = subprocess.run(
+        ["git", "-C", str(depot), "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    assert etat["type"] == "etat_core" and etat["version"] == version
+    assert (etat["occupe"], etat["mise_a_jour_possible"], etat["raison"]) == (False, True, "")
+
+
+def test_redemarrer_depuis_une_page_toutes_les_pages_le_voient(depot, monkeypatch):
+    arrets: list[bool] = []
+    monkeypatch.setattr(entretien, "arreter_le_core", lambda: arrets.append(True))
+    with (
+        TestClient(hub.app) as client,
+        client.websocket_connect("/ws/web", headers=ORIGINE) as ws,
+        client.websocket_connect("/ws/web", headers=ORIGINE) as autre,
+    ):
+        _entrer(ws)
+        _entrer(autre)
+        ws.send_json({"type": "redemarrer_core"})
+        attendu = {"type": "core_en_cours", "etape": "redemarrage",
+                   "texte": "Redémarrage du Core…", "nouveautes": []}  # fmt: skip
+        assert ws.receive_json() == attendu and autre.receive_json() == attendu
+        assert (depot / "donnees" / "redemarrer").exists()
+        ws.send_json({"type": "redemarrer_core"})  # un deuxième clic
+        refus = ws.receive_json()
+        autre.send_json({"type": "saisie", "texte": ""})  # sa réponse suit tout ce qu'elle a reçu
+        assert autre.receive_json()["type"] == "erreur"
+    assert (refus["type"], refus["ok"], refus["texte"]) == ("fin_core", False, entretien.OCCUPE)
+    assert arrets == [True]
+
+
+def test_mettre_a_jour_hors_de_main_est_refuse_a_la_page_qui_le_demande(depot):
+    subprocess.run(["git", "-C", str(depot), "switch", "-q", "-c", "essai"], check=True)
+    with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
+        _entrer(ws)
+        ws.send_json({"type": "mettre_a_jour_core"})
+        refus = ws.receive_json()
+    assert (refus["type"], refus["ok"]) == ("fin_core", False)
+    assert refus["texte"] == (
+        "Le dépôt du Core est sur la branche essai, pas sur main : mets-le à jour au Terminal."
+    )
+
+
+def test_au_demarrage_une_marque_restee_la_s_efface(depot):
+    (depot / "donnees").mkdir()
+    (depot / "donnees" / "redemarrer").touch()
+    with TestClient(hub.app):
+        assert not (depot / "donnees" / "redemarrer").exists()
+
+
+def test_l_arret_du_core_arrete_l_entretien(depot, monkeypatch):
+    fermes: list[bool] = []
+
+    async def fermer(self) -> None:
+        fermes.append(True)
+
+    monkeypatch.setattr(entretien.Entretien, "fermer", fermer)
+    with TestClient(hub.app):
+        assert fermes == []
+    assert fermes == [True]
 
 
 def test_sans_memoire_pas_de_connecteurs(regie, monkeypatch):

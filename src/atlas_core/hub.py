@@ -24,6 +24,7 @@ from .cerveau_claude import CerveauClaude
 from .config import Config
 from .confirmation import Confirmations
 from .diffuseur import Diffuseur
+from .entretien import Entretien
 from .memoire import Memoire
 from .missions import Missions
 from .options_claude import options_cerveau, purger_cles_api
@@ -65,6 +66,7 @@ _reglages = lire_reglages()
 _http: httpx.AsyncClient | None = None
 _cerveau: Cerveau | None = None
 _outils: OutilsMemoire | None = None  # la mémoire et ses outils, le temps de la vie du Core
+_entretien: Entretien | None = None  # le redémarrage et la mise à jour, depuis la page
 
 RACINE_WEB = Path(__file__).resolve().parent.parent / "atlas_web"
 # Le dossier de travail de Claude : vide, à lui seul, hors de tout projet.
@@ -133,7 +135,9 @@ def ouvrir_la_memoire(config: Config) -> OutilsMemoire | None:
 
 @asynccontextmanager
 async def _cycle_de_vie(app: FastAPI):
-    global _http, _cerveau, _outils
+    global _http, _cerveau, _outils, _entretien
+    _entretien = Entretien(_regie.diffuseur.publier)
+    _entretien.effacer_la_marque()  # celle qui a fait revenir ce Core
     _http = httpx.AsyncClient()
     _cerveau = creer_cerveau(_config)
     _outils = _cerveau.outils if isinstance(_cerveau, CerveauClaude) else None
@@ -143,9 +147,10 @@ async def _cycle_de_vie(app: FastAPI):
         # Le cerveau dans son propre `try` : s'il lève (ou est annulé), le client HTTP se
         # ferme quand même, dans le `finally` qui l'entoure.
         try:
+            await _entretien.fermer()  # une mise à jour en cours s'arrête, sa commande comprise
             await _cerveau.fermer()
         finally:
-            _cerveau = _outils = None
+            _cerveau = _outils = _entretien = None
             await _http.aclose()
             _http = None
 
@@ -339,7 +344,8 @@ async def ws_web(ws: WebSocket) -> None:
             except ValueError as e:
                 abonnement.envoyer_prive(Erreur(code="message_invalide", message=str(e)))
                 continue
-            await traiter(msg, Contexte(_regie, _outils, _cerveau, abonnement, demande.page))
+            contexte = Contexte(_regie, _outils, _cerveau, abonnement, demande.page, _entretien)
+            await traiter(msg, contexte)
     except WebSocketDisconnect:
         pass
     finally:
