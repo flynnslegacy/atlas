@@ -2,7 +2,7 @@
 // un champ par réglage. La valeur d'un secret n'arrive jamais dans la page : elle dit seulement
 // s'il est défini, et un champ masqué le remplace. Le Core vérifie tout.
 
-export const REGLAGES = "Réglages";
+export const REGLAGES = "Réglages…";
 export const ENREGISTRER = "Enregistrer";
 export const EFFACER = "Effacer";
 export const DEFINI = "Défini";

@@ -46,3 +46,9 @@ test("app.js est un module valide", () => {
   const verification = spawnSync(process.execPath, ["--check", join(RACINE, "app.js")], { encoding: "utf8" });
   assert.equal(verification.status, 0, verification.stderr);
 });
+
+test("la fenêtre des Paramètres assombrit ce qui l'entoure (spec des Paramètres, §3)", () => {
+  const css = lire(join(RACINE, "parametres.css"));
+  const fenetre = css.match(/#panneau-parametres \{([^}]*)\}/)[1];
+  assert.match(fenetre, /box-shadow:[^;]*0 0 0 100vmax rgba\(2, 3, 10, 0\.55\)/);
+});

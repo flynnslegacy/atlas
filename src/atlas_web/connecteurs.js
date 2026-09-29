@@ -31,6 +31,14 @@ function bouton(document, classe, contenu) {
   return element;
 }
 
+// La valeur de « Connecteurs » dans la liste des rubriques (écran étroit) : combien sont actifs.
+export function resumeConnecteurs(message) {
+  if (!message?.disponible) return "";
+  const actifs = message.connecteurs.filter((connecteur) => connecteur.etat === "actif").length;
+  if (actifs === 0) return "Aucun actif";
+  return actifs === 1 ? "1 actif" : `${actifs} actifs`;
+}
+
 // La liste (message `liste_connecteurs`) ; `surBascule(id, actif)` envoie l'interrupteur au Core.
 // `reglages` : `surRegler(id, valeurs, effacer)`, et ce qui survit à un nouveau rendu de la
 // liste : les réglages ouverts (`ouverts`, des identifiants) et les dernières réponses du Core
@@ -48,33 +56,53 @@ export function rendreConnecteurs(document, conteneur, message, surBascule, regl
   const liste = document.createElement("ul");
   liste.className = "connecteurs";
   for (const connecteur of message.connecteurs) {
-    const element = ligne(document, connecteur, surBascule);
-    if (connecteur.reglages?.length) {
-      element.append(...lesReglages(document, connecteur, surRegler, ouverts, resultats));
-    }
-    liste.append(element);
+    liste.append(carte(document, connecteur, surBascule, surRegler, ouverts, resultats));
   }
   conteneur.replaceChildren(liste);
 }
 
-// Le bouton « Réglages » et son formulaire, ouvert ou fermé comme avant le nouveau rendu.
-function lesReglages(document, connecteur, surRegler, ouverts, resultats) {
-  const ouvrir = bouton(document, "ouvrir-reglages", REGLAGES);
-  const formulaire = rendreReglages(document, connecteur, surRegler, resultats.get(connecteur.id));
-  const montrer = (ouvert) => {
-    formulaire.hidden = !ouvert;
-    ouvrir.setAttribute("aria-expanded", String(ouvert));
-    if (ouvert) ouverts.add(connecteur.id);
-    else ouverts.delete(connecteur.id);
-  };
-  montrer(ouverts.has(connecteur.id));
-  ouvrir.addEventListener("click", () => montrer(formulaire.hidden));
-  return [ouvrir, formulaire];
-}
-
-function ligne(document, connecteur, surBascule) {
+// Une carte : l'entête (le texte à gauche ; « Réglages… » et l'interrupteur à droite),
+// l'avertissement « Communauté », puis les réglages, sous une ligne de séparation.
+function carte(document, connecteur, surBascule, surRegler, ouverts, resultats) {
   const element = document.createElement("li");
   element.className = "connecteur";
+  const { bascule, interrupteur } = lInterrupteur(document, connecteur);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const entete = document.createElement("div");
+  entete.className = "entete";
+  entete.append(leTexte(document, connecteur), actions);
+  element.append(entete, lAvertissement(document, connecteur, interrupteur, surBascule));
+  if (connecteur.reglages?.length) {
+    const [ouvrir, formulaire] = lesReglages(document, connecteur, surRegler, ouverts, resultats);
+    actions.append(ouvrir);
+    element.append(formulaire);
+  }
+  actions.append(bascule);
+  return element;
+}
+
+function leTexte(document, connecteur) {
+  const titre = document.createElement("div");
+  titre.className = "titre";
+  titre.append(
+    texte(document, "span", "nom", connecteur.nom),
+    texte(document, "span", `badge ${connecteur.origine}`, ORIGINES[connecteur.origine]),
+  );
+  const element = document.createElement("div");
+  element.className = "texte";
+  element.append(titre);
+  if (connecteur.description) element.append(texte(document, "p", "description", connecteur.description));
+  const signature = [connecteur.version && `version ${connecteur.version}`, connecteur.auteur];
+  const quoi = signature.filter(Boolean).join(" · ");
+  if (quoi) element.append(texte(document, "p", "signature", quoi));
+  const etat = [ETATS[connecteur.etat], connecteur.detail].filter(Boolean).join(" : ");
+  element.append(texte(document, "p", `etat ${connecteur.etat}`, etat));
+  if (connecteur.en_attente) element.append(texte(document, "p", "attente", EN_ATTENTE));
+  return element;
+}
+
+function lInterrupteur(document, connecteur) {
   const interrupteur = document.createElement("input");
   interrupteur.type = "checkbox";
   interrupteur.checked = connecteur.etat === "actif";
@@ -84,31 +112,17 @@ function ligne(document, connecteur, surBascule) {
   const bascule = document.createElement("label");
   bascule.className = "interrupteur";
   bascule.append(interrupteur);
-  const tete = document.createElement("div");
-  tete.className = "tete";
-  tete.append(
-    texte(document, "span", "nom", connecteur.nom),
-    texte(document, "span", `badge ${connecteur.origine}`, ORIGINES[connecteur.origine]),
-    bascule,
-  );
-  element.append(tete);
-  if (connecteur.description) element.append(texte(document, "p", "description", connecteur.description));
-  const signature = [connecteur.version && `version ${connecteur.version}`, connecteur.auteur];
-  const quoi = signature.filter(Boolean).join(" · ");
-  if (quoi) element.append(texte(document, "p", "signature", quoi));
-  const etat = [ETATS[connecteur.etat], connecteur.detail].filter(Boolean).join(" : ");
-  element.append(texte(document, "p", `etat ${connecteur.etat}`, etat));
-  if (connecteur.en_attente) element.append(texte(document, "p", "attente", EN_ATTENTE));
+  return { bascule, interrupteur };
+}
 
-  // Un connecteur de la communauté : l'avertissement d'abord, l'activation ensuite.
+// Un connecteur de la communauté : l'avertissement d'abord, l'activation ensuite.
+function lAvertissement(document, connecteur, interrupteur, surBascule) {
   const avertissement = document.createElement("div");
   avertissement.className = "avertissement";
   avertissement.hidden = true;
   const activer = bouton(document, "activer", "Activer quand même");
   const annuler = bouton(document, "annuler", "Annuler");
   avertissement.append(texte(document, "p", "", AVERTISSEMENT), activer, annuler);
-  element.append(avertissement);
-
   interrupteur.addEventListener("change", () => {
     if (interrupteur.checked && connecteur.origine === "communaute") {
       interrupteur.checked = false;
@@ -124,5 +138,20 @@ function ligne(document, connecteur, surBascule) {
   annuler.addEventListener("click", () => {
     avertissement.hidden = true;
   });
-  return element;
+  return avertissement;
+}
+
+// Le bouton « Réglages… » et son formulaire, ouvert ou fermé comme avant le nouveau rendu.
+function lesReglages(document, connecteur, surRegler, ouverts, resultats) {
+  const ouvrir = bouton(document, "ouvrir-reglages", REGLAGES);
+  const formulaire = rendreReglages(document, connecteur, surRegler, resultats.get(connecteur.id));
+  const montrer = (ouvert) => {
+    formulaire.hidden = !ouvert;
+    ouvrir.setAttribute("aria-expanded", String(ouvert));
+    if (ouvert) ouverts.add(connecteur.id);
+    else ouverts.delete(connecteur.id);
+  };
+  montrer(ouverts.has(connecteur.id));
+  ouvrir.addEventListener("click", () => montrer(formulaire.hidden));
+  return [ouvrir, formulaire];
 }

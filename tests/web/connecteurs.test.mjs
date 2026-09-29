@@ -7,6 +7,7 @@ import {
   EN_ATTENTE,
   MEMOIRE_ABSENTE,
   rendreConnecteurs,
+  resumeConnecteurs,
 } from "../../src/atlas_web/connecteurs.js";
 import { fauxDocument } from "./faux_dom.mjs";
 
@@ -43,20 +44,31 @@ function lignes(conteneur) {
   return conteneur.children[0].children;
 }
 
+// Une carte : [entête [texte [titre [nom, badge], infos…], actions [« Réglages… » ?, interrupteur]],
+// avertissement, réglages ?].
 function morceaux(ligne) {
-  const [tete, ...reste] = ligne.children;
-  const [nom, badge, bascule] = tete.children;
-  return { nom, badge, bascule, interrupteur: bascule.children[0], reste };
+  const [entete, avertissement, formulaire] = ligne.children;
+  const [texte, actions] = entete.children;
+  const [titre, ...infos] = texte.children;
+  const [nom, badge] = titre.children;
+  const bascule = actions.children.at(-1);
+  const ouvrir = actions.children.length > 1 ? actions.children[0] : undefined;
+  return { entete, nom, badge, infos, actions, ouvrir, bascule, interrupteur: bascule.children[0], avertissement, formulaire };
 }
 
-test("chaque connecteur a sa ligne : nom, badge, description, signature, état, interrupteur", () => {
+test("chaque connecteur a sa carte : nom, badge, description, signature, état, et son interrupteur à droite", () => {
   const { conteneur } = rendre([POSTE, METEO]);
   assert.equal(conteneur.children[0].tagName, "UL");
   const [poste, meteo] = lignes(conteneur).map(morceaux);
+  assert.deepEqual(
+    [poste.entete.className, poste.actions.className, poste.actions.children.length],
+    ["entete", "actions", 1],
+    "sans réglages, l'interrupteur seul",
+  );
   assert.equal(poste.nom.textContent, "Le poste du Mac");
   assert.deepEqual([poste.badge.className, poste.badge.textContent], ["badge atlas", "Atlas"]);
   assert.deepEqual(
-    poste.reste.slice(0, 3).map((p) => [p.className, p.textContent]),
+    poste.infos.slice(0, 3).map((p) => [p.className, p.textContent]),
     [
       ["description", "Atlas pilote le Mac."],
       ["signature", "version 1.0.0 · Atlas"],
@@ -70,7 +82,8 @@ test("chaque connecteur a sa ligne : nom, badge, description, signature, état, 
     "habillé comme « Hey Atlas »",
   );
   assert.deepEqual([poste.interrupteur.checked, poste.interrupteur.disabled], [false, false]);
-  assert.ok(!poste.reste.some((p) => p.className === "attente"), "rien n'attend : rien à dire");
+  assert.ok(!poste.infos.some((p) => p.className === "attente"), "rien n'attend : rien à dire");
+  assert.equal(poste.formulaire, undefined);
   assert.equal(meteo.badge.textContent, "Communauté");
   assert.equal(meteo.nom.textContent, "<b>Météo</b>", "le texte d'un manifeste reste du texte");
 });
@@ -84,14 +97,14 @@ test("un connecteur qui n'est pas activable a son interrupteur grisé, et dit po
   ];
   const [actif, aConfigurer, aInstaller, enErreur] = lignes(rendre(cas).conteneur).map(morceaux);
   assert.deepEqual([actif.interrupteur.checked, actif.interrupteur.disabled], [true, false]);
-  assert.ok(actif.reste.some((p) => p.className === "attente" && p.textContent === EN_ATTENTE));
+  assert.ok(actif.infos.some((p) => p.className === "attente" && p.textContent === EN_ATTENTE));
   for (const [ligne, texte] of [
     [aConfigurer, "À configurer : il manque ATLAS_POSTE_CLE dans le .env du Core"],
     [aInstaller, "À installer : lance make install (il manque caldav)"],
     [enErreur, "En erreur : connecteur.toml absent"],
   ]) {
     assert.equal(ligne.interrupteur.disabled, true);
-    assert.ok(ligne.reste.some((p) => p.textContent === texte), texte);
+    assert.ok(ligne.infos.some((p) => p.textContent === texte), texte);
   }
 });
 
@@ -111,7 +124,8 @@ test("un connecteur d'Atlas s'active et se coupe d'un toucher", () => {
 test("un connecteur de la communauté demande confirmation avant de s'activer, jamais pour se couper", () => {
   const { conteneur, bascules } = rendre([METEO, { ...METEO, id: "radio", etat: "actif" }]);
   const [meteo, radio] = lignes(conteneur).map(morceaux);
-  const avertissement = meteo.reste.at(-1);
+  const avertissement = meteo.avertissement;
+  assert.equal(avertissement.className, "avertissement");
   assert.equal(avertissement.hidden, true);
   meteo.interrupteur.checked = true;
   meteo.interrupteur.declencher("change");
@@ -150,15 +164,16 @@ test("un connecteur qui a des réglages les ouvre d'un bouton, et les garde ouve
     return lignes(conteneur).map(morceaux);
   };
   let [poste, ligne] = rendu();
-  assert.ok(!poste.reste.some((e) => e.className === "ouvrir-reglages"), "sans réglages, pas de bouton");
-  let [ouvrir, formulaire] = ligne.reste.slice(-2);
-  assert.deepEqual([ouvrir.textContent, ouvrir.type, formulaire.tagName], ["Réglages", "button", "FORM"]);
+  assert.equal(poste.ouvrir, undefined, "sans réglages, pas de bouton");
+  let { ouvrir, formulaire } = ligne;
+  assert.deepEqual([ouvrir.textContent, ouvrir.type, formulaire.tagName], ["Réglages…", "button", "FORM"]);
+  assert.equal(ligne.actions.children[1], ligne.bascule, "« Réglages… » à côté de l'interrupteur");
   assert.deepEqual([formulaire.hidden, ouvrir.attributs["aria-expanded"]], [true, "false"]);
   ouvrir.declencher("click");
   assert.deepEqual([formulaire.hidden, ouvrir.attributs["aria-expanded"]], [false, "true"]);
   etat.resultats.set("bonjour", { ok: true, message: "Enregistré." });
   [, ligne] = rendu();
-  [ouvrir, formulaire] = ligne.reste.slice(-2);
+  ({ ouvrir, formulaire } = ligne);
   assert.equal(formulaire.hidden, false, "toujours ouvert après un nouveau rendu");
   assert.equal(formulaire.children.at(-1).textContent, "Enregistré.");
   formulaire.children[0].children[0].children[2].value = "David";
@@ -167,5 +182,14 @@ test("un connecteur qui a des réglages les ouvre d'un bouton, et les garde ouve
   ouvrir.declencher("click");
   assert.equal(etat.ouverts.has("bonjour"), false);
   [, ligne] = rendu();
-  assert.equal(ligne.reste.at(-1).hidden, true, "refermé, il le reste");
+  assert.equal(ligne.formulaire.hidden, true, "refermé, il le reste");
+});
+
+test("le résumé des connecteurs, pour la liste des rubriques", () => {
+  const liste = (...etats) => ({ disponible: true, connecteurs: etats.map((etat, i) => ({ ...POSTE, id: `c${i}`, etat })) });
+  assert.equal(resumeConnecteurs({ disponible: false, connecteurs: [] }), "");
+  assert.equal(resumeConnecteurs(null), "", "avant la première liste");
+  assert.equal(resumeConnecteurs(liste("coupe", "en_erreur")), "Aucun actif");
+  assert.equal(resumeConnecteurs(liste("actif", "coupe")), "1 actif");
+  assert.equal(resumeConnecteurs(liste("actif", "actif", "actif")), "3 actifs");
 });

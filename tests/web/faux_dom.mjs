@@ -13,6 +13,7 @@ export function fauxElement(tag) {
     type: "",
     hidden: false,
     attributs: {},
+    dataset: {},
     setAttribute(nom, valeur) {
       this.attributs[nom] = String(valeur);
     },

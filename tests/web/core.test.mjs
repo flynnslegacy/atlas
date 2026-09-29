@@ -27,13 +27,22 @@ function rendre(etat) {
   const actions = [];
   rendreCore(document, conteneur, etat, (type) => actions.push(type));
   const par = (classe) => conteneur.children.find((e) => e.className === classe);
-  const [redemarrer, mettreAJour] = par("boutons").children;
-  return { conteneur, par, redemarrer, mettreAJour, actions };
+  // La carte : la version, puis une ligne par action : [texte [titre, phrase], bouton].
+  const lignes = par("groupe").children;
+  const [redemarrer, mettreAJour] = lignes.slice(1).map((ligne) => ligne.children[1]);
+  return { conteneur, par, lignes, version: lignes[0].children[1], redemarrer, mettreAJour, actions };
 }
 
-test("la version qui tourne, et deux boutons qui demandent confirmation", () => {
-  const { par, redemarrer, mettreAJour, actions } = rendre({ version: VERSION, enCours: null, fin: null });
-  assert.equal(par("version").textContent, "Version ce65d2a, du 2026-09-29");
+test("la version qui tourne, et deux actions qui demandent confirmation", () => {
+  const { par, lignes, version, redemarrer, mettreAJour, actions } = rendre({ version: VERSION, enCours: null, fin: null });
+  assert.deepEqual([lignes[0].children[0].textContent, version.textContent], ["Version", "ce65d2a, du 2026-09-29"]);
+  assert.deepEqual(
+    lignes.slice(1).map((ligne) => [...ligne.children[0].children.map((e) => e.textContent), ligne.children[1].textContent]),
+    [
+      ["Redémarrer", "La conversation en cours se clôt, avec son résumé au journal.", "Redémarrer…"],
+      ["Mettre à jour et redémarrer", "Récupère la dernière version, installe ce qui manque, puis redémarre.", "Mettre à jour…"],
+    ],
+  );
   assert.deepEqual([redemarrer.disabled, mettreAJour.disabled], [false, false]);
   const confirmation = par("confirmation-core");
   assert.equal(confirmation.hidden, true);
@@ -56,8 +65,8 @@ test("la mise à jour impossible est grisée, avec sa raison", () => {
 });
 
 test("avant la version, ou pendant une étape, les boutons attendent", () => {
-  let { par, redemarrer, mettreAJour } = rendre({ version: null, enCours: null, fin: null });
-  assert.equal(par("version").textContent, "Version…");
+  let { par, version, redemarrer, mettreAJour } = rendre({ version: null, enCours: null, fin: null });
+  assert.equal(version.textContent, "…");
   assert.deepEqual([redemarrer.disabled, mettreAJour.disabled], [true, true]);
   const enCours = { etape: "installation", texte: "Installation…", nouveautes: ["Deux", "Un"] };
   ({ par, redemarrer, mettreAJour } = rendre({ version: VERSION, enCours, fin: null }));
