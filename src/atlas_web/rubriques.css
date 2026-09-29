@@ -1,28 +1,52 @@
 /* Le contenu des rubriques des Paramètres : les connecteurs et leurs réglages, et « Le Core ».
    La disposition des Paramètres est dans parametres.css. */
 
-/* Les connecteurs : une ligne chacun, son état, son interrupteur, et l'avertissement d'un
-   connecteur de la communauté. */
+/* Les connecteurs : une carte chacun ; à gauche son nom, sa description et son état, à droite
+   « Réglages… » et son interrupteur ; dessous, l'avertissement « Communauté » et ses réglages. */
 #liste-connecteurs .connecteurs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 #liste-connecteurs .connecteur {
-  padding: 10px 0;
-  border-top: 1px solid var(--bord);
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-#liste-connecteurs .tete {
+#liste-connecteurs .entete {
   display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+#liste-connecteurs .texte {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+#liste-connecteurs .titre {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
 #liste-connecteurs .nom {
-  flex: 1;
+  font-size: 15px;
   font-weight: 600;
+}
+
+#liste-connecteurs .actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
 }
 
 #liste-connecteurs .badge {
@@ -48,10 +72,19 @@
   color: var(--texte-doux);
 }
 
+#liste-connecteurs .description {
+  font-size: 13px;
+}
+
 #liste-connecteurs .signature,
 #liste-connecteurs .etat,
 #liste-connecteurs .attente {
   font-size: 12px;
+}
+
+#liste-connecteurs .etat.a_configurer,
+#liste-connecteurs .etat.a_installer {
+  color: var(--accent);
 }
 
 #liste-connecteurs .etat.en_erreur {
@@ -84,16 +117,23 @@
 
 /* Les réglages d'un connecteur : un champ chacun ; la valeur d'un secret n'y est jamais. */
 #liste-connecteurs .ouvrir-reglages {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--accent);
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
+
+#liste-connecteurs .ouvrir-reglages:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 #liste-connecteurs .reglages {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--bord);
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 #liste-connecteurs .reglage label {
@@ -147,6 +187,24 @@
 
 #liste-connecteurs .reglages .resultat.refus {
   color: var(--erreur);
+}
+
+/* Sur un écran étroit, les actions passent sous le texte : « Réglages… » à gauche,
+   l'interrupteur à droite. */
+@media (max-width: 719px) {
+  #liste-connecteurs .entete {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  #liste-connecteurs .actions {
+    align-self: stretch;
+    justify-content: flex-end;
+  }
+
+  #liste-connecteurs .ouvrir-reglages {
+    margin-right: auto;
+  }
 }
 
 /* La rubrique « Le Core » : sa version, ses deux boutons, leur confirmation, et les étapes

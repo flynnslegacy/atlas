@@ -472,8 +472,8 @@ test("les Paramètres demandent les connecteurs, les montrent, et envoient une b
   };
   web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [poste] });
   const [liste] = $("liste-connecteurs").children;
-  const [tete] = liste.children[0].children;
-  const interrupteur = tete.children[2].children[0];
+  const [entete] = liste.children[0].children;
+  const interrupteur = entete.children[1].children.at(-1).children[0];
   interrupteur.checked = true;
   interrupteur.declencher("change");
   assert.deepEqual(web.envoyes.at(-1), { type: "activer_connecteur", id: "poste", actif: true });
@@ -505,7 +505,9 @@ test("les réglages d'un connecteur partent au Core, et sa réponse s'affiche ju
     reglages: [nom],
   };
   const regle = { ...bonjour, etat: "coupe", detail: "", reglages: [{ ...nom, defini: true, valeur: "David" }] };
-  const derniers = () => $("liste-connecteurs").children[0].children[0].children.slice(-2);
+  // La carte : [entête [texte, actions [« Réglages… », interrupteur]], avertissement, réglages].
+  const carte = () => $("liste-connecteurs").children[0].children[0];
+  const derniers = () => [carte().children[0].children[1].children[0], carte().children.at(-1)];
   web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [bonjour] });
   let [ouvrir, formulaire] = derniers();
   ouvrir.declencher("click");
