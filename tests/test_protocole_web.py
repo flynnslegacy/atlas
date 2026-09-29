@@ -11,13 +11,16 @@ from atlas_core.protocole_web import (
     AttenteConfirmation,
     Authentification,
     Confirmer,
+    CoreEnCours,
     DemandeConnecteurs,
     DemandeDocuments,
     Document,
     DocumentsChanges,
     Echange,
+    EtatCore,
     FicheConnecteur,
     FinConfirmation,
+    FinCore,
     FinMission,
     Historique,
     Latences,
@@ -256,3 +259,27 @@ def test_une_page_regle_un_connecteur():
 def test_un_reglage_ne_nomme_qu_une_variable_d_atlas(message):
     with pytest.raises(ValueError):
         decoder_message_page(json.dumps({"type": "regler_connecteur", **message}))
+
+
+def test_les_messages_du_core_vers_les_pages():
+    assert EtatCore(version="ce65d2a", date="2026-09-29").model_dump() == {
+        "type": "etat_core",
+        "version": "ce65d2a",
+        "date": "2026-09-29",
+        "occupe": False,
+        "mise_a_jour_possible": False,
+        "raison": "",
+    }
+    en_cours = CoreEnCours(etape="installation", texte="Installation…", nouveautes=["Un"])
+    assert en_cours.model_dump() == {
+        "type": "core_en_cours",
+        "etape": "installation",
+        "texte": "Installation…",
+        "nouveautes": ["Un"],
+    }
+    assert FinCore(ok=True, texte="Atlas est déjà à jour.").model_dump() == {
+        "type": "fin_core",
+        "ok": True,
+        "texte": "Atlas est déjà à jour.",
+        "details": [],
+    }

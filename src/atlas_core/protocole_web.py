@@ -164,6 +164,37 @@ class ListeConnecteurs(BaseModel):
     connecteurs: list[FicheConnecteur] = []
 
 
+class EtatCore(BaseModel):
+    """À la page qui le demande : la version qui tourne, et si la mise à jour est possible
+    (sinon, pourquoi : le bouton est alors grisé, avec la raison)."""
+
+    type: Literal["etat_core"] = "etat_core"
+    version: str
+    date: str = ""
+    occupe: bool = False
+    mise_a_jour_possible: bool = False
+    raison: str = ""
+
+
+class CoreEnCours(BaseModel):
+    """À toutes les pages : une étape d'un redémarrage ou d'une mise à jour."""
+
+    type: Literal["core_en_cours"] = "core_en_cours"
+    etape: Literal["redemarrage", "recuperation", "installation"]
+    texte: str
+    nouveautes: list[str] = []
+
+
+class FinCore(BaseModel):
+    """La fin d'une mise à jour sans redémarrage (à jour, ou un échec), à toutes les pages ;
+    un refus, à la page qui a demandé. `details` : les dernières lignes d'une erreur."""
+
+    type: Literal["fin_core"] = "fin_core"
+    ok: bool
+    texte: str
+    details: list[str] = []
+
+
 class ResultatReglage(BaseModel):
     """À la page qui a enregistré des réglages : faits, ou pourquoi pas."""
 
