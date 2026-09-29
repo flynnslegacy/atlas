@@ -10,14 +10,25 @@ export const PAR_DEFAUT = "connecteurs";
 export const CLE_RUBRIQUE = "atlas.rubrique";
 
 // `boutons` : ceux de la colonne, chacun avec `data-rubrique` ; `pages` : la section de chaque
-// rubrique ; `contenu` : ce qui défile ; `estEtroit()` : l'écran montre-t-il une seule colonne ?
-// `surChoix(id)` : la rubrique affichée (null : aucune, la liste seule).
+// rubrique ; `contenu` : ce qui défile ; `boutonRetour` : « ‹ Paramètres » ; `estEtroit()` :
+// l'écran montre-t-il une seule colonne ? `surChoix(id)` : la rubrique affichée (null : aucune,
+// la liste seule).
 export class Rubriques {
-  constructor({ boutons, pages, panneau, contenu, stockage, estEtroit = () => false, surChoix = () => {} }) {
+  constructor({
+    boutons,
+    pages,
+    panneau,
+    contenu,
+    boutonRetour = null,
+    stockage,
+    estEtroit = () => false,
+    surChoix = () => {},
+  }) {
     this._boutons = boutons;
     this._pages = pages;
     this._panneau = panneau;
     this._contenu = contenu;
+    this._boutonRetour = boutonRetour;
     this._stockage = stockage;
     this._estEtroit = estEtroit;
     this._surChoix = surChoix;
@@ -34,6 +45,7 @@ export class Rubriques {
     this._afficher(RUBRIQUES.includes(retenue) ? retenue : PAR_DEFAUT);
     this._panneau.dataset.vue = "menu";
     this._surChoix(this._estEtroit() ? null : this.courante);
+    this._boutonCourant()?.focus(); // le focus entre dans les Paramètres
   }
 
   choisir(id) {
@@ -43,12 +55,20 @@ export class Rubriques {
     this._panneau.dataset.vue = "rubrique";
     this._contenu.scrollTop = 0;
     this._surChoix(id);
+    // Sur un écran étroit, la colonne se cache : le focus passe dans la rubrique.
+    if (this._estEtroit()) this._boutonRetour?.focus();
   }
 
   // « ‹ Paramètres » : la liste ; sur un écran large, la rubrique reste à côté.
   retour() {
     this._panneau.dataset.vue = "menu";
-    if (this._estEtroit()) this._surChoix(null);
+    if (!this._estEtroit()) return;
+    this._surChoix(null);
+    this._boutonCourant()?.focus(); // la rubrique qu'on vient de quitter
+  }
+
+  _boutonCourant() {
+    return this._boutons.find((bouton) => bouton.dataset.rubrique === this.courante);
   }
 
   // La largeur a changé, les Paramètres ouverts (une fenêtre redimensionnée, un iPad en Split

@@ -5,11 +5,15 @@ import { CLE_RUBRIQUE, PAR_DEFAUT, RUBRIQUES, Rubriques } from "../../src/atlas_
 import { fauxElement, fauxStockage, stockageCasse } from "./faux_dom.mjs";
 
 function monter({ stockage = fauxStockage(), etroit = false } = {}) {
+  const focus = []; // qui a reçu le focus, dans l'ordre
   const boutons = RUBRIQUES.map((id) => {
     const bouton = fauxElement("button");
     bouton.dataset.rubrique = id;
+    bouton.focus = () => focus.push(id);
     return bouton;
   });
+  const boutonRetour = fauxElement("button");
+  boutonRetour.focus = () => focus.push("retour");
   const pages = Object.fromEntries(RUBRIQUES.map((id) => [id, fauxElement("section")]));
   const panneau = fauxElement("section");
   const contenu = fauxElement("div");
@@ -20,13 +24,14 @@ function monter({ stockage = fauxStockage(), etroit = false } = {}) {
     pages,
     panneau,
     contenu,
+    boutonRetour,
     stockage,
     estEtroit: () => ecran.etroit,
     surChoix: (id) => choix.push(id),
   });
   const visibles = () => RUBRIQUES.filter((id) => !pages[id].hidden);
   const courants = () => boutons.filter((b) => b.attributs["aria-current"] === "page").map((b) => b.dataset.rubrique);
-  return { rubriques, boutons, pages, panneau, contenu, stockage, choix, ecran, visibles, courants };
+  return { rubriques, boutons, pages, panneau, contenu, stockage, choix, ecran, focus, visibles, courants };
 }
 
 test("cinq rubriques, dans l'ordre de la spec", () => {
@@ -110,4 +115,23 @@ test("une largeur qui change pendant que les Paramètres sont ouverts : la galer
   rubriques.choisir("fond"); // étroit, la rubrique affichée
   rubriques.surLargeur();
   assert.deepEqual(choix.slice(-2), ["fond", "fond"], "étroit, dans une rubrique : elle reste");
+});
+
+test("sur un écran étroit, le focus suit : la liste, la rubrique, puis la liste", () => {
+  // La colonne et la rubrique se cachent l'une l'autre : sans cela, le focus tomberait derrière
+  // les Paramètres, qui couvrent l'écran (VoiceOver perdrait sa place).
+  const { rubriques, boutons, focus } = monter({ etroit: true });
+  rubriques.ouvrir();
+  assert.deepEqual(focus, ["connecteurs"], "à l'ouverture, la rubrique courante de la liste");
+  boutons[2].declencher("click");
+  assert.equal(focus.at(-1), "retour", "dans la rubrique : « ‹ Paramètres »");
+  rubriques.retour();
+  assert.equal(focus.at(-1), "orbe", "de retour : la rubrique qu'on vient de quitter");
+});
+
+test("sur un écran large, le bouton cliqué garde le focus", () => {
+  const { rubriques, boutons, focus } = monter();
+  rubriques.ouvrir();
+  boutons[1].declencher("click");
+  assert.deepEqual(focus, ["connecteurs"], "seule l'ouverture le déplace");
 });

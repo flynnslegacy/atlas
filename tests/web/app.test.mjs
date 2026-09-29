@@ -114,6 +114,7 @@ function fauxDocumentDeLaPage({ fondSain = false } = {}) {
   const boutonsRubriques = RUBRIQUES.map((id) => {
     const bouton = fauxElement("button");
     bouton.dataset.rubrique = id;
+    bouton.focus = () => {};
     return bouton;
   });
   const panneaux = ["panneau-historique", "panneau-documents", "panneau-parametres"];
