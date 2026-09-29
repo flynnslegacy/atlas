@@ -272,6 +272,7 @@ $("retour-documents").addEventListener("click", montrerLaListe);
 
 // Les rubriques des Paramètres : une colonne à gauche, la rubrique à droite ; sur un écran
 // étroit, la liste puis la rubrique. Chacune dit sa valeur dans la liste.
+const ecranEtroit = window.matchMedia("(max-width: 719px)");
 const rubriques = new Rubriques({
   boutons: [...document.querySelectorAll("#menu-parametres [data-rubrique]")],
   pages: {
@@ -284,10 +285,13 @@ const rubriques = new Rubriques({
   panneau: $("panneau-parametres"),
   contenu: $("contenu-parametres"),
   stockage,
-  estEtroit: () => window.matchMedia("(max-width: 719px)").matches,
+  estEtroit: () => ecranEtroit.matches,
   surChoix: montrerGalerie,
 });
 $("retour-parametres").addEventListener("click", () => rubriques.retour());
+ecranEtroit.addEventListener("change", () => {
+  if (!$("panneau-parametres").hidden) rubriques.surLargeur();
+});
 $("valeur-orbe").textContent = orbes.choisi(stockage).nom;
 $("valeur-fond").textContent = fonds.choisi(stockage).nom;
 

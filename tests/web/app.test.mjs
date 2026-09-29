@@ -144,7 +144,20 @@ function fauxDocumentDeLaPage({ fondSain = false } = {}) {
 async function chargerPage({ stockage = fauxStockage(), FabriqueWebSocket, fondSain = false } = {}) {
   const file = [];
   globalThis.document = fauxDocumentDeLaPage({ fondSain });
-  globalThis.window = { localStorage: stockage, matchMedia: () => ({ matches: false }) };
+  // Chaque requête média a son objet, que les tests font changer (une fenêtre redimensionnée).
+  const medias = {};
+  const media = () => ({
+    matches: false,
+    ecouteurs: [],
+    addEventListener(type, rappel) {
+      this.ecouteurs.push(rappel);
+    },
+    changer(matches) {
+      this.matches = matches;
+      for (const rappel of this.ecouteurs) rappel({ matches });
+    },
+  });
+  globalThis.window = { localStorage: stockage, matchMedia: (requete) => (medias[requete] ??= media()) };
   globalThis.WebSocket = FabriqueWebSocket;
   globalThis.location = { protocol: "http:", host: "atlas.test" };
   globalThis.requestAnimationFrame = (rappel) => {
@@ -665,4 +678,19 @@ test("remonter une rubrique au doigt ne ferme pas les Paramètres", async () => 
   $("panneau-documents").scrollTop = 0;
   glisser();
   assert.equal($("panneau-documents").hidden, true);
+});
+
+test("une fenêtre qui passe sous 720 px, puis au-dessus : la galerie s'arrête, puis revient", async () => {
+  const stockage = fauxStockage({ "atlas.cle": "cle", "atlas.rubrique": "orbe" });
+  const { $ } = await ouvrirLesParametres(stockage);
+  const ecran = window.matchMedia("(max-width: 719px)");
+  assert.ok($("galerie-orbes").children.length > 0);
+  ecran.changer(true);
+  assert.equal($("galerie-orbes").children.length, 0, "la liste seule : la galerie s'arrête");
+  ecran.changer(false);
+  assert.ok($("galerie-orbes").children.length > 0, "la rubrique revient à droite, sa galerie aussi");
+  document.declencher("keydown", { key: "Escape" }); // les Paramètres se ferment
+  ecran.changer(true);
+  ecran.changer(false);
+  assert.equal($("galerie-orbes").children.length, 0, "fermés, aucune galerie ne repart");
 });

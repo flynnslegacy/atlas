@@ -51,6 +51,13 @@ export class Rubriques {
     if (this._estEtroit()) this._surChoix(null);
   }
 
+  // La largeur a changé, les Paramètres ouverts (une fenêtre redimensionnée, un iPad en Split
+  // View) : une rubrique apparaît ou disparaît, et sa galerie avec elle.
+  surLargeur() {
+    const affichee = this._estEtroit() && this._panneau.dataset.vue === "menu" ? null : this.courante;
+    this._surChoix(affichee);
+  }
+
   _afficher(id) {
     this.courante = id;
     for (const bouton of this._boutons) {

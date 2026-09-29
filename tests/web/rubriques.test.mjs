@@ -14,18 +14,19 @@ function monter({ stockage = fauxStockage(), etroit = false } = {}) {
   const panneau = fauxElement("section");
   const contenu = fauxElement("div");
   const choix = [];
+  const ecran = { etroit };
   const rubriques = new Rubriques({
     boutons,
     pages,
     panneau,
     contenu,
     stockage,
-    estEtroit: () => etroit,
+    estEtroit: () => ecran.etroit,
     surChoix: (id) => choix.push(id),
   });
   const visibles = () => RUBRIQUES.filter((id) => !pages[id].hidden);
   const courants = () => boutons.filter((b) => b.attributs["aria-current"] === "page").map((b) => b.dataset.rubrique);
-  return { rubriques, boutons, pages, panneau, contenu, stockage, choix, visibles, courants };
+  return { rubriques, boutons, pages, panneau, contenu, stockage, choix, ecran, visibles, courants };
 }
 
 test("cinq rubriques, dans l'ordre de la spec", () => {
@@ -94,4 +95,19 @@ test("sur un écran large, le retour ne cache rien", () => {
   rubriques.ouvrir();
   rubriques.retour();
   assert.deepEqual(choix, ["connecteurs"], "la rubrique reste affichée à côté de la liste");
+});
+
+test("une largeur qui change pendant que les Paramètres sont ouverts : la galerie suit", () => {
+  const stockage = fauxStockage({ [CLE_RUBRIQUE]: "orbe" });
+  const { rubriques, ecran, choix } = monter({ stockage });
+  rubriques.ouvrir(); // large : l'orbe à droite
+  ecran.etroit = true; // la fenêtre rétrécit : la liste seule
+  rubriques.surLargeur();
+  ecran.etroit = false; // elle s'élargit : la rubrique revient à droite
+  rubriques.surLargeur();
+  assert.deepEqual(choix, ["orbe", null, "orbe"]);
+  ecran.etroit = true;
+  rubriques.choisir("fond"); // étroit, la rubrique affichée
+  rubriques.surLargeur();
+  assert.deepEqual(choix.slice(-2), ["fond", "fond"], "étroit, dans une rubrique : elle reste");
 });
