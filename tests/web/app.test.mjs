@@ -38,6 +38,7 @@ const IDENTIFIANTS = [
   "parler",
   "pastille",
   "retour-documents",
+  "rubrique-core",
   "saisie",
   "sous-titres",
   "st-question",
@@ -82,7 +83,7 @@ function canevasSain() {
   return { width: 4, height: 4, clientWidth: 4, clientHeight: 4, getContext: () => ctx };
 }
 
-function fauxDocumentDeLaPage() {
+function fauxDocumentDeLaPage({ fondSain = false } = {}) {
   const elements = {};
   for (const id of IDENTIFIANTS) {
     const element = fauxElement("div");
@@ -91,7 +92,7 @@ function fauxDocumentDeLaPage() {
     element.focus = () => {};
     elements[id] = element;
   }
-  elements.fond = canevasQuiLeve();
+  elements.fond = fondSain ? canevasSain() : canevasQuiLeve();
   elements.orbe = canevasSain();
   const ecouteurs = {};
   return {
@@ -101,7 +102,7 @@ function fauxDocumentDeLaPage() {
       if (!element) throw new Error(`identifiant absent du faux document : ${id}`);
       return element;
     },
-    createElement: (tag) => fauxElement(tag),
+    createElement: (tag) => (fondSain && tag === "canvas" ? canevasSain() : fauxElement(tag)),
     querySelectorAll: () => [],
     querySelector: () => null,
     addEventListener(type, rappel) {
@@ -113,11 +114,12 @@ function fauxDocumentDeLaPage() {
   };
 }
 
-// Charge app.js dans un faux navigateur, avec un fond dont le dessin lève à chaque image.
-// Rend la file des rappels que le vrai navigateur aurait donnés à requestAnimationFrame.
-async function chargerPage({ stockage = fauxStockage(), FabriqueWebSocket } = {}) {
+// Charge app.js dans un faux navigateur, avec un fond dont le dessin lève à chaque image (sauf
+// `fondSain` : l'image va alors jusqu'à la barre du haut). Rend la file des rappels que le vrai
+// navigateur aurait donnés à requestAnimationFrame.
+async function chargerPage({ stockage = fauxStockage(), FabriqueWebSocket, fondSain = false } = {}) {
   const file = [];
-  globalThis.document = fauxDocumentDeLaPage();
+  globalThis.document = fauxDocumentDeLaPage({ fondSain });
   globalThis.window = { localStorage: stockage, matchMedia: () => ({ matches: false }) };
   globalThis.WebSocket = FabriqueWebSocket;
   globalThis.location = { protocol: "http:", host: "atlas.test" };
@@ -432,7 +434,7 @@ test("les Paramètres demandent les connecteurs, les montrent, et envoient une b
   web.recevoir({ type: "historique", echanges: [] }); // ce que le Core envoie à chaque connexion
   $("panneau-parametres").hidden = true; // fermé, comme au chargement de la vraie page
   $("ouvrir-parametres").declencher("click");
-  assert.deepEqual(web.envoyes.at(-1), { type: "connecteurs" });
+  assert.deepEqual(web.envoyes.slice(-2), [{ type: "connecteurs" }, { type: "demande_core" }]);
   const poste = {
     id: "poste",
     nom: "Le poste du Mac",
@@ -503,4 +505,49 @@ test("les réglages d'un connecteur partent au Core, et sa réponse s'affiche ju
   [, formulaire] = derniers();
   assert.equal(formulaire.hidden, true, "une liste fermée");
   assert.ok(!formulaire.children.some((e) => e.className.startsWith("resultat")), "sans vieux message");
+});
+
+test("le Core se redémarre depuis les Paramètres, et la barre du haut suit son retour", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  FauxWebSocket.ouvertes = [];
+  const stockage = fauxStockage({ "atlas.cle": "cle" });
+  const file = await chargerPage({ stockage, FabriqueWebSocket: FauxWebSocket, fondSain: true });
+  const $ = (id) => document.getElementById(id);
+  const image = () => file[0](0); // l'image de la page (les galeries ont aussi les leurs)
+  const [web] = FauxWebSocket.ouvertes;
+  web.ouvrir();
+  web.recevoir({ type: "historique", echanges: [] });
+  $("panneau-parametres").hidden = true;
+  $("ouvrir-parametres").declencher("click");
+  assert.deepEqual(web.envoyes.at(-1), { type: "demande_core" });
+  web.recevoir({
+    type: "etat_core",
+    version: "ce65d2a",
+    date: "2026-09-29",
+    occupe: false,
+    mise_a_jour_possible: true,
+    raison: "",
+  });
+  const [version, boutons, confirmation] = $("rubrique-core").children;
+  assert.equal(version.textContent, "Version ce65d2a, du 2026-09-29");
+  boutons.children[0].declencher("click"); // « Redémarrer »
+  confirmation.children[1].declencher("click"); // « Confirmer »
+  assert.deepEqual(web.envoyes.at(-1), { type: "redemarrer_core" });
+
+  web.recevoir({ type: "core_en_cours", etape: "redemarrage", texte: "Redémarrage du Core…", nouveautes: [] });
+  web.onclose({ code: 1012 }); // le Core s'arrête
+  image();
+  assert.equal($("libelle-etat").textContent, "Redémarrage du Core…");
+  t.mock.timers.tick(60000);
+  image();
+  assert.equal($("libelle-etat").textContent, "Le Core ne revient pas");
+  assert.match($("rubrique-core").children.at(-1).textContent, /donnees\/logs\/core\.log/);
+
+  const nouvelle = FauxWebSocket.ouvertes.at(-1); // la page a retenté entre-temps
+  assert.notEqual(nouvelle, web);
+  nouvelle.ouvrir();
+  nouvelle.recevoir({ type: "historique", echanges: [] });
+  assert.deepEqual(nouvelle.envoyes.at(-1), { type: "demande_core" }, "la version, revenue");
+  image();
+  assert.notEqual($("libelle-etat").textContent, "Le Core ne revient pas");
 });

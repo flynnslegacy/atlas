@@ -2,6 +2,7 @@
 
 import { rendreConnecteurs } from "./connecteurs.js";
 import { Connexion, identifiantDePage } from "./connexion.js";
+import { SuiviCore, rendreCore } from "./core.js";
 import { dimensionner, rgba } from "./dessin.js";
 import { rendreDocument, rendreListeDocuments } from "./documents.js";
 import { LIBELLES, appliquerMessage, avancer, creerEtat, sceneDe } from "./etat.js";
@@ -78,12 +79,20 @@ function montrerConnecteurs() {
   rendreConnecteurs(document, $("liste-connecteurs"), listeConnecteurs, surBascule, reglages);
 }
 
+// Le Core : sa version, ses deux boutons, les étapes ; et son retour, attendu après un redémarrage.
+const suiviCore = new SuiviCore({ envoyer: (message) => connexion.envoyer(message), surChangement: montrerCore });
+
+function montrerCore() {
+  rendreCore(document, $("rubrique-core"), suiviCore.etat, (type) => connexion.envoyer({ type }));
+}
+
 const connexion = new Connexion({
   url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/web`,
   lireCle: () => cleEnMemoire ?? lireStockage(stockage, CLE_STOCKAGE),
   entree: () => ({ page }),
   surMessage(message) {
     appliquerMessage(etat, message, Date.now());
+    suiviCore.recevoir(message);
     if (message.type === "muet") $("muet").checked = message.actif;
     if (TOUCHENT_HISTORIQUE.has(message.type) && !$("panneau-historique").hidden) {
       rendreHistorique(document, $("liste-historique"), etat.historique);
@@ -112,6 +121,7 @@ const connexion = new Connexion({
   },
   surStatut(nouveau) {
     statut = nouveau;
+    suiviCore.surStatut(nouveau);
     etat.enLigne = nouveau === "en_ligne";
     if (nouveau in MESSAGES_CLE) demanderCle(MESSAGES_CLE[nouveau]);
   },
@@ -259,6 +269,8 @@ function ouvrirParametres() {
   connexion.envoyer({ type: "connecteurs" }); // relus à chaque ouverture : un dossier a pu être déposé
   reglages.ouverts.clear(); // chaque ouverture repart d'une liste fermée, sans vieux message
   reglages.resultats.clear();
+  suiviCore.demander();
+  montrerCore();
   const commun = { document, stockage, scene: () => sceneCourante };
   galeries = [
     ouvrirGalerie({
@@ -359,7 +371,7 @@ function image(ms) {
     fond.dessiner(t, sceneCourante);
     orbe.dessiner(t, sceneCourante);
     $("pastille").style.backgroundColor = rgba(etat.couleur, 1);
-    const libelle = etat.enLigne ? LIBELLES[etat.etat] : (STATUTS[statut] ?? "");
+    const libelle = etat.enLigne ? LIBELLES[etat.etat] : (suiviCore.libelle() ?? STATUTS[statut] ?? "");
     if ($("libelle-etat").textContent !== libelle) $("libelle-etat").textContent = libelle;
     afficherSousTitres(sousTitres, etat, Date.now());
   } catch (e) {
