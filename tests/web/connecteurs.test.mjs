@@ -45,8 +45,8 @@ function lignes(conteneur) {
 
 function morceaux(ligne) {
   const [tete, ...reste] = ligne.children;
-  const [nom, badge, interrupteur] = tete.children;
-  return { nom, badge, interrupteur, reste };
+  const [nom, badge, bascule] = tete.children;
+  return { nom, badge, bascule, interrupteur: bascule.children[0], reste };
 }
 
 test("chaque connecteur a sa ligne : nom, badge, description, signature, état, interrupteur", () => {
@@ -62,6 +62,12 @@ test("chaque connecteur a sa ligne : nom, badge, description, signature, état, 
       ["signature", "version 1.0.0 · Atlas"],
       ["etat coupe", "Coupé"],
     ],
+  );
+  assert.deepEqual([poste.bascule.tagName, poste.bascule.className], ["LABEL", "interrupteur"]);
+  assert.deepEqual(
+    [poste.interrupteur.tagName, poste.interrupteur.type],
+    ["INPUT", "checkbox"],
+    "habillé comme « Hey Atlas »",
   );
   assert.deepEqual([poste.interrupteur.checked, poste.interrupteur.disabled], [false, false]);
   assert.ok(!poste.reste.some((p) => p.className === "attente"), "rien n'attend : rien à dire");

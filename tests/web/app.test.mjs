@@ -447,7 +447,7 @@ test("les Paramètres demandent les connecteurs, les montrent, et envoient une b
   web.recevoir({ type: "liste_connecteurs", disponible: true, connecteurs: [poste] });
   const [liste] = $("liste-connecteurs").children;
   const [tete] = liste.children[0].children;
-  const interrupteur = tete.children[2];
+  const interrupteur = tete.children[2].children[0];
   interrupteur.checked = true;
   interrupteur.declencher("change");
   assert.deepEqual(web.envoyes.at(-1), { type: "activer_connecteur", id: "poste", actif: true });
