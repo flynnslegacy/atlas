@@ -3,8 +3,9 @@ période et chercher (N1), ajouter (N2), modifier et supprimer après son « oui
 
 Chaque rendez-vous lu reçoit une étiquette (`e1`, `e2`…), que Claude rend pour désigner un
 rendez-vous ; chaque fois d'un événement répété a la sienne. Les étiquettes valent pour la
-conversation : la suivante les oublie, et relit l'agenda. Un rendez-vous modifié ou supprimé
-perd la sienne jusqu'à ce qu'on le relise : ce qu'on en savait n'est plus vrai.
+conversation : la suivante les oublie, et relit l'agenda. Un événement modifié ou supprimé, ou
+changé entre-temps, perd les étiquettes de toutes ses fois jusqu'à ce qu'on le relise : ce
+qu'on en savait n'est plus vrai.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Any
 from atlas_core.connecteurs import Connecteur, Contexte, ErreurConnecteur, Fait, Niveau, Outil
 
 from .actions import Modification, Suppression
-from .agenda import ADRESSE, DELAI_S, Agenda, Calendrier, RendezVous, jour_de, normaliser
+from .agenda import ADRESSE, DELAI_S, Agenda, Calendrier, Change, RendezVous, jour_de, normaliser
 from .dire import jour_long, ligne, periode, quand
 
 MAX_JOURS = 62
@@ -295,7 +296,7 @@ class AgendaIcloud(Connecteur):
         )
 
     async def _modifier(self, arguments: dict[str, Any]) -> Modification:
-        etiquette, rendezvous = self._designe(arguments)
+        _, rendezvous = self._designe(arguments)
         changements: dict[str, Any] = {}
         for cle, avant in [
             ("titre", rendezvous.titre),
@@ -316,17 +317,36 @@ class AgendaIcloud(Connecteur):
         return Modification(
             rendezvous,
             changements,
-            faire=lambda: self._calendrier.modifier(rendezvous, **changements),
-            apres=lambda: self._etiquettes.pop(etiquette, None),
+            faire=self._sinon_relire(rendezvous, self._calendrier.modifier, **changements),
+            apres=lambda: self._oublier(rendezvous.url),
         )
 
     async def _supprimer(self, arguments: dict[str, Any]) -> Suppression:
-        etiquette, rendezvous = self._designe(arguments)
+        _, rendezvous = self._designe(arguments)
         return Suppression(
             rendezvous,
-            faire=lambda: self._calendrier.supprimer(rendezvous),
-            apres=lambda: self._etiquettes.pop(etiquette, None),
+            faire=self._sinon_relire(rendezvous, self._calendrier.supprimer),
+            apres=lambda: self._oublier(rendezvous.url),
         )
+
+    def _sinon_relire(
+        self, rendezvous: RendezVous, ecrire: Callable[..., None], **changements: Any
+    ) -> Callable[[], None]:
+        """L'écriture après le « oui » ; si l'événement a changé entre-temps, ses étiquettes
+        sont oubliées : Claude le relira avant de réessayer."""
+
+        def faire() -> None:
+            try:
+                ecrire(rendezvous, **changements)
+            except Change:
+                self._oublier(rendezvous.url)
+                raise
+
+        return faire
+
+    def _oublier(self, url: str) -> None:
+        """Les étiquettes de toutes les fois d'un événement : son ETag n'est plus le bon."""
+        self._etiquettes = {e: r for e, r in self._etiquettes.items() if r.url != url}
 
     def _designe(self, arguments: dict[str, Any]) -> tuple[str, RendezVous]:
         """Le rendez-vous que désigne l'étiquette, s'il peut changer sans écrire à personne."""

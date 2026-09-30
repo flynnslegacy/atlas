@@ -322,6 +322,47 @@ async def test_un_rendez_vous_change_entre_temps_n_est_pas_ecrase(serveur, agend
     assert "T193000" in garde and "SUMMARY:Dîner chez Paul" in garde
 
 
+async def test_les_fois_d_une_serie_se_relisent_apres_un_changement(serveur, agenda):
+    # Toutes les fois d'une série vivent dans le même événement : après en avoir changé une,
+    # les autres doivent être relues, plutôt que d'échouer après le « oui » de David.
+    yoga = evenement(
+        "yoga", paris("20261001T180000"), paris("20261001T190000"), "Yoga", "RRULE:FREQ=WEEKLY"
+    )
+    serveur.deposer(serveur.domicile, "yoga.ics", ics(yoga))
+    await lire(agenda, "2026-10-01", "2026-10-22")
+    supprimee = await appeler(agenda, "agenda_supprimer", evenement="e2")
+    supprimee.executer()
+    supprimee.apres()
+
+    with pytest.raises(ErreurConnecteur) as refus:
+        await appeler(agenda, "agenda_supprimer", evenement="e3")
+    assert str(refus.value) == "Je ne connais pas « e3 » : relis l'agenda d'abord."
+    await lire(agenda, "2026-10-01", "2026-10-22")
+    encore = await appeler(agenda, "agenda_supprimer", evenement="e3")
+    encore.executer()
+    assert "jeudi 15 octobre" not in await lire(agenda, "2026-10-01", "2026-10-22")
+
+
+async def test_apres_un_changement_entre_temps_le_rendez_vous_se_relit(serveur, agenda, diner):
+    await lire(agenda, "2026-10-01")
+    modification = await appeler(agenda, "agenda_modifier", evenement="e1", titre="Dîner")
+    sur_l_iphone = evenement(
+        "diner", paris("20261001T193000"), paris("20261001T213000"), "Dîner chez Paul"
+    )
+    serveur.deposer(serveur.domicile, "diner.ics", ics(sur_l_iphone))
+    with pytest.raises(change()):
+        modification.executer()
+
+    with pytest.raises(ErreurConnecteur) as refus:
+        await appeler(agenda, "agenda_modifier", evenement="e1", titre="Dîner")
+    assert str(refus.value) == "Je ne connais pas « e1 » : relis l'agenda d'abord."
+    await lire(agenda, "2026-10-01")
+    nouvelle = await appeler(agenda, "agenda_modifier", evenement="e1", titre="Dîner")
+    assert nouvelle.question == (
+        "Je change « Dîner chez Paul », jeudi 1er octobre à 19 h 30 : le titre devient « Dîner » ?"
+    )
+
+
 async def test_un_rendez_vous_supprime_entre_temps(serveur, agenda, diner):
     await lire(agenda, "2026-10-01")
     modification = await appeler(agenda, "agenda_modifier", evenement="e1", titre="Dîner")
