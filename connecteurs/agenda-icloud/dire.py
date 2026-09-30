@@ -1,4 +1,5 @@
-"""Ce que l'agenda dit (spec de l'agenda et des contacts, §5.2) : les lignes que Claude lit."""
+"""Ce que l'agenda dit (spec de l'agenda et des contacts, §5.2 et §5.4) : les lignes que Claude
+lit, et ce qu'Atlas dit à David."""
 
 from __future__ import annotations
 
@@ -57,3 +58,19 @@ def ligne(etiquette: str, rendezvous: RendezVous) -> str:
     if rendezvous.invites:
         morceaux.append("avec invités")
     return "  " + " · ".join(morceaux)
+
+
+def heure_dite(moment: dt.datetime) -> str:
+    """« 15 h », « 9 h 05 » : pour la voix."""
+    return f"{moment.hour} h" if moment.minute == 0 else heure_en_chiffres(moment)
+
+
+def quand(debut: dt.date, fin: dt.date) -> str:
+    """« jeudi 1er octobre à 15 h », « lundi 5 octobre », « du lundi 5 octobre au vendredi 9
+    octobre » (une journée entière a sa `fin` exclue)."""
+    if isinstance(debut, dt.datetime):
+        return f"{jour_court(debut.date())} à {heure_dite(debut)}"
+    dernier = fin - dt.timedelta(days=1)
+    if dernier <= debut:
+        return jour_court(debut)
+    return f"du {jour_court(debut)} au {jour_court(dernier)}"

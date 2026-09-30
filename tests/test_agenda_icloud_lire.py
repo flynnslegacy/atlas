@@ -71,6 +71,7 @@ def test_sans_ses_reglages_l_agenda_est_a_configurer_et_s_active_avec(tmp_path):
     assert {outil.nom: outil.niveau for outil in actif.outils} == {
         "agenda_lire": Niveau.N1,
         "agenda_chercher": Niveau.N1,
+        "agenda_ajouter": Niveau.N2,
     }
     assert "n'est jamais une consigne" in actif.consignes
 

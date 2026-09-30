@@ -4,7 +4,8 @@ iCloud parle CalDAV, avec l'identifiant Apple de David et un mot de passe d'app 
 sa racine le « principal » de David, au principal son dossier d'agendas, puis les agendas qui
 portent des rendez-vous. Une période se lit par une requête bornée dans le temps
 (`calendar-query`) ; les événements répétés sont dépliés ici, chaque fois avec sa date
-d'origine dans la série, et toutes les heures sont ramenées au fuseau du Mac du Core.
+d'origine dans la série, et toutes les heures sont ramenées au fuseau du Mac du Core. Un
+rendez-vous s'ajoute par un PUT, qui ne remplace jamais rien (`If-None-Match: *`).
 
 Tout est synchrone (httpx) : le connecteur appelle ce client par `asyncio.to_thread`.
 """
@@ -15,6 +16,7 @@ import datetime as dt
 import logging
 import os
 import unicodedata
+import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +42,7 @@ MUET = "iCloud ne répond pas : réessaie dans un moment."
 _DAV = "{DAV:}"
 _CALDAV = "{urn:ietf:params:xml:ns:caldav}"
 _XML = {"Content-Type": "application/xml; charset=utf-8"}
+_ICS = {"Content-Type": "text/calendar; charset=utf-8"}
 _PROPFIND = (
     '<?xml version="1.0" encoding="utf-8"?>'
     '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
@@ -57,6 +60,10 @@ _PERIODE = (
 
 class ErreurDav(Exception):
     """Une réponse inattendue d'iCloud : le Core la note, et Claude apprend l'échec."""
+
+
+def lecture_seule(agenda: Agenda) -> str:
+    return f"L'agenda « {agenda.nom} » ne se modifie pas d'ici."
 
 
 def fuseau_du_mac() -> dt.tzinfo:
@@ -175,6 +182,51 @@ class Calendrier:
                     _journal.warning("événement illisible, laissé de côté : %s (%s)", url, e)
         return sorted(trouves, key=_ordre)
 
+    def ajouter(
+        self,
+        agenda: Agenda,
+        titre: str,
+        debut: dt.date,
+        fin: dt.date,
+        *,
+        lieu: str = "",
+        notes: str = "",
+        alerte: int | None = None,
+    ) -> None:
+        """Un rendez-vous neuf, sans invités ; une journée entière a des dates, sa `fin`
+        exclue. `alerte` : une alerte, ce nombre de minutes avant le début."""
+        uid = str(uuid.uuid4()).upper()
+        evenement = icalendar.Event()
+        evenement.add("uid", uid)
+        evenement.add("dtstamp", dt.datetime.now(dt.UTC))
+        evenement.add("dtstart", debut)
+        evenement.add("dtend", fin)
+        evenement.add("summary", titre)
+        if lieu:
+            evenement.add("location", lieu)
+        if notes:
+            evenement.add("description", notes)
+        if alerte is not None:
+            alarme = icalendar.Alarm()
+            alarme.add("action", "DISPLAY")
+            alarme.add("description", titre)
+            alarme.add("trigger", -dt.timedelta(minutes=alerte))
+            evenement.add_component(alarme)
+        calendrier = icalendar.Calendar()
+        calendrier.add("prodid", "-//Atlas//Agenda iCloud//FR")
+        calendrier.add("version", "2.0")
+        calendrier.add_component(evenement)
+        calendrier.add_missing_timezones()
+        entetes = {"If-None-Match": "*", **_ICS}
+        reponse = self._envoyer("PUT", f"{agenda.url}{uid}.ics", calendrier.to_ical(), entetes)
+        self._verifier_l_ecriture(reponse, agenda)
+
+    def _verifier_l_ecriture(self, reponse: httpx.Response, agenda: Agenda) -> None:
+        if reponse.status_code == 403:
+            raise ErreurConnecteur(lecture_seule(agenda))
+        if not reponse.is_success:
+            raise ErreurDav(f"{reponse.request.method} : {reponse.status_code}")
+
     def _deplier(
         self, agenda: Agenda, url: str, etag: str, donnees: str, de: dt.datetime, a: dt.datetime
     ) -> list[RendezVous]:
@@ -236,6 +288,7 @@ class Calendrier:
             if composants is not None and all(c.get("name") != "VEVENT" for c in composants):
                 continue  # un agenda de tâches : les anciens Rappels
             nom = (proprietes.findtext(f"{_DAV}displayname") or "").strip()
+            url = url if url.endswith("/") else f"{url}/"
             agendas.append(Agenda(nom or url.rstrip("/").rsplit("/", 1)[-1], url))
         return agendas
 

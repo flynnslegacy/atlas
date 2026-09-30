@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import sys
 import threading
 import types
@@ -137,6 +138,12 @@ class ServeurDav:
     def lire(self, url: str) -> str | None:
         reponse = self.client.get(url)
         return None if reponse.status_code == 404 else reponse.text
+
+    def contenus(self, url_collection: str) -> list[str]:
+        """Les événements ou les fiches d'une collection, tels que le serveur les garde."""
+        reponse = self.client.request("PROPFIND", url_collection, headers={"Depth": "1"})
+        chemins = re.findall(r"<href>([^<]+\.(?:ics|vcf))</href>", reponse.text)
+        return [self.client.get(httpx.URL(self.url).join(chemin)).text for chemin in chemins]
 
     def interdire(self, url_collection: str) -> None:
         """L'écriture dans cette collection est refusée (403), comme un agenda partagé en

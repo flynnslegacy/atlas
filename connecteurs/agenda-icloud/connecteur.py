@@ -1,5 +1,5 @@
 """L'agenda iCloud de David, en connecteur (spec de l'agenda et des contacts, §5) : lire une
-période et chercher (N1).
+période et chercher (N1), ajouter (N2).
 
 Chaque rendez-vous lu reçoit une étiquette (`e1`, `e2`…), que Claude rend pour désigner un
 rendez-vous ; chaque fois d'un événement répété a la sienne. Les étiquettes valent pour la
@@ -14,10 +14,10 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from atlas_core.connecteurs import Connecteur, Contexte, ErreurConnecteur, Niveau, Outil
+from atlas_core.connecteurs import Connecteur, Contexte, ErreurConnecteur, Fait, Niveau, Outil
 
 from .agenda import ADRESSE, DELAI_S, Agenda, Calendrier, RendezVous, jour_de, normaliser
-from .dire import jour_long, ligne, periode
+from .dire import jour_long, ligne, periode, quand
 
 MAX_JOURS = 62
 MAX_JOURS_CHERCHES = 400
@@ -54,7 +54,30 @@ _SCHEMA_CHERCHER = {
     },
     "required": ["texte"],
 }
+AJOUTER = (
+    "Ajoute un rendez-vous à l'agenda iCloud de David quand il le demande : titre, debut "
+    "(AAAA-MM-JJTHH:MM, ou AAAA-MM-JJ pour une journée entière), et au besoin fin (sinon une "
+    "heure, ou la journée ; pour une journée entière, le dernier jour), lieu, notes, alerte "
+    "(minutes avant le début) et agenda (sinon celui de ses réglages). Atlas l'annonce : ne "
+    "l'annonce pas toi-même."
+)
+_SCHEMA_AJOUTER = {
+    "type": "object",
+    "properties": {
+        "titre": {"type": "string"},
+        "debut": {"type": "string"},
+        "fin": {"type": "string"},
+        "lieu": {"type": "string"},
+        "notes": {"type": "string"},
+        "alerte": {"type": "integer"},
+        "agenda": {"type": "string"},
+    },
+    "required": ["titre", "debut"],
+}
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_MOMENT = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?")
+_UNE_HEURE = dt.timedelta(hours=1)
+_UN_JOUR = dt.timedelta(days=1)
 
 
 def _date(arguments: dict[str, Any], cle: str, defaut: dt.date | None = None) -> dt.date:
@@ -82,6 +105,54 @@ def _periode(
     return debut, fin
 
 
+def _moment(arguments: dict[str, Any], cle: str, fuseau: dt.tzinfo) -> dt.date | None:
+    """Une date avec heure (à l'heure du Mac), une date seule (une journée entière), ou rien."""
+    texte = str(arguments.get(cle) or "").strip()
+    if not texte:
+        return None
+    if _MOMENT.fullmatch(texte):
+        try:
+            if "T" not in texte:
+                return dt.date.fromisoformat(texte)
+            return dt.datetime.fromisoformat(texte).replace(tzinfo=fuseau)
+        except ValueError:
+            pass
+    raise ErreurConnecteur(
+        f"{cle} : AAAA-MM-JJTHH:MM pour une heure, par exemple 2026-10-02T15:00, ou AAAA-MM-JJ "
+        "pour une journée entière."
+    )
+
+
+def _horaires(debut: dt.date, fin: dt.date | None) -> tuple[dt.date, dt.date]:
+    """Le début et la fin d'un rendez-vous ; une journée entière finit le lendemain de son
+    dernier jour, comme le veut iCalendar."""
+    a_l_heure = isinstance(debut, dt.datetime)
+    if fin is not None and isinstance(fin, dt.datetime) != a_l_heure:
+        raise ErreurConnecteur(
+            "debut et fin : deux dates avec heure, ou deux dates pour une journée entière."
+        )
+    if a_l_heure:
+        fin = debut + _UNE_HEURE if fin is None else fin
+    else:
+        fin = (debut if fin is None else fin) + _UN_JOUR
+    if fin <= debut:
+        raise ErreurConnecteur("La fin vient avant le début.")
+    return debut, fin
+
+
+def _alerte(arguments: dict[str, Any]) -> int | None:
+    valeur = arguments.get("alerte")
+    if valeur is None or valeur == "":
+        return None
+    try:
+        minutes = int(valeur)
+    except (TypeError, ValueError):
+        minutes = -1
+    if not 0 <= minutes <= 40320:
+        raise ErreurConnecteur("alerte : un nombre de minutes avant le début, par exemple 30.")
+    return minutes
+
+
 class AgendaIcloud(Connecteur):
     """`adresse` : la racine CalDAV, celle d'iCloud ; les tests passent celle de leur serveur,
     et le jour qu'il est (`aujourd_hui`)."""
@@ -104,10 +175,12 @@ class AgendaIcloud(Connecteur):
         )
         self._etiquettes: dict[str, RendezVous] = {}
         self._par_fois: dict[tuple[str, object], str] = {}
+        self._defaut = reglages["ATLAS_ICLOUD_AGENDA"]
         self._aujourd_hui = aujourd_hui or (lambda: dt.datetime.now(self._calendrier.fuseau).date())
         self._outils = [
             Outil("agenda_lire", LIRE, _SCHEMA_LIRE, Niveau.N1, self._lire),
             Outil("agenda_chercher", CHERCHER, _SCHEMA_CHERCHER, Niveau.N1, self._chercher),
+            Outil("agenda_ajouter", AJOUTER, _SCHEMA_AJOUTER, Niveau.N2, self._ajouter),
         ]
 
     def outils(self) -> list[Outil]:
@@ -147,6 +220,34 @@ class AgendaIcloud(Connecteur):
         if not trouves:
             return f"Aucun rendez-vous ne contient « {texte} » {periode(debut, fin)}."
         return self._liste(trouves, debut)
+
+    async def _ajouter(self, arguments: dict[str, Any]) -> Fait:
+        titre = str(arguments.get("titre") or "").strip()
+        if not titre:
+            raise ErreurConnecteur("Donne un titre au rendez-vous.")
+        fuseau = self._calendrier.fuseau
+        debut = _moment(arguments, "debut", fuseau)
+        if debut is None:
+            raise ErreurConnecteur("debut : le jour du rendez-vous, et son heure s'il en a une.")
+        debut, fin = _horaires(debut, _moment(arguments, "fin", fuseau))
+        alerte = _alerte(arguments)
+        agenda = await self._agenda(arguments.get("agenda") or self._defaut)
+        assert agenda is not None
+        await asyncio.to_thread(
+            self._calendrier.ajouter,
+            agenda,
+            titre,
+            debut,
+            fin,
+            lieu=str(arguments.get("lieu") or "").strip(),
+            notes=str(arguments.get("notes") or "").strip(),
+            alerte=alerte,
+        )
+        ou = "" if normaliser(agenda.nom) == normaliser(self._defaut) else f" dans {agenda.nom}"
+        return Fait(
+            f"C'est ajouté à l'agenda « {agenda.nom} ».",
+            f"C'est noté{ou} : {titre}, {quand(debut, fin)}.",
+        )
 
     async def _agenda(self, nom: object) -> Agenda | None:
         """L'agenda que David nomme (sans tenir compte des accents ni des majuscules)."""
