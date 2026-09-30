@@ -40,7 +40,9 @@ jeudi », « Qu'est-ce que j'ai demain ? ». C'est la suite de l'étape 2 de la 
   contrepartie, le jeton peut lire les mails même quand seul l'agenda est actif.
 - **D3. Le code commun va dans le Core** (`src/atlas_core/google.py`) : le jeton d'accès renouvelé, et la connexion
   par le navigateur de `make google`. Les connecteurs l'importent, comme le poste importe ses services ; le cadre des
-  connecteurs ne change pas.
+  connecteurs ne change pas. La commande elle-même vit hors du Core, dans `scripts/google.py` (amendé en écrivant le
+  plan) : les réglages Google appartiennent aux deux connecteurs, que la page peut réécrire, et le Core ne les lit
+  jamais (un test d'Atlas y veille).
 - **D4. Les API REST de Google** (du JSON, avec httpx, déjà dans Atlas), pas CalDAV ni IMAP : Google y déplie les
   séries, dit qui organise un rendez-vous et quels agendas sont en lecture seule.
 - **D5. Les niveaux.** Google Agenda comme l'agenda iCloud : lire et chercher (N1), ajouter (N2), modifier et
@@ -83,10 +85,12 @@ connecteurs/gmail/                 connecteurs/google-agenda/        connecteurs
 | `connecteurs/agenda-icloud/` | Ne garde que son client CalDAV, son manifeste, et un `connecteur.py` qui branche le moteur ; comportement inchangé |
 | `connecteurs/google-agenda/` (nouveau) | Le manifeste, le client de l'API Agenda, et un `connecteur.py` qui branche le moteur |
 | `connecteurs/gmail/` (nouveau) | Le manifeste, les outils `gmail_…`, le client de l'API Gmail, la lecture et l'écriture des mails |
+| `scripts/google.py` (nouveau) | `make google` : obtient le jeton durable et l'écrit dans le `.env` |
 | `Makefile` | La cible `google` |
 | `docs/google.md` (nouveau) | Le guide : créer le projet Google Cloud, lancer `make google`, activer les connecteurs |
-| `tests/doublure_google.py` (nouveau) | Une doublure des API de Google pour les tests |
-| `tests/test_google.py`, `tests/test_google_agenda_*.py`, `tests/test_gmail_*.py` (nouveaux) | Les tests |
+| `tests/doublure_google.py`, `tests/doublure_agenda.py`, `tests/doublure_gmail.py` (nouveaux) | Une doublure des API de Google pour les tests |
+| `tests/aides_connecteurs.py` (nouveau) | Activer un connecteur officiel et appeler ses outils, pour tous les tests de connecteurs |
+| `tests/test_agendas.py`, `tests/test_google.py`, `tests/test_google_agenda*.py`, `tests/test_gmail_*.py` (nouveaux) | Les tests |
 
 Le cadre des connecteurs, la page et la voix ne changent pas. L'agenda iCloud garde ses outils, ses phrases et ses
 tests.
@@ -124,14 +128,16 @@ Déclarés par les deux connecteurs (les saisir dans l'un règle aussi l'autre, 
 - Le module échange le jeton durable contre un jeton d'accès (valable une heure) auprès de
   `https://oauth2.googleapis.com/token`, le garde en mémoire vive, et le renouvelle une minute avant son expiration.
 - Une requête refusée (401) renouvelle une fois le jeton d'accès, puis réessaie.
-- Un seul module, une seule autorisation : les deux connecteurs actifs partagent le jeton d'accès (par l'identifiant,
-  le secret et le jeton durable qu'ils reçoivent).
+- Un seul module, une seule autorisation : chaque connecteur actif renouvelle son propre jeton d'accès, à partir du
+  même identifiant, du même secret et du même jeton durable (amendé en écrivant le plan : Google l'accepte, et un
+  connecteur ne dépend pas de l'autre). Plusieurs outils appelés en même temps ne demandent qu'un jeton.
 
 ## 5. Google Agenda
 
 Les outils, les phrases et les garde-fous sont ceux de l'agenda iCloud (spec de l'agenda et des contacts, §5, avec
-ses corrections : la question dit la nouvelle fin, un événement changé fait relire toutes ses fois, « annulé », 500
-fois au plus par événement et par lecture) : c'est le même moteur (D10), branché sur l'API de Google.
+ses corrections : la question dit la nouvelle fin, un événement changé fait relire toutes ses fois) : c'est le même
+moteur (D10), branché sur l'API de Google. Pour Google, 500 rendez-vous au plus par agenda et par lecture (au-delà,
+le journal du Core le note).
 
 | Outil | Niveau | Ce qu'il fait |
 |---|---|---|
@@ -150,8 +156,9 @@ Ce que Google permet en plus :
 - **Les agendas en lecture seule** (`accessRole` « reader » ou « freeBusyReader » : les jours fériés, un agenda
   partagé) : modifier, supprimer ou y ajouter est refusé avant la question, avec « L'agenda « … » ne se modifie pas
   d'ici. ».
-- **Une invitation refusée par David** (sa réponse, `responseStatus`, vaut « declined ») est dite « refusée » ; un
-  rendez-vous annulé, « annulé ».
+- **Une invitation refusée par David** (sa réponse, `responseStatus`, vaut « declined ») est dite « invitation
+  refusée ». Google ne rend pas les rendez-vous annulés (Atlas ne demande pas `showDeleted`) : « annulé » reste propre
+  à l'agenda iCloud (amendé en écrivant le plan).
 - **Rien ne s'écrase :** chaque modification et chaque suppression portent l'ETag lu (`If-Match`) ; un 412 veut
   dire « changé entre-temps ».
 - **Les consignes** sont celles de l'agenda iCloud, et une de plus : quand David demande son agenda sans préciser,
@@ -231,7 +238,8 @@ Ce que Google permet en plus :
 
 ## 8. Les tests
 
-- **Une doublure de Google** (`tests/doublure_google.py`) : les points d'accès utilisés (jeton, liste des agendas,
+- **Une doublure de Google** (`tests/doublure_google.py`, avec `tests/doublure_agenda.py` et
+  `tests/doublure_gmail.py`) : les points d'accès utilisés (jeton, liste des agendas,
   rendez-vous avec ETag et 412, occurrences, mails au format MIME encodé, brouillons, envoi, libellés, rangement,
   corbeille), qui répondent comme la documentation de Google le décrit, et gardent trace de ce qu'ils reçoivent.
 - **L'autorisation** : le renouvellement du jeton d'accès (et une seule fois après un 401), chaque erreur de la table
