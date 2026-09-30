@@ -5,13 +5,17 @@ sa racine le « principal » de David, au principal son dossier d'agendas, puis 
 portent des rendez-vous. Une période se lit par une requête bornée dans le temps
 (`calendar-query`) ; les événements répétés sont dépliés ici, chaque fois avec sa date
 d'origine dans la série, et toutes les heures sont ramenées au fuseau du Mac du Core. Un
-rendez-vous s'ajoute par un PUT, qui ne remplace jamais rien (`If-None-Match: *`).
+rendez-vous s'ajoute par un PUT, qui ne remplace jamais rien (`If-None-Match: *`). Pour le
+modifier ou le supprimer, on relit l'événement, et on n'écrit que s'il n'a pas changé depuis
+la lecture (son ETag, exigé par `If-Match`). Une fois d'une série devient une exception à la
+série (`RECURRENCE-ID`), ou une date exclue (`EXDATE`) : la série elle-même ne change pas.
 
 Tout est synchrone (httpx) : le connecteur appelle ce client par `asyncio.to_thread`.
 """
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import logging
 import os
@@ -60,6 +64,10 @@ _PERIODE = (
 
 class ErreurDav(Exception):
     """Une réponse inattendue d'iCloud : le Core la note, et Claude apprend l'échec."""
+
+
+class Change(Exception):
+    """Le rendez-vous a changé (ou disparu) depuis sa lecture : rien n'est écrit."""
 
 
 def lecture_seule(agenda: Agenda) -> str:
@@ -122,6 +130,21 @@ def jour_de(moment: dt.date) -> dt.date:
 
 def _utc(moment: dt.datetime) -> str:
     return moment.astimezone(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _meme_moment(a: dt.date, b: dt.date | None) -> bool:
+    """Deux dates d'origine désignent-elles la même fois d'une série ?"""
+    if not isinstance(b, dt.date) or isinstance(a, dt.datetime) != isinstance(b, dt.datetime):
+        return False
+    if isinstance(a, dt.datetime) and isinstance(b, dt.datetime):
+        if (a.tzinfo is None) != (b.tzinfo is None):  # une heure flottante : celle du Mac
+            return a.replace(tzinfo=None) == b.replace(tzinfo=None)
+    return a == b
+
+
+def _remplacer(evenement: icalendar.Event, nom: str, valeur: object) -> None:
+    evenement.pop(nom, None)
+    evenement.add(nom, valeur)
 
 
 def _ordre(rendezvous: RendezVous) -> tuple:
@@ -221,7 +244,87 @@ class Calendrier:
         reponse = self._envoyer("PUT", f"{agenda.url}{uid}.ics", calendrier.to_ical(), entetes)
         self._verifier_l_ecriture(reponse, agenda)
 
+    def modifier(
+        self,
+        rendezvous: RendezVous,
+        *,
+        titre: str | None = None,
+        debut: dt.date | None = None,
+        fin: dt.date | None = None,
+        lieu: str | None = None,
+        notes: str | None = None,
+    ) -> None:
+        """Change ce qui est donné ; `debut` et `fin` vont ensemble. Pour une fois d'une
+        série, seule cette fois change. `Change` si le rendez-vous a changé depuis sa lecture."""
+        calendrier = self._reprendre(rendezvous)
+        evenement = self._la_fois(calendrier, rendezvous)
+        for nom, valeur in [("SUMMARY", titre), ("LOCATION", lieu), ("DESCRIPTION", notes)]:
+            if valeur is not None:
+                _remplacer(evenement, nom, valeur)
+        if debut is not None and fin is not None:
+            evenement.pop("DURATION", None)
+            _remplacer(evenement, "DTSTART", debut)
+            _remplacer(evenement, "DTEND", fin)
+        _remplacer(evenement, "SEQUENCE", int(evenement.get("SEQUENCE", 0)) + 1)
+        _remplacer(evenement, "DTSTAMP", dt.datetime.now(dt.UTC))
+        calendrier.add_missing_timezones()
+        self._remettre(rendezvous, calendrier)
+
+    def supprimer(self, rendezvous: RendezVous) -> None:
+        """Supprime le rendez-vous, ou cette fois seulement de sa série. `Change` s'il a changé
+        depuis sa lecture."""
+        if not rendezvous.repete:
+            entetes = {"If-Match": rendezvous.etag}
+            reponse = self._envoyer("DELETE", rendezvous.url, None, entetes)
+            self._verifier_l_ecriture(reponse, rendezvous.agenda)
+            return
+        calendrier = self._reprendre(rendezvous)
+        for evenement in calendrier.walk("VEVENT"):
+            origine = evenement.get("RECURRENCE-ID")
+            if origine is not None and _meme_moment(origine.dt, rendezvous.origine):
+                calendrier.subcomponents.remove(evenement)
+            elif origine is None:  # la série : cette fois en est exclue
+                evenement.add("EXDATE", rendezvous.origine)
+        self._remettre(rendezvous, calendrier)
+
+    def _reprendre(self, rendezvous: RendezVous) -> icalendar.Calendar:
+        """L'événement tel qu'iCloud le garde : l'écriture qui suit exige qu'il n'ait pas changé
+        depuis la lecture (`If-Match`)."""
+        reponse = self._envoyer("GET", rendezvous.url, None, {})
+        if reponse.status_code == 404:
+            raise Change()
+        if not reponse.is_success:
+            raise ErreurDav(f"GET : {reponse.status_code}")
+        return icalendar.Calendar.from_ical(reponse.text)
+
+    def _la_fois(self, calendrier: icalendar.Calendar, rendezvous: RendezVous) -> icalendar.Event:
+        """L'événement à changer : lui seul, ou l'exception de la série pour cette fois (créée
+        au besoin, à partir de la série)."""
+        evenements = calendrier.walk("VEVENT")
+        if not rendezvous.repete:
+            return evenements[0]
+        for evenement in evenements:
+            origine = evenement.get("RECURRENCE-ID")
+            if origine is not None and _meme_moment(origine.dt, rendezvous.origine):
+                return evenement
+        [serie] = [evenement for evenement in evenements if "RECURRENCE-ID" not in evenement]
+        fois = copy.deepcopy(serie)
+        for nom in ("RRULE", "RDATE", "EXDATE", "DURATION"):
+            fois.pop(nom, None)
+        fois.add("RECURRENCE-ID", rendezvous.origine)
+        _remplacer(fois, "DTSTART", rendezvous.debut)
+        _remplacer(fois, "DTEND", rendezvous.fin)
+        calendrier.add_component(fois)
+        return fois
+
+    def _remettre(self, rendezvous: RendezVous, calendrier: icalendar.Calendar) -> None:
+        entetes = {"If-Match": rendezvous.etag, **_ICS}
+        reponse = self._envoyer("PUT", rendezvous.url, calendrier.to_ical(), entetes)
+        self._verifier_l_ecriture(reponse, rendezvous.agenda)
+
     def _verifier_l_ecriture(self, reponse: httpx.Response, agenda: Agenda) -> None:
+        if reponse.status_code in {404, 412}:  # disparu, ou changé depuis la lecture
+            raise Change()
         if reponse.status_code == 403:
             raise ErreurConnecteur(lecture_seule(agenda))
         if not reponse.is_success:

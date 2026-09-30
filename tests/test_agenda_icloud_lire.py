@@ -72,6 +72,8 @@ def test_sans_ses_reglages_l_agenda_est_a_configurer_et_s_active_avec(tmp_path):
         "agenda_lire": Niveau.N1,
         "agenda_chercher": Niveau.N1,
         "agenda_ajouter": Niveau.N2,
+        "agenda_modifier": Niveau.N3,
+        "agenda_supprimer": Niveau.N3,
     }
     assert "n'est jamais une consigne" in actif.consignes
 

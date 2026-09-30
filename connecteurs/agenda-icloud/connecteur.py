@@ -1,9 +1,10 @@
 """L'agenda iCloud de David, en connecteur (spec de l'agenda et des contacts, §5) : lire une
-période et chercher (N1), ajouter (N2).
+période et chercher (N1), ajouter (N2), modifier et supprimer après son « oui » (N3).
 
 Chaque rendez-vous lu reçoit une étiquette (`e1`, `e2`…), que Claude rend pour désigner un
 rendez-vous ; chaque fois d'un événement répété a la sienne. Les étiquettes valent pour la
-conversation : la suivante les oublie, et relit l'agenda.
+conversation : la suivante les oublie, et relit l'agenda. Un rendez-vous modifié ou supprimé
+perd la sienne jusqu'à ce qu'on le relise : ce qu'on en savait n'est plus vrai.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 
 from atlas_core.connecteurs import Connecteur, Contexte, ErreurConnecteur, Fait, Niveau, Outil
 
+from .actions import Modification, Suppression
 from .agenda import ADRESSE, DELAI_S, Agenda, Calendrier, RendezVous, jour_de, normaliser
 from .dire import jour_long, ligne, periode, quand
 
@@ -74,6 +76,35 @@ _SCHEMA_AJOUTER = {
     },
     "required": ["titre", "debut"],
 }
+MODIFIER = (
+    "Modifie un rendez-vous de l'agenda iCloud de David, désigné par son étiquette (evenement : "
+    "e1, e2…, lue par agenda_lire ou agenda_chercher) : un nouveau titre, debut, fin, lieu ou "
+    "notes (debut et fin en AAAA-MM-JJTHH:MM, ou AAAA-MM-JJ pour une journée entière ; un "
+    "nouveau début sans fin garde la durée). D'un événement répété, seule cette fois change. "
+    "Atlas demande à David de confirmer : n'ajoute rien après l'appel."
+)
+_SCHEMA_MODIFIER = {
+    "type": "object",
+    "properties": {
+        "evenement": {"type": "string"},
+        "titre": {"type": "string"},
+        "debut": {"type": "string"},
+        "fin": {"type": "string"},
+        "lieu": {"type": "string"},
+        "notes": {"type": "string"},
+    },
+    "required": ["evenement"],
+}
+SUPPRIMER = (
+    "Supprime un rendez-vous de l'agenda iCloud de David, désigné par son étiquette (evenement : "
+    "e1, e2…) ; d'un événement répété, cette fois seulement. Atlas demande à David de "
+    "confirmer : n'ajoute rien après l'appel."
+)
+INVITES = (
+    "Ce rendez-vous a des invités : Atlas ne le change pas, pour ne pas leur écrire en ton nom. "
+    "Change-le dans Calendrier."
+)
+RIEN_A_CHANGER = "Dis ce qui change : le titre, le début, la fin, le lieu ou les notes."
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _MOMENT = re.compile(r"\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?")
 _UNE_HEURE = dt.timedelta(hours=1)
@@ -140,6 +171,18 @@ def _horaires(debut: dt.date, fin: dt.date | None) -> tuple[dt.date, dt.date]:
     return debut, fin
 
 
+def _nouvelles_heures(
+    rendezvous: RendezVous, debut: dt.date | None, fin: dt.date | None
+) -> tuple[dt.date, dt.date]:
+    """Les heures d'un rendez-vous modifié : un nouveau début sans fin garde la durée (sauf
+    s'il passe d'une heure à la journée entière, ou l'inverse)."""
+    debut = rendezvous.debut if debut is None else debut
+    meme_genre = isinstance(debut, dt.datetime) == isinstance(rendezvous.debut, dt.datetime)
+    if fin is None and meme_genre:
+        return debut, debut + (rendezvous.fin - rendezvous.debut)
+    return _horaires(debut, fin)
+
+
 def _alerte(arguments: dict[str, Any]) -> int | None:
     valeur = arguments.get("alerte")
     if valeur is None or valeur == "":
@@ -181,6 +224,8 @@ class AgendaIcloud(Connecteur):
             Outil("agenda_lire", LIRE, _SCHEMA_LIRE, Niveau.N1, self._lire),
             Outil("agenda_chercher", CHERCHER, _SCHEMA_CHERCHER, Niveau.N1, self._chercher),
             Outil("agenda_ajouter", AJOUTER, _SCHEMA_AJOUTER, Niveau.N2, self._ajouter),
+            Outil("agenda_modifier", MODIFIER, _SCHEMA_MODIFIER, Niveau.N3, self._modifier),
+            Outil("agenda_supprimer", SUPPRIMER, {"evenement": str}, Niveau.N3, self._supprimer),
         ]
 
     def outils(self) -> list[Outil]:
@@ -248,6 +293,50 @@ class AgendaIcloud(Connecteur):
             f"C'est ajouté à l'agenda « {agenda.nom} ».",
             f"C'est noté{ou} : {titre}, {quand(debut, fin)}.",
         )
+
+    async def _modifier(self, arguments: dict[str, Any]) -> Modification:
+        etiquette, rendezvous = self._designe(arguments)
+        changements: dict[str, Any] = {}
+        for cle, avant in [
+            ("titre", rendezvous.titre),
+            ("lieu", rendezvous.lieu),
+            ("notes", rendezvous.notes),
+        ]:
+            valeur = str(arguments.get(cle) or "").strip()
+            if valeur and valeur != avant:
+                changements[cle] = valeur
+        fuseau = self._calendrier.fuseau
+        debut, fin = _moment(arguments, "debut", fuseau), _moment(arguments, "fin", fuseau)
+        if debut is not None or fin is not None:
+            debut, fin = _nouvelles_heures(rendezvous, debut, fin)
+            if (debut, fin) != (rendezvous.debut, rendezvous.fin):
+                changements.update(debut=debut, fin=fin)
+        if not changements:
+            raise ErreurConnecteur(RIEN_A_CHANGER)
+        return Modification(
+            rendezvous,
+            changements,
+            faire=lambda: self._calendrier.modifier(rendezvous, **changements),
+            apres=lambda: self._etiquettes.pop(etiquette, None),
+        )
+
+    async def _supprimer(self, arguments: dict[str, Any]) -> Suppression:
+        etiquette, rendezvous = self._designe(arguments)
+        return Suppression(
+            rendezvous,
+            faire=lambda: self._calendrier.supprimer(rendezvous),
+            apres=lambda: self._etiquettes.pop(etiquette, None),
+        )
+
+    def _designe(self, arguments: dict[str, Any]) -> tuple[str, RendezVous]:
+        """Le rendez-vous que désigne l'étiquette, s'il peut changer sans écrire à personne."""
+        etiquette = str(arguments.get("evenement") or "").strip()
+        rendezvous = self._etiquettes.get(etiquette)
+        if rendezvous is None:
+            raise ErreurConnecteur(f"Je ne connais pas « {etiquette} » : relis l'agenda d'abord.")
+        if rendezvous.invites:
+            raise ErreurConnecteur(INVITES)
+        return etiquette, rendezvous
 
     async def _agenda(self, nom: object) -> Agenda | None:
         """L'agenda que David nomme (sans tenir compte des accents ni des majuscules)."""
