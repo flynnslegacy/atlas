@@ -37,6 +37,7 @@ _journal = logging.getLogger(__name__)
 
 ADRESSE = "https://caldav.icloud.com/"
 DELAI_S = 15.0
+MAX_FOIS = 500  # les fois d'un même événement dans une lecture : au-delà, laissées de côté
 REFUS = (
     "iCloud refuse l'identifiant ou le mot de passe d'app : vérifie-les dans Paramètres › "
     "Connecteurs › Réglages."
@@ -123,6 +124,13 @@ def normaliser(texte: str) -> str:
     """Sans accents ni majuscules : « Réunion » et « reunion » se valent."""
     decompose = unicodedata.normalize("NFKD", texte)
     return "".join(c for c in decompose if not unicodedata.combining(c)).casefold().strip()
+
+
+def _instant(moment: dt.date, fuseau: dt.tzinfo) -> dt.datetime:
+    """Un début comparable aux autres : une date à minuit, une heure flottante à l'heure du Mac."""
+    if not isinstance(moment, dt.datetime):
+        return dt.datetime.combine(moment, dt.time(), fuseau)
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=fuseau)
 
 
 def jour_de(moment: dt.date) -> dt.date:
@@ -342,10 +350,18 @@ class Calendrier:
             for composant in calendrier.walk("VEVENT")
             for nom in ("RRULE", "RDATE", "RECURRENCE-ID")
         )
-        return [
-            self._rendezvous(agenda, url, etag, fois, serie)
-            for fois in recurring_ical_events.of(calendrier).between(de, a)
-        ]
+        # Dans l'ordre, et pas plus de MAX_FOIS : une répétition à la minute (une invitation
+        # piégée) n'épuise pas le Core ; les premières fois restent justes à l'affichage.
+        trouves: list[RendezVous] = []
+        for fois in recurring_ical_events.of(calendrier).after(de):
+            if _instant(fois["DTSTART"].dt, self.fuseau) >= a:
+                break
+            if len(trouves) == MAX_FOIS:
+                modele = "%s : plus de %d fois dans la période, le reste est laissé de côté"
+                _journal.warning(modele, url, MAX_FOIS)
+                break
+            trouves.append(self._rendezvous(agenda, url, etag, fois, serie))
+        return trouves
 
     def _rendezvous(
         self, agenda: Agenda, url: str, etag: str, fois: icalendar.Event, serie: bool

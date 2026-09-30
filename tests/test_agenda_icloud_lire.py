@@ -377,6 +377,24 @@ async def test_un_rendez_vous_annule_est_dit_annule(serveur, agenda):
     )
 
 
+async def test_une_repetition_demesuree_est_bornee(serveur, agenda, caplog):
+    # Une invitation d'un inconnu qui se répète à la minute (ou à la seconde) ne doit pas
+    # épuiser le Core : 500 fois au plus par événement et par lecture, le reste est noté.
+    minute = evenement(
+        "spam",
+        paris("20261001T000000"),
+        paris("20261001T000100"),
+        "Offre",
+        "RRULE:FREQ=MINUTELY",
+    )
+    serveur.deposer(serveur.domicile, "spam.ics", ics(minute))
+
+    texte = await lire(agenda, "2026-10-01")
+    assert texte.count(" · Offre · ") == 100
+    assert texte.endswith("\n… et 400 autres : demande une période plus courte.")
+    assert "plus de 500 fois" in caplog.text
+
+
 def test_le_fuseau_est_celui_du_mac(module, monkeypatch):
     client = sys.modules["atlas_connecteurs.agenda_icloud.agenda"]
     monkeypatch.setenv("TZ", "America/New_York")
