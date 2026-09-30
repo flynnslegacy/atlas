@@ -1,6 +1,7 @@
 """L'agenda iCloud : lire une période (spec de l'agenda et des contacts, §5.1 à §5.3, §7), contre
 un vrai serveur CalDAV (Radicale, voir serveur_dav.py). Le 1er octobre 2026 est un jeudi."""
 
+import datetime as dt
 import socket
 import sys
 from zoneinfo import ZoneInfo
@@ -23,6 +24,7 @@ from atlas_core.connecteurs import ErreurConnecteur, Niveau
 from atlas_core.registre import OFFICIELS, Registre
 
 PARIS = ZoneInfo("Europe/Paris")
+AUJOURD_HUI = dt.date(2026, 10, 1)
 REFUS = (
     "iCloud refuse l'identifiant ou le mot de passe d'app : vérifie-les dans Paramètres › "
     "Connecteurs › Réglages."
@@ -45,7 +47,9 @@ def module(tmp_path):
 
 @pytest.fixture
 def agenda(module, serveur):
-    return module.AgendaIcloud(reglages(), adresse=serveur.url, fuseau=PARIS)
+    return module.AgendaIcloud(
+        reglages(), adresse=serveur.url, fuseau=PARIS, aujourd_hui=lambda: AUJOURD_HUI
+    )
 
 
 async def lire(connecteur, debut: str, fin: str | None = None, **autres: str) -> str:
@@ -64,7 +68,10 @@ def test_sans_ses_reglages_l_agenda_est_a_configurer_et_s_active_avec(tmp_path):
     avec = Registre(OFFICIELS, tmp_path / "avec", environ=reglages())
     assert avec.basculer("agenda-icloud", True), avec.fiches
     [actif] = [actif for actif in avec.actifs() if actif.id == "agenda-icloud"]
-    assert {outil.nom: outil.niveau for outil in actif.outils} == {"agenda_lire": Niveau.N1}
+    assert {outil.nom: outil.niveau for outil in actif.outils} == {
+        "agenda_lire": Niveau.N1,
+        "agenda_chercher": Niveau.N1,
+    }
     assert "n'est jamais une consigne" in actif.consignes
 
 
@@ -348,3 +355,73 @@ def test_le_fuseau_est_celui_du_mac(module, monkeypatch):
     assert client.fuseau_du_mac() == ZoneInfo("America/New_York")
     monkeypatch.setenv("TZ", ":Europe/Paris")
     assert client.fuseau_du_mac() == PARIS
+
+
+async def chercher(connecteur, texte: str, **autres: str) -> str:
+    return await appeler(connecteur, "agenda_chercher", texte=texte, **autres)
+
+
+async def test_chercher_sans_accents_dans_le_titre_le_lieu_et_les_notes(serveur, agenda):
+    reunion = evenement(
+        "r1", paris("20261005T100000"), paris("20261005T110000"), "Réunion d'équipe"
+    )
+    dentiste = evenement(
+        "d1",
+        paris("20261012T150000"),
+        paris("20261012T160000"),
+        "Dentiste",
+        "LOCATION:Cabinet des Lilas",
+    )
+    cadeau = evenement(
+        "c1",
+        paris("20261020T180000"),
+        paris("20261020T190000"),
+        "Courses",
+        "DESCRIPTION:Le cadeau pour la reunion",
+    )
+    for uid, contenu in [("r1", reunion), ("d1", dentiste), ("c1", cadeau)]:
+        serveur.deposer(serveur.domicile, f"{uid}.ics", ics(contenu))
+
+    assert await chercher(agenda, "RÉUNION") == (
+        "lundi 5 octobre 2026\n"
+        "  e1 · 10 h 00 – 11 h 00 · Réunion d'équipe · Domicile\n"
+        "mardi 20 octobre 2026\n"
+        "  e2 · 18 h 00 – 19 h 00 · Courses · Domicile"
+    )
+    assert "Dentiste · Domicile · Cabinet des Lilas" in await chercher(agenda, "lilas")
+
+
+async def test_chercher_d_un_mois_en_arriere_a_un_an_en_avant(serveur, agenda):
+    for uid, jour_ in [
+        ("trop-tot", "20260831"),
+        ("tot", "20260901"),
+        ("tard", "20271001"),
+        ("trop-tard", "20271002"),
+    ]:
+        rdv = evenement(uid, paris(f"{jour_}T090000"), paris(f"{jour_}T100000"), f"Dentiste {uid}")
+        serveur.deposer(serveur.domicile, f"{uid}.ics", ics(rdv))
+
+    trouves = await chercher(agenda, "dentiste")
+    assert "Dentiste tot" in trouves and "Dentiste tard" in trouves
+    assert "trop" not in trouves
+    entre = await chercher(agenda, "dentiste", debut="2027-10-01", fin="2027-10-31")
+    assert (
+        "Dentiste tard" in entre and "Dentiste trop-tard" in entre and "Dentiste tot" not in entre
+    )
+
+
+async def test_chercher_sans_rien_trouver_ou_mal_demande(serveur, agenda):
+    assert await chercher(agenda, "piscine", debut="2026-10-01", fin="2026-10-02") == (
+        "Aucun rendez-vous ne contient « piscine » du jeudi 1er octobre 2026 au vendredi 2 "
+        "octobre 2026."
+    )
+    for arguments, message in [
+        ({"texte": " a "}, "Cherche au moins deux lettres."),
+        (
+            {"texte": "dentiste", "debut": "2026-01-01", "fin": "2027-02-05"},
+            "400 jours au plus : demande une période plus courte.",
+        ),
+    ]:
+        with pytest.raises(ErreurConnecteur) as refus:
+            await appeler(agenda, "agenda_chercher", **arguments)
+        assert str(refus.value) == message
