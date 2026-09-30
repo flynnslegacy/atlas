@@ -269,7 +269,7 @@ def test_quand_les_bascules_prennent_effet_les_pages_le_voient(monkeypatch, tmp_
     outils.basculer("poste", True)
     outils.conversation_commencee()  # la conversation neuve : la bascule a pris effet
     [liste] = [m for m in publies if isinstance(m, ListeConnecteurs)]
-    [poste] = liste.connecteurs
+    [poste] = [fiche for fiche in liste.connecteurs if fiche.id == "poste"]
     assert (poste.id, poste.etat, poste.en_attente) == ("poste", "actif", False)
 
 

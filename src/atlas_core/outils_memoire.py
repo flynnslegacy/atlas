@@ -139,8 +139,10 @@ class OutilsMemoire(ServeurAtlas):
 
     def regler(self, id_: str, valeurs: Mapping[str, str], effacer: Iterable[str]) -> bool:
         """Écrit des réglages d'un connecteur dans le .env et les applique aussitôt : un
-        connecteur actif se recharge avec eux, comme après deux bascules (rend vrai : la
-        conversation se renouvelle). `ReglageRefuse` si rien ne convient : rien n'a changé."""
+        connecteur actif se recharge avec eux, comme après deux bascules, et de même tout
+        autre connecteur actif qui déclare un réglage changé (un mot de passe partagé) ; rend
+        vrai : la conversation se renouvelle. `ReglageRefuse` si rien ne convient : rien n'a
+        changé."""
         if self.registre is None or self.fichier_env is None:
             raise ReglageRefuse("Les réglages ne s'écrivent pas ici.")
         fiches = self.registre.decouvrir()
@@ -157,11 +159,20 @@ class OutilsMemoire(ServeurAtlas):
                 environ[variable] = valeur
         secrets = secretes(f.manifeste for f in fiches)
         self.memoire.ajouter_secrets(v for k, v in changements.items() if v and k in secrets)
-        self.registre.oublier_l_echec(id_)  # « en erreur » à cause d'un réglage : il réessaiera
-        if fiche.etat != "actif":
+        concernes = [
+            f
+            for f in fiches
+            if f.manifeste is not None
+            and any(r.variable in changements for r in f.manifeste.reglages)
+        ]
+        for concerne in concernes:  # « en erreur » à cause d'un réglage : il réessaiera
+            self.registre.oublier_l_echec(concerne.id)
+        actifs = [concerne.id for concerne in concernes if concerne.etat == "actif"]
+        if not actifs:
             return False
-        self.registre.basculer(id_, False)
-        self.registre.basculer(id_, True)  # s'il ne se recharge pas : « en erreur »
+        for actif in actifs:
+            self.registre.basculer(actif, False)
+            self.registre.basculer(actif, True)  # s'il ne se recharge pas : « en erreur »
         self.connecteurs = self.registre.actifs()
         self._installer(self._tous())
         return True

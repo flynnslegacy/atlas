@@ -52,8 +52,8 @@ def etat(outils, id_="salut"):
     return next(f for f in outils.registre.decouvrir() if f.id == id_)
 
 
-async def dire(outils) -> str:
-    outil = next(o for o in outils.outils if o.name == "salut_dire")
+async def dire(outils, nom: str = "salut_dire") -> str:
+    outil = next(o for o in outils.outils if o.name == nom)
     return (await outil.handler({}))["content"][0]["text"]
 
 
@@ -79,6 +79,25 @@ async def test_un_connecteur_actif_se_recharge_avec_ses_nouveaux_reglages(tmp_pa
     assert (etat(outils).etat, etat(outils).en_attente) == ("actif", True)
     interrupteurs = json.loads(fichier_des_interrupteurs(perso).read_text())
     assert interrupteurs == {"actifs": ["communaute:salut"]}, "son interrupteur ne change pas"
+
+
+async def test_un_reglage_partage_recharge_les_autres_connecteurs_qui_le_declarent(
+    tmp_path, perso, env
+):
+    # Comme l'agenda et les contacts iCloud et leur mot de passe : saisi dans l'un, il vaut
+    # aussitôt pour l'autre (spec de l'agenda et des contacts, §4).
+    deposer(perso, "salut", MANIFESTE.format(nom="Salut") + ORDINAIRE)
+    deposer(perso, "ami", MANIFESTE.format(nom="Ami") + ORDINAIRE, source=code("ami_dire", "Salut"))
+    deposer(perso, "autre", MANIFESTE.format(nom="Autre"), source=code("autre_dire"))
+    outils = outils_de(tmp_path, perso, env, {"ATLAS_BONJOUR_NOM": "David"})
+    for id_ in ("salut", "ami", "autre"):
+        outils.basculer(id_, True)
+    outils.registre.appliquer()
+
+    assert outils.regler("salut", {"ATLAS_BONJOUR_NOM": "Camille"}, []) is True
+    assert await dire(outils, "ami_dire") == "Salut Camille."
+    assert (etat(outils, "ami").etat, etat(outils, "ami").en_attente) == ("actif", True)
+    assert etat(outils, "autre").en_attente is False, "il ne déclare pas ce réglage"
 
 
 def test_effacer_le_reglage_d_un_connecteur_actif_le_coupe(tmp_path, perso, env):

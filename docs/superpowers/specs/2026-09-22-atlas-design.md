@@ -566,6 +566,10 @@ le routeur d'intention et Ollama ne sont pas replanifiés pour l'instant.
 par le cadre des connecteurs (`2026-09-28-connecteurs-design.md`) : chaque lien vers
 l'extérieur devient un connecteur activable depuis la page.
 
+**Amendé le 30/09/2026.** L'étape 2 se poursuit par l'agenda et les contacts iCloud
+(`2026-09-30-agenda-contacts-icloud-design.md`), puis les Rappels, par macOS (iCloud ne les
+sert plus par CalDAV), puis Gmail.
+
 **Phase 4 — Présence et accès.** Tableau de bord, Hermes en porte mobile. L'orbe et la
 conversation ont été avancées (`2026-09-24-interface-orbe-design.md`).
 *Critère de réussite :* David parle à Atlas depuis Telegram hors de chez lui, et le

@@ -222,7 +222,8 @@ lancer Atlas ; le poste sert d'exemple complet.
 - Des connecteurs dans d'autres langages (serveurs MCP) ; des tâches de fond propres à un connecteur (il en faudra pour
   le point du matin).
 - Des réglages saisis dans la page ; une bascule sans conversation neuve.
-- L'agenda iCloud et Gmail : leurs specs suivent celle-ci.
+- L'agenda iCloud et Gmail : leurs specs suivent celle-ci. Amendé le 30 septembre : l'agenda iCloud a sa spec, avec
+  les contacts (`2026-09-30-agenda-contacts-icloud-design.md`) ; les Rappels auront la leur.
 
 ## 12. Changements dans la spec parente
 

@@ -20,7 +20,8 @@ audio = ["sounddevice>=0.5", "numpy>=2.1", "onnxruntime>=1.20", "openwakeword>=0
 # Le poste, sur le Mac de David : les clics et la frappe passent par Quartz.
 poste = ["websockets>=13", "pyobjc-framework-Quartz>=10; sys_platform == 'darwin'"]
 # Avertissement anyio 4.15.1 sur BlockingPortal (v max publiée); httpx2 élimine StarletteDeprecationWarning.
-dev   = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "numpy>=2.1", "soxr>=0.5", "soundfile>=0.12", "httpx2", "starlette>=1.6", "anyio>=4.15"]
+# Les connecteurs iCloud : leurs bibliothèques, et Radicale, le serveur d'agenda de leurs tests.
+dev   = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "numpy>=2.1", "soxr>=0.5", "soundfile>=0.12", "httpx2", "starlette>=1.6", "anyio>=4.15", "icalendar>=7.3", "recurring-ical-events>=3.8", "vobject>=0.9.9", "radicale>=3.8"]
 
 [build-system]
 requires = ["hatchling"]

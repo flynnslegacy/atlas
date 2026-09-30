@@ -155,13 +155,20 @@ def connecteurs(memoire, monkeypatch, tmp_path):
     monkeypatch.setenv("ATLAS_POSTE_CLE", "cle-du-poste-de-test")
 
 
+def _fiche(liste: dict, id_: str = "poste") -> dict:
+    """La fiche d'un connecteur dans une liste : les officiels sont triés par nom."""
+    [fiche] = [fiche for fiche in liste["connecteurs"] if fiche["id"] == id_]
+    return fiche
+
+
 def test_une_page_liste_les_connecteurs_meme_casses(connecteurs):
     with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
         _entrer(ws)
         ws.send_json({"type": "connecteurs"})
         liste = ws.receive_json()
     assert (liste["type"], liste["disponible"]) == ("liste_connecteurs", True)
-    poste, casse = liste["connecteurs"]
+    poste, casse = _fiche(liste), _fiche(liste, "casse")
+    assert liste["connecteurs"][-1] is casse, "les officiels d'abord"
     assert (poste["id"], poste["nom"], poste["origine"], poste["etat"]) == (
         "poste",
         "Le poste du Mac",
@@ -225,12 +232,12 @@ def test_activer_un_connecteur_renouvelle_la_conversation_et_toutes_les_pages_le
             {"type": "activer_connecteur", "id": "poste", "actif": True}
         )  # en même temps
         for page in (ws, autre, ws, autre):
-            fiche = page.receive_json()["connecteurs"][0]
-            assert (fiche["id"], fiche["etat"], fiche["en_attente"]) == ("poste", "actif", True)
+            fiche = _fiche(page.receive_json())
+            assert (fiche["etat"], fiche["en_attente"]) == ("actif", True)
         assert renouvellements == [True], "une seule conversation neuve"
         assert "mcp__atlas__mac_mission" in hub._outils.noms
         ws.send_json({"type": "activer_connecteur", "id": "inconnu", "actif": True})
-        assert [f["id"] for f in ws.receive_json()["connecteurs"]] == ["poste", "casse"]
+        assert "inconnu" not in [f["id"] for f in ws.receive_json()["connecteurs"]]
         ws.send_json({"type": "activer_connecteur", "id": "../memoire", "actif": True})
         erreur = ws.receive_json()
     assert (erreur["type"], erreur["code"]) == ("erreur", "message_invalide")
@@ -243,10 +250,10 @@ def test_la_note_d_attente_tient_jusqu_a_la_question_suivante(connecteurs):
     with TestClient(hub.app) as client, client.websocket_connect("/ws/web", headers=ORIGINE) as ws:
         _entrer(ws)
         ws.send_json({"type": "activer_connecteur", "id": "poste", "actif": True})
-        assert ws.receive_json()["connecteurs"][0]["en_attente"] is True
+        assert _fiche(ws.receive_json())["en_attente"] is True
         for _ in range(3):
             ws.send_json({"type": "connecteurs"})
-            fiche = ws.receive_json()["connecteurs"][0]
+            fiche = _fiche(ws.receive_json())
         assert (fiche["etat"], fiche["en_attente"]) == ("actif", True)
 
 
