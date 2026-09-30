@@ -96,9 +96,7 @@ async def test_une_etiquette_se_relit_apres_un_changement(serveur, agenda, diner
 async def test_deplacer_a_un_autre_jour_ou_changer_le_reste(serveur, agenda, diner):
     await lire(agenda, "2026-10-01")
 
-    autre_jour = await appeler(
-        agenda, "agenda_modifier", evenement="e1", debut="2026-10-02T20:00", fin="2026-10-02T23:00"
-    )
+    autre_jour = await appeler(agenda, "agenda_modifier", evenement="e1", debut="2026-10-02T20:00")
     assert autre_jour.question == (
         "Je déplace « Dîner chez Paul » du jeudi 1er octobre, 19 h, au vendredi 2 octobre, 20 h ?"
     )
@@ -128,6 +126,43 @@ async def test_deplacer_a_un_autre_jour_ou_changer_le_reste(serveur, agenda, din
     assert "DESCRIPTION:Apporter le dessert" in garde and "SEQUENCE:1" in garde
 
 
+async def test_une_fin_ou_une_duree_qui_change_se_dit_telle_quelle(serveur, agenda, diner):
+    # La question est ce que David confirme : elle dit la nouvelle fin, pas un déplacement.
+    salon = evenement("salon", jour("20261007"), jour("20261010"), "Salon")
+    serveur.deposer(serveur.domicile, "salon.ics", ics(salon))
+    await lire(agenda, "2026-10-01", "2026-10-07")
+
+    for arguments, question in [
+        ({"fin": "2026-10-01T23:00"}, "il finit à 23 h"),
+        ({"fin": "2026-10-02T01:00"}, "il finit le vendredi 2 octobre à 1 h"),
+        (
+            {"debut": "2026-10-02T20:00", "fin": "2026-10-02T23:00"},
+            "il passe au vendredi 2 octobre, de 20 h à 23 h",
+        ),
+        (
+            {"debut": "2026-10-01T20:00", "fin": "2026-10-02T01:00"},
+            "il passe du jeudi 1er octobre, 20 h, au vendredi 2 octobre, 1 h",
+        ),
+    ]:
+        action = await appeler(agenda, "agenda_modifier", evenement="e1", **arguments)
+        assert action.question == (
+            f"Je change « Dîner chez Paul », jeudi 1er octobre à 19 h : {question} ?"
+        )
+    prolonge = await appeler(agenda, "agenda_modifier", evenement="e2", fin="2026-10-10")
+    assert prolonge.question == (
+        "Je change « Salon », du mercredi 7 octobre au vendredi 9 octobre : il passe du mercredi "
+        "7 octobre au samedi 10 octobre ?"
+    )
+
+    plus_tard = await appeler(agenda, "agenda_modifier", evenement="e1", fin="2026-10-01T23:00")
+    plus_tard.executer()
+    assert (
+        plus_tard.faite
+        == "C'est fait : le rendez-vous « Dîner chez Paul » est changé : il finit à 23 h."
+    )
+    assert "19 h 00 – 23 h 00 · Dîner chez Paul" in await lire(agenda, "2026-10-01")
+
+
 async def test_une_journee_entiere_se_deplace_ou_prend_une_heure(serveur, agenda):
     conges = evenement("conges", jour("20261005"), jour("20261006"), "Congés")
     serveur.deposer(serveur.domicile, "conges.ics", ics(conges))
@@ -137,7 +172,7 @@ async def test_une_journee_entiere_se_deplace_ou_prend_une_heure(serveur, agenda
     assert lendemain.question == "Je déplace « Congés » du lundi 5 octobre au mardi 6 octobre ?"
     a_l_heure = await appeler(agenda, "agenda_modifier", evenement="e1", debut="2026-10-05T09:00")
     assert a_l_heure.question == (
-        "Je change « Congés », lundi 5 octobre : il passe au lundi 5 octobre à 9 h ?"
+        "Je change « Congés », lundi 5 octobre : il passe au lundi 5 octobre, de 9 h à 10 h ?"
     )
     a_l_heure.executer()
     assert "9 h 00 – 10 h 00 · Congés" in await lire(agenda, "2026-10-05")

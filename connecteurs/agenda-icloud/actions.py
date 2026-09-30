@@ -26,10 +26,15 @@ def _vers(debut: dt.date, fin: dt.date) -> str:
     return moment if moment.startswith("du ") else f"au {moment}"
 
 
-def _deplacement(avant: RendezVous, debut: dt.date) -> str | None:
+def _deplace(avant: RendezVous, debut: dt.date, fin: dt.date) -> bool:
+    """Le début change et la durée reste : un déplacement."""
+    meme_genre = isinstance(debut, dt.datetime) == isinstance(avant.debut, dt.datetime)
+    return debut != avant.debut and meme_genre and fin - debut == avant.fin - avant.debut
+
+
+def _deplacement(avant: RendezVous, debut: dt.date) -> str:
     """« , jeudi 1er octobre, de 19 h à 20 h », « du jeudi 1er octobre, 19 h, au vendredi 2
-    octobre, 20 h », « du lundi 5 octobre au mardi 6 octobre » ; None quand le rendez-vous
-    passe d'une heure à la journée entière, ou l'inverse."""
+    octobre, 20 h », « du lundi 5 octobre au mardi 6 octobre » (un déplacement, `_deplace`)."""
     ancien = avant.debut
     if isinstance(ancien, dt.datetime) and isinstance(debut, dt.datetime):
         jour = jour_court(ancien.date())
@@ -37,9 +42,24 @@ def _deplacement(avant: RendezVous, debut: dt.date) -> str | None:
             return f", {jour}, de {heure_dite(ancien)} à {heure_dite(debut)}"
         nouveau = jour_court(debut.date())
         return f" du {jour}, {heure_dite(ancien)}, au {nouveau}, {heure_dite(debut)}"
-    if isinstance(ancien, dt.datetime) or isinstance(debut, dt.datetime):
-        return None
     return f" du {jour_court(ancien)} au {jour_court(debut)}"
+
+
+def _horaire(avant: RendezVous, debut: dt.date, fin: dt.date) -> str:
+    """Ce que devient l'horaire, en entier : « il finit à 23 h », « il passe au vendredi 2
+    octobre, de 20 h à 23 h », « il passe du lundi 5 octobre au mardi 6 octobre »."""
+    a_l_heure = isinstance(debut, dt.datetime) and isinstance(fin, dt.datetime)
+    if not a_l_heure or _deplace(avant, debut, fin):  # des jours, ou la même durée
+        return f"il passe {_vers(debut, fin)}"
+    if debut == avant.debut:
+        if fin.date() == debut.date():
+            return f"il finit à {heure_dite(fin)}"
+        return f"il finit le {jour_court(fin.date())} à {heure_dite(fin)}"
+    if fin.date() == debut.date():
+        jour = jour_court(debut.date())
+        return f"il passe au {jour}, de {heure_dite(debut)} à {heure_dite(fin)}"
+    de, a = jour_court(debut.date()), jour_court(fin.date())
+    return f"il passe du {de}, {heure_dite(debut)}, au {a}, {heure_dite(fin)}"
 
 
 class _SurUnRendezVous:
@@ -100,23 +120,28 @@ class Modification(_SurUnRendezVous):
         return str(self.changements.get("titre", self.rendezvous.titre))
 
     @property
-    def _nouveau_moment(self) -> str | None:
+    def _deplace(self) -> bool:
+        if "debut" not in self.changements:
+            return False
+        return _deplace(self.rendezvous, self.changements["debut"], self.changements["fin"])
+
+    @property
+    def _horaire(self) -> str | None:
         if "debut" not in self.changements:
             return None
-        return _vers(self.changements["debut"], self.changements["fin"])
+        return _horaire(self.rendezvous, self.changements["debut"], self.changements["fin"])
 
     @property
     def question(self) -> str:
         avant = self.rendezvous
-        if set(self.changements) == {"debut", "fin"}:
+        if set(self.changements) == {"debut", "fin"} and self._deplace:
             deplacement = _deplacement(avant, self.changements["debut"])
-            if deplacement is not None:
-                return f"Je déplace « {avant.titre} »{deplacement}{self._cette_fois} ?"
+            return f"Je déplace « {avant.titre} »{deplacement}{self._cette_fois} ?"
         morceaux = []
         if "titre" in self.changements:
             morceaux.append(f"le titre devient « {self._titre} »")
-        if self._nouveau_moment is not None:
-            morceaux.append(f"il passe {self._nouveau_moment}")
+        if self._horaire is not None:
+            morceaux.append(self._horaire)
         if "lieu" in self.changements:
             morceaux.append(f"le lieu devient « {self.changements['lieu']} »")
         if "notes" in self.changements:
@@ -126,8 +151,11 @@ class Modification(_SurUnRendezVous):
 
     @property
     def _ce_qui_est_fait(self) -> str:
-        if self._nouveau_moment is not None:
-            return f"le rendez-vous « {self._titre} » est déplacé {self._nouveau_moment}"
+        if self._deplace:
+            vers = _vers(self.changements["debut"], self.changements["fin"])
+            return f"le rendez-vous « {self._titre} » est déplacé {vers}"
+        if self._horaire is not None:
+            return f"le rendez-vous « {self._titre} » est changé : {self._horaire}"
         return f"le rendez-vous « {self._titre} » est changé"
 
     @property
