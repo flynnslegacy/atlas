@@ -262,6 +262,8 @@ class Calendrier:
         for nom, valeur in [("SUMMARY", titre), ("LOCATION", lieu), ("DESCRIPTION", notes)]:
             if valeur is not None:
                 _remplacer(evenement, nom, valeur)
+        if lieu is not None:  # la carte et le temps de trajet de l'iPhone suivaient l'ancien
+            evenement.pop("X-APPLE-STRUCTURED-LOCATION", None)
         if debut is not None and fin is not None:
             evenement.pop("DURATION", None)
             _remplacer(evenement, "DTSTART", debut)

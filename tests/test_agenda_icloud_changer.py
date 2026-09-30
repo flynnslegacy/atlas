@@ -163,6 +163,30 @@ async def test_une_fin_ou_une_duree_qui_change_se_dit_telle_quelle(serveur, agen
     assert "19 h 00 – 23 h 00 · Dîner chez Paul" in await lire(agenda, "2026-10-01")
 
 
+async def test_un_nouveau_lieu_remplace_aussi_le_lieu_de_la_carte(serveur, agenda):
+    # L'iPhone garde, à côté du texte du lieu, un lieu structuré (la carte, le temps de
+    # trajet) : un nouveau lieu doit le remplacer, sans quoi l'iPhone guiderait vers l'ancien.
+    diner = evenement(
+        "diner",
+        paris("20261001T190000"),
+        paris("20261001T210000"),
+        "Dîner",
+        "LOCATION:Chez Paul",
+        "X-APPLE-STRUCTURED-LOCATION;VALUE=URI;X-TITLE=Chez Paul:geo:45.76,4.83",
+    )
+    serveur.deposer(serveur.domicile, "diner.ics", ics(diner))
+    await lire(agenda, "2026-10-01")
+
+    titre = await appeler(agenda, "agenda_modifier", evenement="e1", titre="Dîner du jeudi")
+    titre.executer()
+    assert "X-APPLE-STRUCTURED-LOCATION" in serveur.ecrits[-1][3], "le lieu n'a pas changé"
+    await lire(agenda, "2026-10-01")
+    lieu = await appeler(agenda, "agenda_modifier", evenement="e1", lieu="Chez Marie")
+    lieu.executer()
+    envoye = serveur.ecrits[-1][3]
+    assert "LOCATION:Chez Marie" in envoye and "X-APPLE-STRUCTURED-LOCATION" not in envoye
+
+
 async def test_une_journee_entiere_se_deplace_ou_prend_une_heure(serveur, agenda):
     conges = evenement("conges", jour("20261005"), jour("20261006"), "Congés")
     serveur.deposer(serveur.domicile, "conges.ics", ics(conges))
