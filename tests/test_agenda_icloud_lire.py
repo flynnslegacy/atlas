@@ -352,6 +352,31 @@ async def test_un_rendez_vous_sans_fin(serveur, agenda):
     )
 
 
+async def test_un_rendez_vous_annule_est_dit_annule(serveur, agenda):
+    # Une invitation annulée par son organisateur reste dans iCloud jusqu'à ce que David la
+    # retire : Atlas ne doit pas la donner comme un rendez-vous qui a lieu.
+    annulee = evenement(
+        "revue",
+        paris("20261001T100000"),
+        paris("20261001T110000"),
+        "Revue",
+        "STATUS:CANCELLED",
+        "ORGANIZER:mailto:marie@example.com",
+        "ATTENDEE:mailto:david@example.com",
+    )
+    serveur.deposer(serveur.travail, "revue.ics", ics(annulee))
+    confirme = evenement(
+        "cafe", paris("20261001T090000"), paris("20261001T093000"), "Café", "STATUS:CONFIRMED"
+    )
+    serveur.deposer(serveur.domicile, "cafe.ics", ics(confirme))
+
+    assert await lire(agenda, "2026-10-01") == (
+        "jeudi 1er octobre 2026\n"
+        "  e1 · 9 h 00 – 9 h 30 · Café · Domicile\n"
+        "  e2 · 10 h 00 – 11 h 00 · Revue · Travail · annulé · avec invités"
+    )
+
+
 def test_le_fuseau_est_celui_du_mac(module, monkeypatch):
     client = sys.modules["atlas_connecteurs.agenda_icloud.agenda"]
     monkeypatch.setenv("TZ", "America/New_York")

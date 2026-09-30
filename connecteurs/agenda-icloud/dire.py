@@ -53,6 +53,8 @@ def ligne(etiquette: str, rendezvous: RendezVous) -> str:
     morceaux = [etiquette, horaire(rendezvous), rendezvous.titre, rendezvous.agenda.nom]
     if rendezvous.lieu:
         morceaux.append(rendezvous.lieu)
+    if rendezvous.annule:
+        morceaux.append("annulé")
     if rendezvous.repete:
         morceaux.append("répété")
     if rendezvous.invites:

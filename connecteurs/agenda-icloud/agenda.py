@@ -108,6 +108,7 @@ class RendezVous:
     notes: str = ""
     invites: bool = False
     origine: dt.date | None = None
+    annule: bool = False  # une invitation annulée, qu'iCloud garde jusqu'à ce que David la retire
 
     @property
     def journee(self) -> bool:
@@ -358,6 +359,7 @@ class Calendrier:
             lieu=str(fois.get("LOCATION", "")).strip(),
             notes=str(fois.get("DESCRIPTION", "")).strip(),
             invites="ATTENDEE" in fois or "ORGANIZER" in fois,
+            annule=str(fois.get("STATUS", "")).upper() == "CANCELLED",
             origine=origine.dt if origine is not None else None,
         )
 
