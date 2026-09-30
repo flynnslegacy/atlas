@@ -1,5 +1,5 @@
 """Les contacts iCloud de David, en connecteur (spec de l'agenda et des contacts, §6) : les
-chercher (N1), en lecture seule."""
+chercher, et leurs anniversaires d'une période (N1), en lecture seule."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from atlas_core.consignes import date_en_lettres
 from .carnet import ADRESSE, DELAI_S, Anniversaire, Carnet, Fiche, normaliser
 
 MAX_FICHES = 10
+MAX_JOURS = 366
+JOURS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 
 CHERCHER = (
     "Cherche dans les contacts iCloud de David les fiches dont le nom, le prénom, le surnom, "
@@ -23,6 +25,12 @@ CHERCHER = (
     "moins), sans tenir compte des accents ni des majuscules : 10 fiches au plus, avec leurs "
     "téléphones, leurs adresses mail et postales, et leur anniversaire."
 )
+ANNIVERSAIRES = (
+    "Les anniversaires des contacts iCloud de David entre deux dates (debut et fin, AAAA-MM-JJ, "
+    "fin comprise, 366 jours au plus), dans l'ordre, avec l'âge atteint quand l'année de "
+    "naissance est connue."
+)
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _SEPARATEURS = re.compile(r"[\s.()-]")
 
 
@@ -51,6 +59,30 @@ def date_d_anniversaire(anniversaire: Anniversaire) -> str:
     jour = dt.date(anniversaire.annee or 2000, anniversaire.mois, anniversaire.jour)
     texte = date_en_lettres(jour)
     return texte if anniversaire.annee else texte.removesuffix(f" {jour.year}")
+
+
+def jour_long(jour: dt.date) -> str:
+    """« jeudi 1er octobre 2026 »."""
+    return f"{JOURS[jour.weekday()]} {date_en_lettres(jour)}"
+
+
+def _date(arguments: dict[str, Any], cle: str) -> dt.date:
+    texte = str(arguments.get(cle) or "").strip()
+    if _DATE.fullmatch(texte):
+        try:
+            return dt.date.fromisoformat(texte)
+        except ValueError:
+            pass
+    raise ErreurConnecteur(f"{cle} : une date de la forme AAAA-MM-JJ, par exemple 2026-10-02.")
+
+
+def fete(anniversaire: Anniversaire, annee: int) -> dt.date:
+    """Le jour où l'anniversaire se fête cette année-là : un 29 février, le 28 les années qui
+    ne sont pas bissextiles."""
+    try:
+        return dt.date(annee, anniversaire.mois, anniversaire.jour)
+    except ValueError:
+        return dt.date(annee, 2, 28)
 
 
 def presenter(fiche: Fiche) -> str:
@@ -92,7 +124,14 @@ class ContactsIcloud(Connecteur):
             horloge=horloge,
         )
         self._outils = [
-            Outil("contacts_chercher", CHERCHER, {"texte": str}, Niveau.N1, self._chercher)
+            Outil("contacts_chercher", CHERCHER, {"texte": str}, Niveau.N1, self._chercher),
+            Outil(
+                "contacts_anniversaires",
+                ANNIVERSAIRES,
+                {"debut": str, "fin": str},
+                Niveau.N1,
+                self._anniversaires,
+            ),
         ]
 
     def outils(self) -> list[Outil]:
@@ -109,6 +148,35 @@ class ContactsIcloud(Connecteur):
         lignes = [presenter(fiche) for fiche in trouvees[:MAX_FICHES]]
         if len(trouvees) > MAX_FICHES:
             lignes.append(f"… et {len(trouvees) - MAX_FICHES} autres : précise ta recherche.")
+        return "\n".join(lignes)
+
+    async def _anniversaires(self, arguments: dict[str, Any]) -> str:
+        debut, fin = _date(arguments, "debut"), _date(arguments, "fin")
+        if fin < debut:
+            raise ErreurConnecteur("La fin vient avant le début.")
+        if (fin - debut).days + 1 > MAX_JOURS:
+            raise ErreurConnecteur(f"{MAX_JOURS} jours au plus : demande une période plus courte.")
+        fetes = []
+        for fiche in await asyncio.to_thread(self._carnet.fiches):
+            anniversaire = fiche.anniversaire
+            if anniversaire is None:
+                continue
+            for annee in range(debut.year, fin.year + 1):
+                jour = fete(anniversaire, annee)
+                if debut <= jour <= fin:
+                    age = annee - anniversaire.annee if anniversaire.annee else 0
+                    fetes.append((jour, fiche.nom, age))
+        if not fetes:
+            quand = (
+                f"le {jour_long(debut)}"
+                if debut == fin
+                else f"du {jour_long(debut)} au {jour_long(fin)}"
+            )
+            return f"Aucun anniversaire {quand}."
+        lignes = []
+        for jour, nom, age in sorted(fetes, key=lambda fete: (fete[0], normaliser(fete[1]))):
+            suite = f", {age} an{'s' if age > 1 else ''}" if age > 0 else ""
+            lignes.append(f"{jour_long(jour)} : {nom}{suite}")
         return "\n".join(lignes)
 
 

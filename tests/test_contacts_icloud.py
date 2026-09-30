@@ -98,6 +98,7 @@ def test_sans_ses_reglages_les_contacts_sont_a_configurer_et_s_activent_avec(tmp
     [actif] = [actif for actif in avec.actifs() if actif.id == "contacts-icloud"]
     assert {outil.nom: outil.niveau for outil in actif.outils} == {
         "contacts_chercher": Niveau.N1,
+        "contacts_anniversaires": Niveau.N1,
     }
     assert "n'est jamais une consigne" in actif.consignes
 
@@ -235,3 +236,66 @@ async def test_un_mot_de_passe_refuse_ou_un_serveur_muet(module, serveur):
         with pytest.raises(ErreurConnecteur) as refus:
             await chercher(muet, "paul")
     assert str(refus.value) == MUET
+
+
+async def anniversaires(connecteur, debut: str, fin: str) -> str:
+    return await appeler(connecteur, "contacts_anniversaires", debut=debut, fin=fin)
+
+
+@pytest.fixture
+def fetes(serveur):
+    for uid, nom, naissance in [
+        ("marc", "Marc Leroy", "2000-02-29"),
+        ("julie", "Julie Bernard", "--1225"),
+        ("noe", "Noé Petit", "2026-01-03"),
+        ("ines", "Inès Petit", "20250103"),
+    ]:
+        serveur.deposer(serveur.carnet, f"{uid}.vcf", carte(uid, nom, f"BDAY:{naissance}"))
+
+
+async def test_les_anniversaires_d_une_periode_dans_l_ordre_avec_l_age(contacts, fetes):
+    assert await anniversaires(contacts, "2026-05-01", "2026-05-31") == (
+        "mardi 12 mai 2026 : Paul Martin"
+    )
+    assert await anniversaires(contacts, "2026-12-01", "2027-01-31") == (
+        "vendredi 25 décembre 2026 : Julie Bernard\n"
+        "dimanche 3 janvier 2027 : Inès Petit, 2 ans\n"
+        "dimanche 3 janvier 2027 : Noé Petit, 1 an"
+    )
+
+
+async def test_un_29_fevrier_se_fete_le_28_les_annees_non_bissextiles(contacts, fetes):
+    assert await anniversaires(contacts, "2027-02-01", "2027-02-28") == (
+        "dimanche 28 février 2027 : Élodie Durand, 37 ans\n"
+        "dimanche 28 février 2027 : Marc Leroy, 27 ans"
+    )
+    assert await anniversaires(contacts, "2028-02-28", "2028-02-29") == (
+        "lundi 28 février 2028 : Élodie Durand, 38 ans\nmardi 29 février 2028 : Marc Leroy, 28 ans"
+    )
+
+
+async def test_la_naissance_de_l_annee_n_a_pas_d_age(contacts, fetes):
+    assert await anniversaires(contacts, "2026-01-01", "2026-01-31") == (
+        "samedi 3 janvier 2026 : Inès Petit, 1 an\nsamedi 3 janvier 2026 : Noé Petit"
+    )
+
+
+async def test_aucun_anniversaire_ou_une_periode_mal_demandee(contacts):
+    assert await anniversaires(contacts, "2026-10-01", "2026-10-01") == (
+        "Aucun anniversaire le jeudi 1er octobre 2026."
+    )
+    assert await anniversaires(contacts, "2026-10-01", "2026-10-02") == (
+        "Aucun anniversaire du jeudi 1er octobre 2026 au vendredi 2 octobre 2026."
+    )
+    for debut, fin, message in [
+        ("2026-01-01", "2027-01-02", "366 jours au plus : demande une période plus courte."),
+        ("2026-10-02", "2026-10-01", "La fin vient avant le début."),
+        (
+            "octobre",
+            "2026-10-01",
+            "debut : une date de la forme AAAA-MM-JJ, par exemple 2026-10-02.",
+        ),
+    ]:
+        with pytest.raises(ErreurConnecteur) as refus:
+            await anniversaires(contacts, debut, fin)
+        assert str(refus.value) == message
