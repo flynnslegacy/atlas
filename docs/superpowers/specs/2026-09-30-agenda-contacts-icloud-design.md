@@ -68,10 +68,16 @@ connecteurs/agenda-icloud/          connecteurs/contacts-icloud/
 | `connecteurs/contacts-icloud/` (nouveau) | Le manifeste, les outils `contacts_…`, le client CardDAV et la lecture des fiches |
 | `tests/serveur_dav.py` (nouveau) | Un vrai serveur CalDAV et CardDAV (Radicale) lancé pour les tests, dans un dossier temporaire |
 | `tests/test_agenda_icloud.py`, `tests/test_contacts_icloud.py` (nouveaux) | Les tests des deux connecteurs |
-| `pyproject.toml` | Radicale, `caldav` et `vobject` rejoignent les dépendances de développement |
+| `pyproject.toml` | icalendar, recurring-ical-events, vobject et Radicale rejoignent les dépendances de développement |
 
 Le cadre des connecteurs, le Core, la page et le guide ne changent pas : les deux connecteurs n'utilisent que le
 contrat de la version 1 (`api = 1`), sans service du Core.
+
+**Amendé le 30 septembre, en écrivant le plan :** les clients parlent CalDAV et CardDAV directement, avec httpx (déjà
+dans Atlas) ; icalendar lit et écrit les événements, recurring-ical-events déplie les séries, vobject lit les fiches.
+La bibliothèque `caldav`, prévue d'abord, apporte en version 3 son propre client HTTP, une découverte par DNS et des
+centaines de cas propres à chaque serveur : parler le protocole garde la main sur le délai, les messages d'erreur et
+l'ETag. Chaque connecteur a son client : un connecteur ne dépend pas d'un autre.
 
 ## 4. Les réglages
 
