@@ -194,7 +194,7 @@ def test_sans_sa_cle_le_poste_reste_a_configurer(tmp_path):
     outils = OutilsMemoire(Memoire.ouvrir(tmp_path / "memoire"), registre=registre)
     assert not outils.basculer("poste", True)
     assert not any(o.nom.startswith("mac_") for o in outils.declarations)
-    [fiche] = registre.fiches
+    [fiche] = [fiche for fiche in registre.fiches if fiche.id == "poste"]
     assert (fiche.origine, fiche.etat, fiche.detail) == (
         "atlas",
         "a_configurer",
