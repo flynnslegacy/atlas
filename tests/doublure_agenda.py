@@ -2,12 +2,15 @@
 décrit : la liste des agendas de David (`calendarList`), leurs événements avec leur ETag, les
 séries dépliées (`singleEvents=true` : chaque fois a son identifiant, `<id>_<début en UTC>`,
 avec `recurringEventId` et `originalStartTime`), les exceptions d'une série, et les écritures,
-refusées dans un agenda en lecture seule et soumises à `If-Match`. Les séries n'ont ici que des
-règles simples (`FREQ=DAILY` ou `WEEKLY`, et `COUNT`).
+refusées dans un agenda en lecture seule et soumises à `If-Match`. Un PATCH fusionne les objets,
+comme chez Google : un champ envoyé à `null` s'efface, et un début ou une fin qui garderait à la
+fois `date` et `dateTime` est refusé. Les séries n'ont ici que des règles simples (`FREQ=DAILY`
+ou `WEEKLY`, et `COUNT`).
 """
 
 from __future__ import annotations
 
+import copy
 import datetime as dt
 from typing import Any
 from urllib.parse import unquote
@@ -31,6 +34,17 @@ def _lire(valeur: dict[str, str], fuseau: ZoneInfo) -> dt.datetime:
     if "date" in valeur:
         return dt.datetime.combine(dt.date.fromisoformat(valeur["date"]), dt.time(), fuseau)
     return dt.datetime.fromisoformat(valeur["dateTime"]).astimezone(fuseau)
+
+
+def _fusionner(cible: dict[str, Any], changements: dict[str, Any]) -> None:
+    """Un PATCH de Google : les objets se fusionnent, un champ à `null` s'efface."""
+    for cle, valeur in changements.items():
+        if valeur is None:
+            cible.pop(cle, None)
+        elif isinstance(valeur, dict) and isinstance(cible.get(cle), dict):
+            _fusionner(cible[cle], valeur)
+        else:
+            cible[cle] = valeur
 
 
 def _dire(instant: dt.datetime, journee: bool, fuseau: ZoneInfo) -> dict[str, str]:
@@ -201,7 +215,12 @@ class AgendaGoogle:
         attendu = requete.headers.get("if-match")
         if attendu is not None and attendu != cible["etag"]:
             return erreur(412, "conditionNotMet")
-        cible.update(corps(requete))
+        change = copy.deepcopy(cible)
+        _fusionner(change, corps(requete))
+        if any({"date", "dateTime"} <= set(change.get(bord, {})) for bord in ("start", "end")):
+            return erreur(400, "invalid")  # « Invalid start time. »
+        cible.clear()
+        cible.update(change)
         cible["etag"] = self._etag_neuf()
         return repondre(200, cible)
 

@@ -166,7 +166,8 @@ class Calendrier:
             if valeur is not None:
                 corps[nom] = valeur
         if debut is not None and fin is not None:
-            corps["start"], corps["end"] = self._moment_google(debut), self._moment_google(fin)
+            corps["start"] = self._moment_google(debut, effacer=True)
+            corps["end"] = self._moment_google(fin, effacer=True)
         reponse = self._ecrire("PATCH", self._adresse(rendezvous), corps, rendezvous.etag)
         self._verifier(reponse, rendezvous.agenda)
 
@@ -201,12 +202,21 @@ class Calendrier:
             return dt.date.fromisoformat(valeur["date"])
         return dt.datetime.fromisoformat(valeur["dateTime"]).astimezone(self.fuseau)
 
-    def _moment_google(self, moment: dt.date) -> dict[str, str]:
+    def _moment_google(self, moment: dt.date, *, effacer: bool = False) -> dict[str, str | None]:
+        """Un début ou une fin au format de Google. `effacer`, pour un PATCH, que Google fusionne
+        avec l'existant : l'autre forme est mise à `null`, pour qu'un rendez-vous passe d'une
+        heure à la journée entière, ou l'inverse."""
+        valeur: dict[str, str | None]
         if not isinstance(moment, dt.datetime):
-            return {"date": moment.isoformat()}
+            valeur = {"date": moment.isoformat()}
+            if effacer:
+                valeur.update(dateTime=None, timeZone=None)
+            return valeur
         valeur = {"dateTime": moment.isoformat()}
         if zone := getattr(self.fuseau, "key", None):
             valeur["timeZone"] = zone
+        if effacer:
+            valeur["date"] = None
         return valeur
 
     def _adresse(self, rendezvous: RendezVous) -> str:

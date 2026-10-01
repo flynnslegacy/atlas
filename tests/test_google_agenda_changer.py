@@ -254,6 +254,32 @@ async def test_changer_le_lieu_et_les_notes(doublure, agenda, connecteur, diner)
     }
 
 
+async def test_passer_d_une_heure_a_la_journee_entiere_et_retour(
+    doublure, agenda, connecteur, diner
+):
+    # Google fusionne les objets d'un PATCH : l'ancienne forme du début doit être effacée.
+    await lire(connecteur, "2026-10-01")
+    journee = await appeler(
+        connecteur, "google_agenda_modifier", evenement="g1", debut="2026-10-02"
+    )
+    journee.executer()
+    journee.apres()
+
+    [envoi] = ecritures(doublure)
+    assert json.loads(envoi.content)["start"] == {
+        "date": "2026-10-02",
+        "dateTime": None,
+        "timeZone": None,
+    }
+    assert "g1 · journée entière · Dîner chez Paul" in await lire(connecteur, "2026-10-02")
+
+    a_l_heure = await appeler(
+        connecteur, "google_agenda_modifier", evenement="g1", debut="2026-10-02T19:00"
+    )
+    a_l_heure.executer()
+    assert "19 h 00 – 20 h 00 · Dîner chez Paul" in await lire(connecteur, "2026-10-02")
+
+
 async def test_supprimer_apres_le_oui(doublure, agenda, connecteur, diner):
     await lire(connecteur, "2026-10-01")
     action = await appeler(connecteur, "google_agenda_supprimer", evenement="g1")
