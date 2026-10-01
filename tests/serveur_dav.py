@@ -5,9 +5,8 @@ dans un dossier temporaire. Jamais le vrai iCloud.
 Le serveur demande un identifiant et un mot de passe, comme iCloud. `interdire` lui fait
 refuser l'écriture dans un agenda (un agenda partagé en lecture seule), ce que Radicale seul
 ne sait pas faire ; `ecrits` note chaque écriture reçue telle quelle, avant que Radicale ne
-range (et ne complète) ce qu'il garde. `charger` active un connecteur officiel par le vrai
-registre, puis rend son module : les tests construisent le connecteur avec l'adresse de ce
-serveur.
+range (et ne complète) ce qu'il garde. Les tests construisent le connecteur avec l'adresse de ce
+serveur (`charger` et `appeler` : aides_connecteurs.py).
 """
 
 from __future__ import annotations
@@ -15,9 +14,7 @@ from __future__ import annotations
 import io
 import logging
 import re
-import sys
 import threading
-import types
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,8 +23,7 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 import httpx
 import radicale
 import radicale.config
-
-from atlas_core.registre import OFFICIELS, Registre
+from aides_connecteurs import appeler, charger  # noqa: F401 — les tests iCloud les prennent ici
 
 IDENTIFIANT = "david@example.com"
 MOT_DE_PASSE = "abcd-efgh-ijkl-mnop"
@@ -168,20 +164,6 @@ def reglages(**autres: str) -> dict[str, str]:
         "ATLAS_ICLOUD_AGENDA": "Domicile",
         **autres,
     }
-
-
-def charger(id_: str, dossier: Path, environ: dict[str, str]) -> types.ModuleType:
-    """Active le connecteur officiel `id_` par le vrai registre (ses interrupteurs rangés dans
-    `dossier`), et rend son module `connecteur`."""
-    registre = Registre(OFFICIELS, dossier / "perso", environ=environ)
-    assert registre.basculer(id_, True), [(f.id, f.etat, f.detail) for f in registre.fiches]
-    return sys.modules[f"atlas_connecteurs.{id_.replace('-', '_')}.connecteur"]
-
-
-async def appeler(connecteur, nom: str, **arguments: object) -> object:
-    """Appelle l'outil `nom` du connecteur, comme le Core le ferait."""
-    [outil] = [outil for outil in connecteur.outils() if outil.nom == nom]
-    return await outil.gestionnaire(arguments)
 
 
 def ics(*evenements: str) -> str:
