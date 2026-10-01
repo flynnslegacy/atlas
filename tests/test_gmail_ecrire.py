@@ -243,6 +243,41 @@ async def test_une_reponse_ou_un_brouillon_pret_s_envoient(boite, gmail):
     assert str(refus.value) == "Je ne connais pas « b1 » : prépare d'abord le brouillon."
 
 
+async def test_un_brouillon_retouche_dans_gmail_est_lu_tel_qu_il_partira(boite, gmail):
+    await appeler(gmail, "gmail_brouillon", a="paul@exemple.fr", objet="Photos", texte="Les voici.")
+    [id_] = boite.brouillons
+    boite.retoucher(
+        id_,
+        texte="Les voici, avec celles de Marie.",
+        entetes=(("Cc", "Marie <marie@exemple.fr>"),),
+    )
+
+    envoi = await appeler(gmail, "gmail_envoyer", brouillon="b1")
+    assert envoi.question == (
+        "J'envoie à paul@exemple.fr, copie à marie@exemple.fr, objet « Photos » : « Les voici, "
+        "avec celles de Marie. » ?"
+    )
+
+
+@pytest.mark.parametrize(
+    "retouche",
+    [{"entetes": (("Bcc", "secret@exemple.fr"),)}, {"piece": ("devis.pdf", b"%PDF")}],
+)
+async def test_un_brouillon_a_copie_cachee_ou_piece_jointe_part_depuis_gmail(
+    boite, gmail, retouche
+):
+    await appeler(gmail, "gmail_brouillon", a="paul@exemple.fr", objet="Photos", texte="Les voici.")
+    [id_] = boite.brouillons
+    boite.retoucher(id_, **retouche)
+
+    with pytest.raises(ErreurConnecteur) as refus:
+        await appeler(gmail, "gmail_envoyer", brouillon="b1")
+    assert str(refus.value) == (
+        "Ce brouillon a une copie cachée ou une pièce jointe : envoie-le depuis Gmail."
+    )
+    assert boite.envoyes == []
+
+
 async def test_un_brouillon_supprime_dans_gmail_entre_temps(boite, gmail):
     await appeler(gmail, "gmail_brouillon", a="paul@exemple.fr", objet="Photos", texte="Les voici.")
     envoi = await appeler(gmail, "gmail_envoyer", brouillon="b1")

@@ -14,7 +14,7 @@ from atlas_core.connecteurs import ErreurConnecteur
 from atlas_core.google import Autorisation
 from atlas_core.rendez_vous import fuseau_du_mac
 
-from .mails import Brouillon, Mail, Resume, composer, lire_mail, lire_resume
+from .mails import Brouillon, Mail, Resume, composer, lire_brouillon, lire_mail, lire_resume
 
 ADRESSE = "https://gmail.googleapis.com/gmail/v1/users/me"
 SERVICE = "Gmail"
@@ -59,6 +59,15 @@ class Boite:
 
     def envoyer(self, brouillon: Brouillon) -> None:
         self._json("POST", "messages/send", json=self._message(brouillon))
+
+    def lire_le_brouillon(self, id_: str, fil: str = "") -> Brouillon:
+        """Le brouillon tel qu'il partira : David a pu le retoucher dans Gmail."""
+        reponse = self._appeler("GET", f"drafts/{id_}", params={"format": "raw"})
+        if reponse.status_code == 404:  # David l'a supprimé, ou envoyé, entre-temps
+            raise ErreurConnecteur(PLUS_DE_BROUILLON)
+        if not reponse.is_success:
+            raise ErreurGmail(f"GET drafts : {reponse.status_code}")
+        return lire_brouillon(str(reponse.json()["message"]["raw"]), fil)
 
     def envoyer_le_brouillon(self, id_: str) -> None:
         reponse = self._appeler("POST", "drafts/send", json={"id": id_})

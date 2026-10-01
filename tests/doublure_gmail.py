@@ -2,8 +2,8 @@
 des mails au format de l'API (des parties MIME, leur contenu en base64url, leurs libellés), la
 recherche (les mots que les tests emploient : `in:inbox`, `is:unread`, `is:important`,
 `category:primary`, `from:`, et du texte libre), les formats complet et réduit d'un mail, les
-brouillons et l'envoi (`envoyes` : chaque mail parti, tel qu'Atlas l'a écrit), les libellés et
-la corbeille.
+brouillons (que David peut retoucher dans Gmail : `retoucher`) et l'envoi (`envoyes` : chaque
+mail parti), les libellés et la corbeille.
 """
 
 from __future__ import annotations
@@ -66,10 +66,33 @@ class Gmail:
         doublure.route("GET", rf"{HOTE}/messages/([^/]+)", self._lire)
         doublure.route("POST", rf"{HOTE}/drafts", self._brouillon)
         doublure.route("POST", rf"{HOTE}/drafts/send", self._envoyer_le_brouillon)
+        doublure.route("GET", rf"{HOTE}/drafts/([^/]+)", self._lire_le_brouillon)
         doublure.route("POST", rf"{HOTE}/messages/send", self._envoyer)
         doublure.route("GET", rf"{HOTE}/labels", self._libelles)
         doublure.route("POST", rf"{HOTE}/messages/batchModify", self._changer)
         doublure.route("POST", rf"{HOTE}/messages/([^/]+)/trash", self._corbeille)
+
+    def retoucher(
+        self,
+        id_: str,
+        *,
+        texte: str | None = None,
+        entetes: tuple[tuple[str, str], ...] = (),
+        piece: tuple[str, bytes] | None = None,
+    ) -> None:
+        """David retouche dans Gmail un brouillon qu'Atlas a préparé : son texte, ses en-têtes
+        (une copie, une copie cachée), une pièce jointe."""
+        message = self.brouillons[id_]
+        ecrit = lu(message)
+        for nom, valeur in entetes:
+            del ecrit[nom]
+            ecrit[nom] = valeur
+        if texte is not None:
+            ecrit.set_content(texte)
+        if piece is not None:
+            nom, contenu = piece
+            ecrit.add_attachment(contenu, maintype="application", subtype="pdf", filename=nom)
+        message["raw"] = base64.urlsafe_b64encode(ecrit.as_bytes()).decode()
 
     def libelle(self, nom: str) -> str:
         """Un libellé de David ; rend son identifiant (`Label_…`, comme chez Google)."""
@@ -186,6 +209,16 @@ class Gmail:
         id_ = f"brouillon{len(self.brouillons) + 1}"
         self.brouillons[id_] = corps(requete)["message"]
         return repondre(200, {"id": id_, "message": {"id": f"m-{id_}"}})
+
+    def _lire_le_brouillon(self, requete: httpx.Request, id_: str) -> httpx.Response:
+        message = self.brouillons.get(id_)
+        if message is None:
+            return erreur(404, "notFound")
+        assert requete.url.params.get("format") == "raw"
+        fil = message.get("threadId", f"fil-{id_}")  # Gmail donne un fil à tout brouillon
+        return repondre(
+            200, {"id": id_, "message": {"id": f"m-{id_}", "threadId": fil, "raw": message["raw"]}}
+        )
 
     def _envoyer_le_brouillon(self, requete: httpx.Request) -> httpx.Response:
         message = self.brouillons.pop(corps(requete)["id"], None)

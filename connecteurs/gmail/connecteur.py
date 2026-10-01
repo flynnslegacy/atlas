@@ -177,7 +177,9 @@ class Gmail(Connecteur):
             raise ErreurConnecteur(
                 f"Je ne connais pas « {etiquette} » : prépare d'abord le brouillon."
             )
-        id_, brouillon = self._brouillons[etiquette]
+        id_, prepare = self._brouillons[etiquette]
+        # David a pu le retoucher dans Gmail : la question lit ce qui partira.
+        brouillon = await asyncio.to_thread(self._boite.lire_le_brouillon, id_, prepare.fil)
         return Envoi(
             brouillon,
             faire=lambda: self._boite.envoyer_le_brouillon(id_),

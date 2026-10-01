@@ -11,6 +11,7 @@ import datetime as dt
 import html
 import re
 from dataclasses import dataclass
+from email import message_from_bytes, policy
 from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from email.message import EmailMessage
@@ -23,6 +24,7 @@ from atlas_core.connecteurs import ErreurConnecteur
 _ADRESSE = re.compile(r"[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+")
 MAX_TEXTE = 8000
 COUPE = "\n… (la suite est coupée)"
+EN_GMAIL = "Ce brouillon a une copie cachée ou une pièce jointe : envoie-le depuis Gmail."
 _BLOCS = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table"}
 _MUETS = {"script", "style", "head", "title"}
 
@@ -277,6 +279,34 @@ def en_reponse(mail: Mail, a: tuple[str, ...] = ()) -> Brouillon:
         fil=mail.fil,
         en_reponse_a=mail.message_id,
         references=references,
+    )
+
+
+def lire_brouillon(raw: str, fil: str = "") -> Brouillon:
+    """Un brouillon tel qu'il est dans Gmail (`format=raw`), que David a pu retoucher : ce qui
+    partira. `ErreurConnecteur` s'il porte une copie cachée ou une pièce jointe, qu'Atlas ne lit
+    pas à David. `fil` : celui qu'Atlas connaît, quand il a préparé une réponse."""
+    brut = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    message = message_from_bytes(brut, policy=policy.default)
+    if message["Bcc"] or any(True for _ in message.iter_attachments()):
+        raise ErreurConnecteur(EN_GMAIL)
+    corps = message.get_body(preferencelist=("plain", "html"))
+    texte = "" if corps is None else corps.get_content()
+    if corps is not None and corps.get_content_type() == "text/html":
+        texte = en_texte(texte)
+
+    def adresses(nom: str) -> tuple[str, ...]:
+        entete = message[nom]
+        return tuple(adresse.addr_spec for adresse in entete.addresses) if entete else ()
+
+    return Brouillon(
+        a=adresses("To"),
+        objet=str(message["Subject"] or ""),
+        texte=texte.strip(),
+        copie=adresses("Cc"),
+        fil=fil,
+        en_reponse_a=str(message["In-Reply-To"] or ""),
+        references=str(message["References"] or ""),
     )
 
 

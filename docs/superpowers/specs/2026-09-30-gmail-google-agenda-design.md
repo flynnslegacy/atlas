@@ -194,6 +194,8 @@ Ce que Google permet en plus :
 - **Le mail** est du texte simple en UTF-8, depuis l'adresse de David, sans copie cachée ni pièce jointe ; les adresses
   sont vérifiées (une adresse mal formée est refusée avec son exemple).
 - **Le brouillon** : « Brouillon prêt pour Paul Martin : « Jeudi ». » ; Claude reçoit son étiquette (`b1`).
+  Pour l'envoyer, Atlas le relit dans Gmail, où David a pu le retoucher : la question lit ce qui partira ; une
+  copie cachée ou une pièce jointe ajoutée par David le fait envoyer depuis Gmail (amendé après la relecture finale).
 - **La question de l'envoi** lit les adresses exactes : « J'envoie à paul@exemple.fr, objet « Jeudi » : « Je serai là
   jeudi à 19 h. » ? » ; avec une copie : « J'envoie à … , copie à …, objet … » ; une réponse : « Je réponds à … » ; un
   texte de plus de 300 caractères est lu jusque-là, puis « … (120 mots en tout) ». Après le « oui » : « C'est parti :
