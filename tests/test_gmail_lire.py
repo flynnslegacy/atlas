@@ -244,6 +244,18 @@ async def test_un_jeu_de_caracteres_inconnu(boite, gmail):
     assert "\nObjet : =?x-inconnu?Q?caf=E9?=\n" in texte and texte.endswith("\n\nUn café ?")
 
 
+async def test_un_base64_tronque_n_empeche_pas_la_recherche(boite, gmail):
+    # Un pourriel mal formé : Python ne sait pas décoder ce base64 (HeaderParseError).
+    boite.mail(
+        "p1", "=?UTF-8?B?abcde?= <promo@exemple.fr>", "=?UTF-8?B?abcde?=", "Promo", date=le(1, 9)
+    )
+
+    assert await chercher(gmail) == (
+        "m1 · jeudi 1er octobre, 9 h 00 · promo@exemple.fr · =?UTF-8?B?abcde?= · « Promo » · non lu"
+    )
+    assert "\nObjet : =?UTF-8?B?abcde?=\n" in await lire(gmail, "m1")
+
+
 async def test_un_long_mail_est_coupe(boite, gmail):
     boite.mail(
         "l1", "Paul <paul@exemple.fr>", "Long", "é" * 9000, date=le(1, 9), charset="iso-8859-1"

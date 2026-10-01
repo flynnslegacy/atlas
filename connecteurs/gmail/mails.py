@@ -11,6 +11,7 @@ import datetime as dt
 import html
 import re
 from dataclasses import dataclass
+from email.errors import HeaderParseError
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import parseaddr
@@ -60,7 +61,7 @@ def decoder(valeur: str) -> str:
     """Un en-tête, encodé ou non (`=?UTF-8?B?…?=`)."""
     try:
         return str(make_header(decode_header(valeur))).strip()
-    except (LookupError, ValueError):  # mal encodé, ou un jeu de caractères inconnu
+    except (HeaderParseError, LookupError, ValueError):  # mal encodé, jeu de caractères inconnu
         return valeur.strip()
 
 
