@@ -7,7 +7,7 @@ export
 CLES_DU_ENV := $(shell sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*[:?+]\{0,2\}=.*/\2/p' .env 2>/dev/null)
 COMMANDE_CORE ?= uv run uvicorn atlas_core.hub:app --host 0.0.0.0 --port 8080
 
-.PHONY: install test test-web test-swift lint format bench run-core core run-audio run-poste
+.PHONY: install test test-web test-swift lint format bench run-core core run-audio run-poste google
 
 # Les dépendances des connecteurs (connecteurs/ et ~/.atlas/connecteurs/) s'installent après.
 install:
@@ -58,3 +58,8 @@ run-audio:
 # Le poste, sur le Mac de David : ouvre, regarde et pilote pour Atlas.
 run-poste:
 	uv run python -m atlas_poste.client
+
+# Autorise Atlas à parler à Gmail et à Google Agenda, une fois, dans le navigateur de ce Mac
+# (docs/google.md) ; `make google AFFICHER=1` montre aussi le jeton, pour un Core qui tourne ailleurs.
+google:
+	uv run python -m scripts.google
