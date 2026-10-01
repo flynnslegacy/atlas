@@ -1,18 +1,25 @@
 """Les mails, tels que l'API Gmail les rend (spec de Gmail et de Google Agenda, §6.2) : leurs
 en-têtes décodés, leur texte (la partie texte, sinon la partie HTML convertie en texte), leurs
-pièces jointes nommées et jamais ouvertes. Rien ici ne parle au réseau."""
+pièces jointes nommées et jamais ouvertes ; et les mails qu'Atlas écrit (§6.3) : du texte
+simple, sans copie cachée ni pièce jointe, une réponse gardant son fil. Rien ici ne parle au
+réseau."""
 
 from __future__ import annotations
 
 import base64
 import datetime as dt
 import html
+import re
 from dataclasses import dataclass
 from email.header import decode_header, make_header
+from email.message import EmailMessage
 from email.utils import parseaddr
 from html.parser import HTMLParser
 from typing import Any
 
+from atlas_core.connecteurs import ErreurConnecteur
+
+_ADRESSE = re.compile(r"[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+")
 MAX_TEXTE = 8000
 COUPE = "\n… (la suite est coupée)"
 _BLOCS = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table"}
@@ -208,3 +215,63 @@ def taille(octets: int) -> str:
     if octets < 1_000_000:
         return f"{round(octets / 1000)} Ko"
     return f"{octets / 1_000_000:.1f} Mo".replace(".", ",")
+
+
+@dataclass(frozen=True)
+class Brouillon:
+    """Un mail qu'Atlas écrit : ses adresses, exactes, et, pour une réponse, son fil."""
+
+    a: tuple[str, ...]
+    objet: str
+    texte: str
+    copie: tuple[str, ...] = ()
+    fil: str = ""
+    en_reponse_a: str = ""
+    references: str = ""
+
+
+def verifier_adresses(valeur: object, cle: str) -> tuple[str, ...]:
+    """Des adresses données par Claude (« paul@exemple.fr, Marie <marie@exemple.fr> ») ;
+    `ErreurConnecteur` si l'une n'en est pas une."""
+    trouvees = []
+    for morceau in str(valeur or "").split(","):
+        if not (morceau := morceau.strip()):
+            continue
+        _, adresse = parseaddr(morceau)
+        if not _ADRESSE.fullmatch(adresse):
+            raise ErreurConnecteur(
+                f"{cle} : « {morceau} » n'est pas une adresse mail ; par exemple paul@exemple.fr."
+            )
+        trouvees.append(adresse)
+    return tuple(trouvees)
+
+
+def en_reponse(mail: Mail) -> Brouillon:
+    """Une réponse à `mail`, sans texte encore : à l'expéditeur (ou à son adresse de réponse),
+    dans le même fil, l'objet précédé de « Re: »."""
+    destinataire = verifier_adresses(mail.repondre_a or mail.de, "a")
+    objet = mail.objet if mail.objet.casefold().startswith("re:") else f"Re: {mail.objet}"
+    references = " ".join(r for r in (mail.references, mail.message_id) if r)
+    return Brouillon(
+        a=destinataire,
+        objet=objet,
+        texte="",
+        fil=mail.fil,
+        en_reponse_a=mail.message_id,
+        references=references,
+    )
+
+
+def composer(brouillon: Brouillon) -> str:
+    """Le mail au format que l'API Gmail attend (`raw`) : du texte simple en UTF-8, depuis
+    l'adresse de David (Gmail la met), sans copie cachée ni pièce jointe."""
+    message = EmailMessage()
+    message["To"] = ", ".join(brouillon.a)
+    if brouillon.copie:
+        message["Cc"] = ", ".join(brouillon.copie)
+    message["Subject"] = brouillon.objet
+    if brouillon.en_reponse_a:
+        message["In-Reply-To"] = brouillon.en_reponse_a
+        message["References"] = brouillon.references
+    message.set_content(brouillon.texte)
+    return base64.urlsafe_b64encode(message.as_bytes()).decode()

@@ -1,6 +1,6 @@
 """Le client de l'API Gmail (spec de Gmail et de Google Agenda, §6) : chercher des mails (la
-syntaxe de recherche de Gmail), et en lire un. Tout est synchrone : le connecteur l'appelle par
-`asyncio.to_thread`."""
+syntaxe de recherche de Gmail), en lire un, écrire un brouillon, envoyer. Tout est synchrone :
+le connecteur l'appelle par `asyncio.to_thread`."""
 
 from __future__ import annotations
 
@@ -8,14 +8,16 @@ import datetime as dt
 
 import httpx
 
+from atlas_core.connecteurs import ErreurConnecteur
 from atlas_core.google import Autorisation
 from atlas_core.rendez_vous import fuseau_du_mac
 
-from .mails import Mail, Resume, lire_mail, lire_resume
+from .mails import Brouillon, Mail, Resume, composer, lire_mail, lire_resume
 
 ADRESSE = "https://gmail.googleapis.com/gmail/v1/users/me"
 SERVICE = "Gmail"
 MAX_MAILS = 20
+PLUS_DE_BROUILLON = "Ce brouillon n'est plus dans Gmail : prépare-le de nouveau."
 
 
 class ErreurGmail(Exception):
@@ -47,6 +49,27 @@ class Boite:
         return lire_mail(
             self._json("GET", f"messages/{id_}", params={"format": "full"}), self.fuseau
         )
+
+    def brouillon(self, brouillon: Brouillon) -> str:
+        """Un brouillon dans Gmail ; rend son identifiant."""
+        message = self._message(brouillon)
+        return str(self._json("POST", "drafts", json={"message": message})["id"])
+
+    def envoyer(self, brouillon: Brouillon) -> None:
+        self._json("POST", "messages/send", json=self._message(brouillon))
+
+    def envoyer_le_brouillon(self, id_: str) -> None:
+        reponse = self._appeler("POST", "drafts/send", json={"id": id_})
+        if reponse.status_code == 404:  # David l'a supprimé, ou envoyé, entre-temps
+            raise ErreurConnecteur(PLUS_DE_BROUILLON)
+        if not reponse.is_success:
+            raise ErreurGmail(f"POST drafts/send : {reponse.status_code}")
+
+    def _message(self, brouillon: Brouillon) -> dict:
+        message = {"raw": composer(brouillon)}
+        if brouillon.fil:
+            message["threadId"] = brouillon.fil
+        return message
 
     def _json(self, methode: str, chemin: str, **options) -> dict:
         reponse = self._appeler(methode, chemin, **options)

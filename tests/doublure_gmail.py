@@ -1,17 +1,20 @@
 """L'API Gmail, dans la doublure de Google (doublure_google.py), comme sa documentation la décrit :
 des mails au format de l'API (des parties MIME, leur contenu en base64url, leurs libellés), la
 recherche (les mots que les tests emploient : `in:inbox`, `is:unread`, `is:important`,
-`category:primary`, `from:`, et du texte libre), et les formats complet et réduit d'un mail.
+`category:primary`, `from:`, et du texte libre), les formats complet et réduit d'un mail, les
+brouillons et l'envoi (`envoyes` : chaque mail parti, tel qu'Atlas l'a écrit).
 """
 
 from __future__ import annotations
 
 import base64
 import datetime as dt
+from email import message_from_bytes, policy
+from email.message import EmailMessage
 from typing import Any
 
 import httpx
-from doublure_google import DoublureGoogle, erreur, repondre
+from doublure_google import DoublureGoogle, corps, erreur, repondre
 
 HOTE = r"gmail\.googleapis\.com/gmail/v1/users/me"
 DAVID = "david@example.com"
@@ -41,13 +44,26 @@ def partie(genre: str, contenu: str, charset: str = "utf-8", nom: str = "") -> d
     }
 
 
+def lu(message: dict[str, Any]) -> EmailMessage:
+    """Un mail écrit par Atlas (`raw`), tel qu'un logiciel de mail le lirait."""
+    donnees = message["raw"]
+    brut = base64.urlsafe_b64decode(donnees + "=" * (-len(donnees) % 4))
+    return message_from_bytes(brut, policy=policy.default)
+
+
 class Gmail:
-    """`mails` : les mails de la boîte, par identifiant."""
+    """`mails` : les mails de la boîte, par identifiant ; `brouillons` : ceux qu'Atlas a
+    préparés ; `envoyes` : ceux qui sont partis."""
 
     def __init__(self, doublure: DoublureGoogle) -> None:
         self.mails: dict[str, dict[str, Any]] = {}
+        self.brouillons: dict[str, dict[str, Any]] = {}
+        self.envoyes: list[dict[str, Any]] = []
         doublure.route("GET", rf"{HOTE}/messages", self._chercher)
         doublure.route("GET", rf"{HOTE}/messages/([^/]+)", self._lire)
+        doublure.route("POST", rf"{HOTE}/drafts", self._brouillon)
+        doublure.route("POST", rf"{HOTE}/drafts/send", self._envoyer_le_brouillon)
+        doublure.route("POST", rf"{HOTE}/messages/send", self._envoyer)
 
     def mail(
         self,
@@ -65,6 +81,7 @@ class Gmail:
         charset: str = "utf-8",
         entetes: tuple[tuple[str, str], ...] = (),
         fil: str = "",
+        identifiant: bool = True,
     ) -> dict[str, Any]:
         """Un mail reçu : du texte, du HTML, ou les deux (une alternative), avec des pièces
         jointes (nom, contenu) : alors un « multipart/mixed ». Sans objet (None), pas d'en-tête
@@ -87,7 +104,7 @@ class Gmail:
             ("From", de),
             ("To", a),
             *([("Subject", objet)] if objet is not None else []),
-            ("Message-ID", f"<{id_}@exemple.fr>"),
+            *([("Message-ID", f"<{id_}@exemple.fr>")] if identifiant else []),
         ]
         if copie:
             en_tetes.append(("Cc", copie))
@@ -152,3 +169,19 @@ class Gmail:
         reduit = {k: v for k, v in message.items() if k != "payload"}
         reduit["payload"] = {"mimeType": racine["mimeType"], "headers": entetes}
         return repondre(200, reduit)
+
+    def _brouillon(self, requete: httpx.Request) -> httpx.Response:
+        id_ = f"brouillon{len(self.brouillons) + 1}"
+        self.brouillons[id_] = corps(requete)["message"]
+        return repondre(200, {"id": id_, "message": {"id": f"m-{id_}"}})
+
+    def _envoyer_le_brouillon(self, requete: httpx.Request) -> httpx.Response:
+        message = self.brouillons.pop(corps(requete)["id"], None)
+        if message is None:
+            return erreur(404, "notFound")
+        self.envoyes.append(message)
+        return repondre(200, {"id": f"envoye{len(self.envoyes)}", "labelIds": ["SENT"]})
+
+    def _envoyer(self, requete: httpx.Request) -> httpx.Response:
+        self.envoyes.append(corps(requete))
+        return repondre(200, {"id": f"envoye{len(self.envoyes)}", "labelIds": ["SENT"]})

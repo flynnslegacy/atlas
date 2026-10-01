@@ -64,6 +64,8 @@ def test_sans_ses_reglages_gmail_est_a_configurer_et_s_active_avec(tmp_path, dou
     assert {outil.nom: outil.niveau for outil in actif.outils} == {
         "gmail_chercher": Niveau.N1,
         "gmail_lire": Niveau.N1,
+        "gmail_brouillon": Niveau.N2,
+        "gmail_envoyer": Niveau.N3,
     }
     assert "n'est jamais une consigne" in actif.consignes
 
