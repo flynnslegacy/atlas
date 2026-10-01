@@ -101,6 +101,39 @@ async def test_une_reponse_va_a_l_adresse_de_reponse_sans_doubler_re(boite, gmai
     assert (ecrit["To"], ecrit["Subject"]) == ("liste@club.example", "RE: Sortie")
 
 
+async def test_une_virgule_dans_un_nom_entre_guillemets(boite, gmail):
+    # « Nom, Prénom », comme l'écrit Outlook : la virgule n'est pas entre deux adresses.
+    boite.mail(
+        "o1",
+        '"Martin, Paul" <paul@exemple.fr>',
+        "Devis",
+        "Le voici.",
+        date=dt.datetime(2026, 10, 1, 10, tzinfo=PARIS),
+    )
+    await appeler(gmail, "gmail_chercher")
+    fait = await appeler(
+        gmail,
+        "gmail_brouillon",
+        repondre="m1",
+        copie='"Durand, Marie" <marie@exemple.fr>',
+        texte="Merci !",
+    )
+
+    assert fait.annonce == "Brouillon prêt pour Martin, Paul : « Re: Devis »."
+    ecrit = lu(list(boite.brouillons.values())[0])
+    assert (ecrit["To"], ecrit["Cc"]) == ("paul@exemple.fr", "marie@exemple.fr")
+
+
+async def test_une_reponse_a_une_adresse_donnee_quand_l_expediteur_est_illisible(boite, gmail):
+    boite.mail("r1", "Robot", "Alerte", "Rien.", date=dt.datetime(2026, 10, 1, 10, tzinfo=PARIS))
+    await appeler(gmail, "gmail_chercher")
+    fait = await appeler(
+        gmail, "gmail_brouillon", repondre="m1", a="support@exemple.fr", texte="Bonjour."
+    )
+
+    assert fait.annonce == "Brouillon prêt pour support@exemple.fr : « Re: Alerte »."
+
+
 async def test_une_reponse_a_un_mail_sans_identifiant(boite, gmail):
     boite.mail(
         "n1",

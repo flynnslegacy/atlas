@@ -231,11 +231,28 @@ class Brouillon:
     references: str = ""
 
 
+def _morceaux(valeur: str) -> list[str]:
+    """Une liste d'adresses, coupée aux virgules qui ne sont ni entre guillemets (« "Martin,
+    Paul" <…> », comme l'écrit Outlook) ni entre chevrons."""
+    morceaux, courant, guillemets, chevrons = [], "", False, False
+    for caractere in valeur:
+        if caractere == '"':
+            guillemets = not guillemets
+        elif caractere in "<>" and not guillemets:
+            chevrons = caractere == "<"
+        elif caractere == "," and not (guillemets or chevrons):
+            morceaux.append(courant)
+            courant = ""
+            continue
+        courant += caractere
+    return [*morceaux, courant]
+
+
 def verifier_adresses(valeur: object, cle: str) -> tuple[str, ...]:
     """Des adresses données par Claude (« paul@exemple.fr, Marie <marie@exemple.fr> ») ;
     `ErreurConnecteur` si l'une n'en est pas une."""
     trouvees = []
-    for morceau in str(valeur or "").split(","):
+    for morceau in _morceaux(str(valeur or "")):
         if not (morceau := morceau.strip()):
             continue
         _, adresse = parseaddr(morceau)
@@ -247,10 +264,10 @@ def verifier_adresses(valeur: object, cle: str) -> tuple[str, ...]:
     return tuple(trouvees)
 
 
-def en_reponse(mail: Mail) -> Brouillon:
-    """Une réponse à `mail`, sans texte encore : à l'expéditeur (ou à son adresse de réponse),
-    dans le même fil, l'objet précédé de « Re: »."""
-    destinataire = verifier_adresses(mail.repondre_a or mail.de, "a")
+def en_reponse(mail: Mail, a: tuple[str, ...] = ()) -> Brouillon:
+    """Une réponse à `mail`, sans texte encore : aux adresses `a` que Claude donne, sinon à
+    l'expéditeur (ou à son adresse de réponse), dans le même fil, l'objet précédé de « Re: »."""
+    destinataire = a or verifier_adresses(mail.repondre_a or mail.de, "a")
     objet = mail.objet if mail.objet.casefold().startswith("re:") else f"Re: {mail.objet}"
     references = " ".join(r for r in (mail.references, mail.message_id) if r)
     return Brouillon(

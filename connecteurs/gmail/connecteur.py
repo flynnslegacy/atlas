@@ -237,9 +237,9 @@ class Gmail(Connecteur):
         objet = str(arguments.get("objet") or "").strip()
         if arguments.get("repondre"):
             mail = await asyncio.to_thread(self._boite.lire, self._designe(arguments["repondre"]))
-            reponse = en_reponse(mail)
+            reponse = en_reponse(mail, a)
             brouillon = Brouillon(
-                a=a or reponse.a,
+                a=reponse.a,
                 objet=objet or reponse.objet,
                 texte=texte,
                 copie=copie,
