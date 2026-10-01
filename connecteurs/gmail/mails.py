@@ -1,0 +1,210 @@
+"""Les mails, tels que l'API Gmail les rend (spec de Gmail et de Google Agenda, §6.2) : leurs
+en-têtes décodés, leur texte (la partie texte, sinon la partie HTML convertie en texte), leurs
+pièces jointes nommées et jamais ouvertes. Rien ici ne parle au réseau."""
+
+from __future__ import annotations
+
+import base64
+import datetime as dt
+import html
+from dataclasses import dataclass
+from email.header import decode_header, make_header
+from email.utils import parseaddr
+from html.parser import HTMLParser
+from typing import Any
+
+MAX_TEXTE = 8000
+COUPE = "\n… (la suite est coupée)"
+_BLOCS = {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table"}
+_MUETS = {"script", "style", "head", "title"}
+
+
+@dataclass(frozen=True)
+class Resume:
+    """Un mail dans une liste : de quoi le reconnaître."""
+
+    id: str
+    date: dt.datetime
+    expediteur: str
+    objet: str
+    extrait: str
+    non_lu: bool = False
+    important: bool = False
+    piece_jointe: bool = False
+
+
+@dataclass(frozen=True)
+class Mail:
+    id: str
+    fil: str
+    de: str
+    a: str
+    copie: str
+    repondre_a: str
+    date: dt.datetime
+    objet: str
+    texte: str
+    message_id: str = ""
+    references: str = ""
+    pieces: tuple[tuple[str, int], ...] = ()
+
+
+def decoder(valeur: str) -> str:
+    """Un en-tête, encodé ou non (`=?UTF-8?B?…?=`)."""
+    try:
+        return str(make_header(decode_header(valeur))).strip()
+    except (LookupError, ValueError):  # mal encodé, ou un jeu de caractères inconnu
+        return valeur.strip()
+
+
+def _entetes(partie: dict[str, Any]) -> dict[str, str]:
+    """Les en-têtes d'une partie, sans tenir compte des majuscules ; le premier l'emporte."""
+    entetes: dict[str, str] = {}
+    for entete in partie.get("headers", []):
+        entetes.setdefault(str(entete.get("name", "")).casefold(), str(entete.get("value", "")))
+    return entetes
+
+
+def nom_ou_adresse(valeur: str) -> str:
+    nom, adresse = parseaddr(decoder(valeur))
+    if nom.startswith("=?") and adresse:  # un nom mal encodé ne se dit pas
+        return adresse
+    return nom or adresse or decoder(valeur)
+
+
+def _date(donnees: dict[str, Any], fuseau: dt.tzinfo) -> dt.datetime:
+    millisecondes = int(donnees.get("internalDate", 0))
+    return dt.datetime.fromtimestamp(millisecondes / 1000, fuseau)
+
+
+def _charset(partie: dict[str, Any]) -> str:
+    genre = _entetes(partie).get("content-type", "")
+    for morceau in genre.split(";")[1:]:
+        cle, _, valeur = morceau.strip().partition("=")
+        if cle.casefold() == "charset":
+            return valeur.strip('"') or "utf-8"
+    return "utf-8"
+
+
+def _contenu(partie: dict[str, Any]) -> str:
+    donnees = str(partie.get("body", {}).get("data", ""))
+    brut = base64.urlsafe_b64decode(donnees + "=" * (-len(donnees) % 4))
+    try:
+        return brut.decode(_charset(partie), errors="replace")
+    except LookupError:  # un jeu de caractères inconnu
+        return brut.decode("utf-8", errors="replace")
+
+
+def _parties(partie: dict[str, Any]) -> list[dict[str, Any]]:
+    """Toutes les parties d'un mail, à plat."""
+    tout = [partie]
+    for enfant in partie.get("parts", []) or []:
+        tout += _parties(enfant)
+    return tout
+
+
+class _EnTexte(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.morceaux: list[str] = []
+        self._muet = 0
+        self._lien: str | None = None
+
+    def handle_starttag(self, balise: str, attributs: list[tuple[str, str | None]]) -> None:
+        if balise in _MUETS:
+            self._muet += 1
+        elif balise in _BLOCS:
+            self.morceaux.append("\n")
+        elif balise == "a":
+            self._lien = dict(attributs).get("href") or None
+
+    def handle_endtag(self, balise: str) -> None:
+        if balise in _MUETS:
+            self._muet = max(0, self._muet - 1)
+        elif balise in _BLOCS:
+            self.morceaux.append("\n")
+        elif balise == "a" and self._lien:
+            if self._lien.startswith(("http://", "https://")):
+                self.morceaux.append(f" ({self._lien})")
+            self._lien = None
+
+    def handle_data(self, donnees: str) -> None:
+        if not self._muet:
+            self.morceaux.append(donnees)
+
+
+def en_texte(source: str) -> str:
+    """Du HTML en texte : sans balises ni scripts, un paragraphe par ligne, les liens en clair."""
+    lecteur = _EnTexte()
+    lecteur.feed(source)
+    lignes = (" ".join(ligne.split()) for ligne in "".join(lecteur.morceaux).splitlines())
+    texte, vide = [], True
+    for ligne in lignes:
+        if ligne or not vide:
+            texte.append(ligne)
+        vide = not ligne
+    return "\n".join(texte).strip()
+
+
+def lire_mail(donnees: dict[str, Any], fuseau: dt.tzinfo) -> Mail:
+    """Un mail au format complet de l'API Gmail (`format=full`)."""
+    racine = donnees.get("payload", {})
+    entetes = _entetes(racine)
+    parties = _parties(racine)
+    corps = [p for p in parties if not p.get("filename") and "data" in p.get("body", {})]
+    texte_brut = next((p for p in corps if p.get("mimeType") == "text/plain"), None)
+    en_html = next((p for p in corps if p.get("mimeType") == "text/html"), None)
+    if texte_brut is not None:
+        texte = _contenu(texte_brut).strip()
+    elif en_html is not None:
+        texte = en_texte(_contenu(en_html))
+    else:
+        texte = ""
+    if len(texte) > MAX_TEXTE:
+        texte = texte[:MAX_TEXTE] + COUPE
+    pieces = tuple(
+        (str(p["filename"]), int(p.get("body", {}).get("size", 0)))
+        for p in parties
+        if p.get("filename")
+    )
+    return Mail(
+        id=str(donnees["id"]),
+        fil=str(donnees.get("threadId", "")),
+        de=decoder(entetes.get("from", "")),
+        a=decoder(entetes.get("to", "")),
+        copie=decoder(entetes.get("cc", "")),
+        repondre_a=decoder(entetes.get("reply-to", "")),
+        date=_date(donnees, fuseau),
+        objet=decoder(entetes.get("subject", "")) or "(sans objet)",
+        texte=texte,
+        message_id=entetes.get("message-id", ""),
+        references=entetes.get("references", ""),
+        pieces=pieces,
+    )
+
+
+def lire_resume(donnees: dict[str, Any], fuseau: dt.tzinfo) -> Resume:
+    """Un mail au format réduit de l'API Gmail (`format=metadata`)."""
+    racine = donnees.get("payload", {})
+    entetes = _entetes(racine)
+    libelles = set(donnees.get("labelIds", []))
+    extrait = " ".join(html.unescape(str(donnees.get("snippet", ""))).split())
+    return Resume(
+        id=str(donnees["id"]),
+        date=_date(donnees, fuseau),
+        expediteur=nom_ou_adresse(entetes.get("from", "")),
+        objet=decoder(entetes.get("subject", "")) or "(sans objet)",
+        extrait=extrait if len(extrait) <= 100 else extrait[:99].rstrip() + "…",
+        non_lu="UNREAD" in libelles,
+        important="IMPORTANT" in libelles,
+        piece_jointe=racine.get("mimeType") == "multipart/mixed",
+    )
+
+
+def taille(octets: int) -> str:
+    """« 850 octets », « 120 Ko », « 2,3 Mo »."""
+    if octets < 1000:
+        return f"{octets} octets"
+    if octets < 1_000_000:
+        return f"{round(octets / 1000)} Ko"
+    return f"{octets / 1_000_000:.1f} Mo".replace(".", ",")
