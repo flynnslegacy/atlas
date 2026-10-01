@@ -1,23 +1,181 @@
-"""Ce qui attend le « oui » de David dans l'agenda (spec de l'agenda et des contacts, §5.5) :
-modifier ou supprimer un rendez-vous.
+"""Les rendez-vous d'un agenda, quel que soit son serveur (spec de Gmail et de Google Agenda,
+D10 ; spec de l'agenda et des contacts, §5) : ce qu'on en sait, ce qu'Atlas en dit, et les
+actions qui attendent le « oui » de David. L'agenda iCloud et Google Agenda s'en servent tous
+deux, chacun avec son client.
 
-Atlas pose la question ; `executer` ne tourne qu'après le « oui », hors de la boucle du Core,
-et `apres`, dans la boucle, une fois l'écriture faite. Un rendez-vous changé entre-temps n'est
-pas écrasé ; un échec dit pourquoi à David (`ratee`).
+Pour modifier ou supprimer, Atlas pose la question ; `executer` ne tourne qu'après le « oui »,
+hors de la boucle du Core, et `apres`, dans la boucle, une fois l'écriture faite. Un rendez-vous
+changé entre-temps n'est pas écrasé (`Change`) ; un échec dit pourquoi à David (`ratee`).
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import os
+import unicodedata
 from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from atlas_core.connecteurs import ErreurConnecteur
+from .consignes import date_en_lettres, heure_en_chiffres
+from .outils import ErreurConnecteur
 
-from .agenda import Change, RendezVous
-from .dire import heure_dite, jour_court, quand
-
+JOURS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 CETTE_FOIS = " (cette fois seulement)"
+
+
+class Change(Exception):
+    """Le rendez-vous a changé (ou disparu) depuis sa lecture : rien n'est écrit."""
+
+
+def fuseau_du_mac() -> dt.tzinfo:
+    """Le fuseau du Mac du Core : `TZ` s'il est posé, sinon celui que nomme /etc/localtime."""
+    nom = os.environ.get("TZ", "").lstrip(":")
+    if not nom:
+        cible = str(Path("/etc/localtime").resolve())
+        nom = cible.split("zoneinfo/", 1)[1] if "zoneinfo/" in cible else ""
+    try:
+        return ZoneInfo(nom)
+    except (ZoneInfoNotFoundError, ValueError):
+        return dt.datetime.now().astimezone().tzinfo or dt.UTC
+
+
+@dataclass(frozen=True)
+class Agenda:
+    """Un agenda : son nom, et ce qui le désigne pour son serveur (`cle` : l'adresse CalDAV,
+    l'identifiant Google) ; son serveur dit parfois qu'il est en lecture seule, ou principal."""
+
+    nom: str
+    cle: str
+    lecture_seule: bool = False
+    principal: bool = False
+
+
+def lecture_seule(agenda: Agenda) -> str:
+    return f"L'agenda « {agenda.nom} » ne se modifie pas d'ici."
+
+
+@dataclass(frozen=True)
+class RendezVous:
+    """Une fois d'un rendez-vous : un événement seul, ou l'une des fois d'une série, que
+    désigne `origine` (sa date d'origine dans la série ; None hors série). `evenement` désigne
+    l'événement (toutes ses fois) pour son serveur ; `cle`, cette fois-ci, quand le serveur lui
+    en donne une (Google). Les heures sont celles du Mac ; une journée entière a des dates, et
+    sa `fin` est exclue."""
+
+    agenda: Agenda
+    evenement: str
+    etag: str
+    titre: str
+    debut: dt.date  # un dt.datetime pour un rendez-vous à l'heure
+    fin: dt.date
+    lieu: str = ""
+    notes: str = ""
+    invites: bool = False
+    origine: dt.date | None = None
+    annule: bool = False  # une invitation annulée, gardée jusqu'à ce que David la retire
+    refuse: bool = False  # une invitation que David a refusée
+    cle: str = ""
+
+    @property
+    def journee(self) -> bool:
+        return not isinstance(self.debut, dt.datetime)
+
+    @property
+    def repete(self) -> bool:
+        return self.origine is not None
+
+
+def normaliser(texte: str) -> str:
+    """Sans accents ni majuscules : « Réunion » et « reunion » se valent."""
+    decompose = unicodedata.normalize("NFKD", texte)
+    return "".join(c for c in decompose if not unicodedata.combining(c)).casefold().strip()
+
+
+def jour_de(moment: dt.date) -> dt.date:
+    return moment.date() if isinstance(moment, dt.datetime) else moment
+
+
+def ordre(rendezvous: RendezVous) -> tuple:
+    debut = rendezvous.debut
+    minutes = debut.hour * 60 + debut.minute if isinstance(debut, dt.datetime) else -1
+    return jour_de(debut), minutes, normaliser(rendezvous.titre)
+
+
+# Ce qu'Atlas en dit.
+
+
+def jour_long(jour: dt.date) -> str:
+    """« jeudi 2 octobre 2026 »."""
+    return f"{JOURS[jour.weekday()]} {date_en_lettres(jour)}"
+
+
+def jour_court(jour: dt.date) -> str:
+    """« jeudi 2 octobre »."""
+    return jour_long(jour).removesuffix(f" {jour.year}")
+
+
+def periode(debut: dt.date, fin: dt.date) -> str:
+    """« le jeudi 2 octobre 2026 », « du jeudi 2 octobre 2026 au samedi 4 octobre 2026 »."""
+    if debut == fin:
+        return f"le {jour_long(debut)}"
+    return f"du {jour_long(debut)} au {jour_long(fin)}"
+
+
+def horaire(rendezvous: RendezVous) -> str:
+    """« 15 h 00 – 16 h 00 », « 15 h 00 » (sans fin), « journée entière », « journée entière,
+    jusqu'au lundi 6 octobre »."""
+    debut, fin = rendezvous.debut, rendezvous.fin
+    if rendezvous.journee:
+        dernier = fin - dt.timedelta(days=1)
+        return (
+            "journée entière"
+            if dernier <= debut
+            else f"journée entière, jusqu'au {jour_court(dernier)}"
+        )
+    assert isinstance(debut, dt.datetime) and isinstance(fin, dt.datetime)
+    if fin == debut:
+        return heure_en_chiffres(debut)
+    if jour_de(fin) == jour_de(debut):
+        return f"{heure_en_chiffres(debut)} – {heure_en_chiffres(fin)}"
+    return f"{heure_en_chiffres(debut)} – {jour_court(jour_de(fin))}, {heure_en_chiffres(fin)}"
+
+
+def ligne(etiquette: str, rendezvous: RendezVous) -> str:
+    """« e3 · 15 h 00 – 16 h 00 · Dentiste · Domicile · 12 rue des Lilas »."""
+    morceaux = [etiquette, horaire(rendezvous), rendezvous.titre, rendezvous.agenda.nom]
+    if rendezvous.lieu:
+        morceaux.append(rendezvous.lieu)
+    if rendezvous.annule:
+        morceaux.append("annulé")
+    if rendezvous.refuse:
+        morceaux.append("invitation refusée")
+    if rendezvous.repete:
+        morceaux.append("répété")
+    if rendezvous.invites:
+        morceaux.append("avec invités")
+    return "  " + " · ".join(morceaux)
+
+
+def heure_dite(moment: dt.datetime) -> str:
+    """« 15 h », « 9 h 05 » : pour la voix."""
+    return f"{moment.hour} h" if moment.minute == 0 else heure_en_chiffres(moment)
+
+
+def quand(debut: dt.date, fin: dt.date) -> str:
+    """« jeudi 1er octobre à 15 h », « lundi 5 octobre », « du lundi 5 octobre au vendredi 9
+    octobre » (une journée entière a sa `fin` exclue)."""
+    if isinstance(debut, dt.datetime):
+        return f"{jour_court(debut.date())} à {heure_dite(debut)}"
+    dernier = fin - dt.timedelta(days=1)
+    if dernier <= debut:
+        return jour_court(debut)
+    return f"du {jour_court(debut)} au {jour_court(dernier)}"
+
+
+# Ce qui attend le « oui » de David.
 
 
 def _vers(debut: dt.date, fin: dt.date) -> str:

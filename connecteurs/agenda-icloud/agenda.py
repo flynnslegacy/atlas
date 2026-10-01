@@ -18,20 +18,24 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import logging
-import os
-import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from pathlib import Path
 from urllib.parse import urljoin
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 import icalendar
 import recurring_ical_events
 
 from atlas_core.connecteurs import ErreurConnecteur
+from atlas_core.rendez_vous import (
+    Agenda,
+    Change,
+    RendezVous,
+    fuseau_du_mac,
+    lecture_seule,
+    normaliser,
+    ordre,
+)
 
 _journal = logging.getLogger(__name__)
 
@@ -67,74 +71,11 @@ class ErreurDav(Exception):
     """Une réponse inattendue d'iCloud : le Core la note, et Claude apprend l'échec."""
 
 
-class Change(Exception):
-    """Le rendez-vous a changé (ou disparu) depuis sa lecture : rien n'est écrit."""
-
-
-def lecture_seule(agenda: Agenda) -> str:
-    return f"L'agenda « {agenda.nom} » ne se modifie pas d'ici."
-
-
-def fuseau_du_mac() -> dt.tzinfo:
-    """Le fuseau du Mac du Core : `TZ` s'il est posé, sinon celui que nomme /etc/localtime."""
-    nom = os.environ.get("TZ", "").lstrip(":")
-    if not nom:
-        cible = str(Path("/etc/localtime").resolve())
-        nom = cible.split("zoneinfo/", 1)[1] if "zoneinfo/" in cible else ""
-    try:
-        return ZoneInfo(nom)
-    except (ZoneInfoNotFoundError, ValueError):
-        return dt.datetime.now().astimezone().tzinfo or dt.UTC
-
-
-@dataclass(frozen=True)
-class Agenda:
-    nom: str
-    url: str
-
-
-@dataclass(frozen=True)
-class RendezVous:
-    """Une fois d'un rendez-vous : un événement seul, ou l'une des fois d'une série, que
-    désigne `origine` (sa date d'origine dans la série ; None hors série). Les heures sont
-    celles du Mac ; une journée entière a des dates, et sa `fin` est exclue."""
-
-    agenda: Agenda
-    url: str
-    etag: str
-    titre: str
-    debut: dt.date  # un dt.datetime pour un rendez-vous à l'heure
-    fin: dt.date
-    lieu: str = ""
-    notes: str = ""
-    invites: bool = False
-    origine: dt.date | None = None
-    annule: bool = False  # une invitation annulée, qu'iCloud garde jusqu'à ce que David la retire
-
-    @property
-    def journee(self) -> bool:
-        return not isinstance(self.debut, dt.datetime)
-
-    @property
-    def repete(self) -> bool:
-        return self.origine is not None
-
-
-def normaliser(texte: str) -> str:
-    """Sans accents ni majuscules : « Réunion » et « reunion » se valent."""
-    decompose = unicodedata.normalize("NFKD", texte)
-    return "".join(c for c in decompose if not unicodedata.combining(c)).casefold().strip()
-
-
 def _instant(moment: dt.date, fuseau: dt.tzinfo) -> dt.datetime:
     """Un début comparable aux autres : une date à minuit, une heure flottante à l'heure du Mac."""
     if not isinstance(moment, dt.datetime):
         return dt.datetime.combine(moment, dt.time(), fuseau)
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=fuseau)
-
-
-def jour_de(moment: dt.date) -> dt.date:
-    return moment.date() if isinstance(moment, dt.datetime) else moment
 
 
 def _utc(moment: dt.datetime) -> str:
@@ -154,12 +95,6 @@ def _meme_moment(a: dt.date, b: dt.date | None) -> bool:
 def _remplacer(evenement: icalendar.Event, nom: str, valeur: object) -> None:
     evenement.pop(nom, None)
     evenement.add(nom, valeur)
-
-
-def _ordre(rendezvous: RendezVous) -> tuple:
-    debut = rendezvous.debut
-    minutes = debut.hour * 60 + debut.minute if isinstance(debut, dt.datetime) else -1
-    return jour_de(debut), minutes, normaliser(rendezvous.titre)
 
 
 class Calendrier:
@@ -202,7 +137,7 @@ class Calendrier:
         corps = _PERIODE.format(debut=_utc(de), fin=_utc(a))
         trouves: list[RendezVous] = []
         for lu in [agenda] if agenda is not None else self.agendas():
-            reponse = self._envoyer("REPORT", lu.url, corps, {"Depth": "1", **_XML})
+            reponse = self._envoyer("REPORT", lu.cle, corps, {"Depth": "1", **_XML})
             for url, proprietes in self._multistatus(reponse):
                 donnees = proprietes.findtext(f"{_CALDAV}calendar-data")
                 if not donnees:
@@ -212,7 +147,7 @@ class Calendrier:
                     trouves += self._deplier(lu, url, etag, donnees, de, a)
                 except Exception as e:  # noqa: BLE001 — un événement illisible n'empêche pas les autres
                     _journal.warning("événement illisible, laissé de côté : %s (%s)", url, e)
-        return sorted(trouves, key=_ordre)
+        return sorted(trouves, key=ordre)
 
     def ajouter(
         self,
@@ -250,7 +185,7 @@ class Calendrier:
         calendrier.add_component(evenement)
         calendrier.add_missing_timezones()
         entetes = {"If-None-Match": "*", **_ICS}
-        reponse = self._envoyer("PUT", f"{agenda.url}{uid}.ics", calendrier.to_ical(), entetes)
+        reponse = self._envoyer("PUT", f"{agenda.cle}{uid}.ics", calendrier.to_ical(), entetes)
         self._verifier_l_ecriture(reponse, agenda)
 
     def modifier(
@@ -286,7 +221,7 @@ class Calendrier:
         depuis sa lecture."""
         if not rendezvous.repete:
             entetes = {"If-Match": rendezvous.etag}
-            reponse = self._envoyer("DELETE", rendezvous.url, None, entetes)
+            reponse = self._envoyer("DELETE", rendezvous.evenement, None, entetes)
             self._verifier_l_ecriture(reponse, rendezvous.agenda)
             return
         calendrier = self._reprendre(rendezvous)
@@ -301,7 +236,7 @@ class Calendrier:
     def _reprendre(self, rendezvous: RendezVous) -> icalendar.Calendar:
         """L'événement tel qu'iCloud le garde : l'écriture qui suit exige qu'il n'ait pas changé
         depuis la lecture (`If-Match`)."""
-        reponse = self._envoyer("GET", rendezvous.url, None, {})
+        reponse = self._envoyer("GET", rendezvous.evenement, None, {})
         if reponse.status_code == 404:
             raise Change()
         if not reponse.is_success:
@@ -330,7 +265,7 @@ class Calendrier:
 
     def _remettre(self, rendezvous: RendezVous, calendrier: icalendar.Calendar) -> None:
         entetes = {"If-Match": rendezvous.etag, **_ICS}
-        reponse = self._envoyer("PUT", rendezvous.url, calendrier.to_ical(), entetes)
+        reponse = self._envoyer("PUT", rendezvous.evenement, calendrier.to_ical(), entetes)
         self._verifier_l_ecriture(reponse, rendezvous.agenda)
 
     def _verifier_l_ecriture(self, reponse: httpx.Response, agenda: Agenda) -> None:
@@ -369,7 +304,7 @@ class Calendrier:
         origine = fois.get("RECURRENCE-ID") if serie else None
         return RendezVous(
             agenda=agenda,
-            url=url,
+            evenement=url,
             etag=etag,
             titre=str(fois.get("SUMMARY", "")).strip() or "(sans titre)",
             debut=self._local(fois["DTSTART"].dt),
