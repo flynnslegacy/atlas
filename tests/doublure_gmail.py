@@ -2,7 +2,8 @@
 des mails au format de l'API (des parties MIME, leur contenu en base64url, leurs libellés), la
 recherche (les mots que les tests emploient : `in:inbox`, `is:unread`, `is:important`,
 `category:primary`, `from:`, et du texte libre), les formats complet et réduit d'un mail, les
-brouillons et l'envoi (`envoyes` : chaque mail parti, tel qu'Atlas l'a écrit).
+brouillons et l'envoi (`envoyes` : chaque mail parti, tel qu'Atlas l'a écrit), les libellés et
+la corbeille.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from doublure_google import DoublureGoogle, corps, erreur, repondre
 
 HOTE = r"gmail\.googleapis\.com/gmail/v1/users/me"
 DAVID = "david@example.com"
+SYSTEME = ("INBOX", "UNREAD", "IMPORTANT", "SENT", "DRAFT", "TRASH", "SPAM", "STARRED")
 
 
 def _base64(texte: str | bytes, charset: str = "utf-8") -> str:
@@ -59,11 +61,21 @@ class Gmail:
         self.mails: dict[str, dict[str, Any]] = {}
         self.brouillons: dict[str, dict[str, Any]] = {}
         self.envoyes: list[dict[str, Any]] = []
+        self.libelles: dict[str, str] = {nom: nom for nom in SYSTEME}  # identifiant → nom
         doublure.route("GET", rf"{HOTE}/messages", self._chercher)
         doublure.route("GET", rf"{HOTE}/messages/([^/]+)", self._lire)
         doublure.route("POST", rf"{HOTE}/drafts", self._brouillon)
         doublure.route("POST", rf"{HOTE}/drafts/send", self._envoyer_le_brouillon)
         doublure.route("POST", rf"{HOTE}/messages/send", self._envoyer)
+        doublure.route("GET", rf"{HOTE}/labels", self._libelles)
+        doublure.route("POST", rf"{HOTE}/messages/batchModify", self._changer)
+        doublure.route("POST", rf"{HOTE}/messages/([^/]+)/trash", self._corbeille)
+
+    def libelle(self, nom: str) -> str:
+        """Un libellé de David ; rend son identifiant (`Label_…`, comme chez Google)."""
+        id_ = f"Label_{len(self.libelles) + 1}"
+        self.libelles[id_] = nom
+        return id_
 
     def mail(
         self,
@@ -185,3 +197,29 @@ class Gmail:
     def _envoyer(self, requete: httpx.Request) -> httpx.Response:
         self.envoyes.append(corps(requete))
         return repondre(200, {"id": f"envoye{len(self.envoyes)}", "labelIds": ["SENT"]})
+
+    def _libelles(self, requete: httpx.Request) -> httpx.Response:
+        liste = [
+            {"id": i, "name": n, "type": "system" if i in SYSTEME else "user"}
+            for i, n in self.libelles.items()
+        ]
+        return repondre(200, {"labels": liste})
+
+    def _changer(self, requete: httpx.Request) -> httpx.Response:
+        demande = corps(requete)
+        inconnus = set(demande.get("addLabelIds", [])) - set(self.libelles)
+        if inconnus or any(i not in self.mails for i in demande["ids"]):
+            return erreur(400, "invalidArgument")
+        for id_ in demande["ids"]:
+            libelles = self.mails[id_]["labelIds"]
+            retires = demande.get("removeLabelIds", [])
+            libelles[:] = [nom for nom in libelles if nom not in retires]
+            libelles += [nom for nom in demande.get("addLabelIds", []) if nom not in libelles]
+        return repondre(204)
+
+    def _corbeille(self, requete: httpx.Request, id_: str) -> httpx.Response:
+        message = self.mails.get(id_)
+        if message is None:
+            return erreur(404, "notFound")
+        message["labelIds"] = [nom for nom in message["labelIds"] if nom != "INBOX"] + ["TRASH"]
+        return repondre(200, message)

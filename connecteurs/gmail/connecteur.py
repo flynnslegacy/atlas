@@ -1,5 +1,5 @@
 """La boîte Gmail de David, en connecteur (spec de Gmail et de Google Agenda, §6) : chercher et
-lire (N1), préparer un brouillon (N2), envoyer après son « oui » (N3).
+lire (N1), préparer un brouillon (N2), envoyer après son « oui » (N3), ranger (N2).
 
 Chaque mail trouvé reçoit une étiquette (`m1`, `m2`…), chaque brouillon préparé la sienne (`b1`,
 `b2`…), que Claude rend pour les désigner. Les étiquettes valent pour la conversation : la
@@ -18,7 +18,7 @@ import httpx
 from atlas_core.connecteurs import Connecteur, Contexte, ErreurConnecteur, Fait, Niveau, Outil
 from atlas_core.consignes import heure_en_chiffres
 from atlas_core.google import Autorisation
-from atlas_core.rendez_vous import jour_court, jour_long
+from atlas_core.rendez_vous import jour_court, jour_long, normaliser
 
 from .boite import Boite
 from .envoi import Envoi
@@ -48,6 +48,13 @@ ENVOYER = (
     "David les adresses, l'objet et le texte, et attend son « oui » : n'ajoute rien après "
     "l'appel. Du texte simple, sans copie cachée ni pièce jointe."
 )
+RANGER = (
+    "Range des mails de David, désignés par leurs étiquettes (mails : « m1, m3 »), quand il le "
+    "demande : action lu, non_lu, archiver, libelle (avec libelle : le nom d'un libellé qui "
+    "existe déjà) ou corbeille (elle se vide seule au bout de 30 jours ; jamais d'effacement "
+    "définitif). Atlas l'annonce : ne l'annonce pas toi-même."
+)
+ACTIONS = ("lu", "non_lu", "archiver", "libelle", "corbeille")
 _ECRIRE = {
     "a": "string",
     "copie": "string",
@@ -110,6 +117,21 @@ class Gmail(Connecteur):
                 Niveau.N3,
                 self._envoyer,
             ),
+            Outil(
+                "gmail_ranger",
+                RANGER,
+                {
+                    "type": "object",
+                    "properties": {
+                        "mails": {"type": "string"},
+                        "action": {"type": "string", "enum": list(ACTIONS)},
+                        "libelle": {"type": "string"},
+                    },
+                    "required": ["mails", "action"],
+                },
+                Niveau.N2,
+                self._ranger,
+            ),
         ]
 
     def outils(self) -> list[Outil]:
@@ -160,6 +182,49 @@ class Gmail(Connecteur):
             brouillon,
             faire=lambda: self._boite.envoyer_le_brouillon(id_),
             apres=lambda: self._brouillons.pop(etiquette, None),
+        )
+
+    async def _ranger(self, arguments: dict[str, Any]) -> Fait:
+        etiquettes = str(arguments.get("mails") or "").replace(",", " ").split()
+        if not etiquettes:
+            raise ErreurConnecteur("Dis quels mails ranger (mails : m1, m2…).")
+        ids = [self._designe(etiquette) for etiquette in etiquettes]
+        action = str(arguments.get("action") or "").strip()
+        n = len(ids)
+        mails = f"{n} mail{'s' if n > 1 else ''}"
+        e = "s" if n > 1 else ""
+        if action == "corbeille":
+            await asyncio.to_thread(self._boite.corbeille, ids)
+            fait = f"{mails} mis à la corbeille"
+        elif action == "libelle":
+            id_libelle, nom = await self._libelle(arguments.get("libelle"))
+            await asyncio.to_thread(self._boite.changer_les_libelles, ids, ajouter=[id_libelle])
+            fait = f"{mails} sous « {nom} »"
+        elif action in {"lu", "non_lu", "archiver"}:
+            libelle, dit = {
+                "lu": ("UNREAD", f"marqué{e} comme lu{e}"),
+                "non_lu": ("UNREAD", f"marqué{e} comme non lu{e}"),
+                "archiver": ("INBOX", f"archivé{e}"),
+            }[action]
+            changement = {"ajouter": [libelle]} if action == "non_lu" else {"retirer": [libelle]}
+            await asyncio.to_thread(self._boite.changer_les_libelles, ids, **changement)
+            fait = f"{mails} {dit}"
+        else:
+            raise ErreurConnecteur("action : lu, non_lu, archiver, libelle ou corbeille.")
+        return Fait("C'est fait.", f"C'est rangé : {fait}.")
+
+    async def _libelle(self, nom: object) -> tuple[str, str]:
+        """Le libellé que David nomme, sans tenir compte des accents ni des majuscules."""
+        nom = str(nom or "").strip()
+        if not nom:
+            raise ErreurConnecteur("Donne le nom du libellé (libelle).")
+        libelles = await asyncio.to_thread(self._boite.libelles)
+        for id_, existant in libelles.items():
+            if normaliser(existant) == normaliser(nom):
+                return id_, existant
+        siens = sorted((n for i, n in libelles.items() if i.startswith("Label_")), key=normaliser)
+        raise ErreurConnecteur(
+            f"Pas de libellé « {nom} » dans ta boîte Gmail. Tes libellés : {', '.join(siens)}."
         )
 
     async def _preparer(self, arguments: dict[str, Any]) -> tuple[Brouillon, str]:

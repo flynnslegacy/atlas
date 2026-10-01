@@ -1,10 +1,12 @@
 """Le client de l'API Gmail (spec de Gmail et de Google Agenda, §6) : chercher des mails (la
-syntaxe de recherche de Gmail), en lire un, écrire un brouillon, envoyer. Tout est synchrone :
-le connecteur l'appelle par `asyncio.to_thread`."""
+syntaxe de recherche de Gmail), en lire un, écrire un brouillon, envoyer, et ranger : changer
+des libellés, mettre à la corbeille (jamais d'effacement définitif). Tout est synchrone : le
+connecteur l'appelle par `asyncio.to_thread`."""
 
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 
 import httpx
 
@@ -64,6 +66,23 @@ class Boite:
             raise ErreurConnecteur(PLUS_DE_BROUILLON)
         if not reponse.is_success:
             raise ErreurGmail(f"POST drafts/send : {reponse.status_code}")
+
+    def libelles(self) -> dict[str, str]:
+        """Les libellés de la boîte : identifiant → nom."""
+        return {
+            str(libelle["id"]): str(libelle.get("name", libelle["id"]))
+            for libelle in self._json("GET", "labels").get("labels", [])
+        }
+
+    def changer_les_libelles(
+        self, ids: list[str], ajouter: Sequence[str] = (), retirer: Sequence[str] = ()
+    ) -> None:
+        corps = {"ids": ids, "addLabelIds": list(ajouter), "removeLabelIds": list(retirer)}
+        self._json("POST", "messages/batchModify", json=corps)
+
+    def corbeille(self, ids: list[str]) -> None:
+        for id_ in ids:
+            self._json("POST", f"messages/{id_}/trash")
 
     def _message(self, brouillon: Brouillon) -> dict:
         message = {"raw": composer(brouillon)}
