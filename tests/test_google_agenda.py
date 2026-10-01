@@ -109,7 +109,7 @@ async def test_une_journee_dans_tous_les_agendas_affiches(doublure, agenda, conn
         "2026-10-02T00:00:00+02:00",
         "Europe/Paris",
     )
-    assert (params["singleEvents"], params["maxResults"]) == ("true", "250")
+    assert (params["singleEvents"], params["maxResults"]) == ("true", "2500")
 
 
 async def test_un_agenda_nomme_ou_inconnu(agenda, connecteur):
@@ -262,7 +262,14 @@ async def test_un_rendez_vous_illisible_n_empeche_pas_les_autres(agenda, connect
     )
 
 
-async def test_plusieurs_pages_et_cent_rendez_vous_au_plus(doublure, agenda, connecteur):
+def module_agenda():
+    return sys.modules["atlas_connecteurs.google_agenda.agenda"]
+
+
+async def test_plusieurs_pages_et_cent_rendez_vous_au_plus(
+    doublure, agenda, connecteur, monkeypatch
+):
+    monkeypatch.setattr(module_agenda(), "PAGE", 250)  # 2 500 en vrai
     for numero in range(300):
         debut = a_paris(1, 8) + dt.timedelta(minutes=2 * numero)
         agenda.evenement(
@@ -276,8 +283,12 @@ async def test_plusieurs_pages_et_cent_rendez_vous_au_plus(doublure, agenda, con
     assert [r.url.params.get("pageToken") for r in pages] == [None, "250"]
 
 
-async def test_cinq_cents_rendez_vous_au_plus_par_agenda(doublure, agenda, connecteur, caplog):
+async def test_un_plafond_de_rendez_vous_par_agenda(
+    doublure, agenda, connecteur, caplog, monkeypatch
+):
     # Un agenda piégé (une invitation répétée à la minute) ne peut pas épuiser Atlas.
+    monkeypatch.setattr(module_agenda(), "PAGE", 250)  # 2 500 en vrai, comme le plafond
+    monkeypatch.setattr(module_agenda(), "MAX_FOIS", 500)
     for numero in range(800):
         debut = a_paris(1, 8) + dt.timedelta(minutes=numero)
         agenda.evenement(PERSO, f"r{numero}", debut, debut + dt.timedelta(minutes=1), "Pourriel")
@@ -287,6 +298,25 @@ async def test_cinq_cents_rendez_vous_au_plus_par_agenda(doublure, agenda, conne
     pages = [r for r in doublure.recues if r.url.path.endswith(f"{PERSO}/events")]
     assert [r.url.params.get("pageToken") for r in pages] == [None, "250", "500"]
     assert "Perso : plus de 500 rendez-vous dans la période" in caplog.text
+
+
+async def test_une_recherche_dans_un_agenda_charge(agenda, connecteur):
+    # Deux rendez-vous quotidiens : près de 800 fois sur les 395 jours d'une recherche.
+    for id_, heure in (("medicament", 8), ("marche", 18)):
+        agenda.evenement(
+            PERSO,
+            id_,
+            a_paris(1, heure, mois=9),
+            a_paris(1, heure, 30, mois=9),
+            id_.capitalize(),
+            recurrence=["RRULE:FREQ=DAILY"],
+        )
+    juillet = dt.datetime(2027, 7, 15, 10, tzinfo=PARIS)
+    agenda.evenement(PERSO, "d1", juillet, juillet + dt.timedelta(hours=1), "Dentiste")
+
+    assert "Dentiste · Perso" in await appeler(
+        connecteur, "google_agenda_chercher", texte="dentiste"
+    )
 
 
 async def test_chercher_sans_accents_d_un_mois_en_arriere_a_un_an_en_avant(agenda, connecteur):

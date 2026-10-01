@@ -136,8 +136,8 @@ Déclarés par les deux connecteurs (les saisir dans l'un règle aussi l'autre, 
 
 Les outils, les phrases et les garde-fous sont ceux de l'agenda iCloud (spec de l'agenda et des contacts, §5, avec
 ses corrections : la question dit la nouvelle fin, un événement changé fait relire toutes ses fois) : c'est le même
-moteur (D10), branché sur l'API de Google. Pour Google, 500 rendez-vous au plus par agenda et par lecture (au-delà,
-le journal du Core le note).
+moteur (D10), branché sur l'API de Google. Pour Google, 2 500 rendez-vous au plus par agenda et par lecture (au-delà,
+le journal du Core le note ; 500 auraient faussé une recherche d'un an dans un agenda chargé).
 
 | Outil | Niveau | Ce qu'il fait |
 |---|---|---|

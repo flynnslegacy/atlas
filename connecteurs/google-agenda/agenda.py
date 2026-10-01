@@ -36,8 +36,10 @@ _journal = logging.getLogger(__name__)
 
 ADRESSE = "https://www.googleapis.com/calendar/v3"
 SERVICE = "l'Agenda"
-PAGE = 250
-MAX_FOIS = 500  # les rendez-vous d'un agenda dans une lecture : au-delà, laissés de côté
+PAGE = 2500  # le plus que Google donne par page
+# Les rendez-vous d'un agenda dans une lecture : au-delà, laissés de côté. Assez pour une recherche
+# de 395 jours dans un agenda chargé (un rendez-vous quotidien en fait déjà 395).
+MAX_FOIS = 2500
 LECTURE_SEULE = {"reader", "freeBusyReader"}
 
 
