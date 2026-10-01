@@ -100,6 +100,8 @@ def test_un_jeton_d_acces_refuse_se_renouvelle_une_fois(doublure):
         ),
         ({"refus": (403, "insufficientPermissions")}, google.PERMISSION),
         ({"refus": (429, "rateLimitExceeded")}, google.MUET),
+        ({"refus": (403, "rateLimitExceeded")}, google.MUET),
+        ({"refus": (403, "userRateLimitExceeded")}, google.MUET),
         ({"refus": (503, "backendError")}, google.MUET),
         ({"muette": True}, google.MUET),
         ({"jeton_en_panne": 503}, google.MUET),

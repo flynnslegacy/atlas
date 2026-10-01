@@ -242,6 +242,16 @@ async def test_un_agenda_devenu_illisible_n_empeche_pas_les_autres(agenda, conne
         await lire(connecteur, "2026-10-01", agenda="Ancien club")
 
 
+async def test_un_autre_refus_de_lecture_ne_se_tait_pas(agenda, connecteur):
+    # Seul un agenda disparu (404, 410) est laissé de côté : sinon, « Rien dans l'agenda »
+    # serait faux.
+    agenda.evenement(PERSO, "d1", a_paris(1, 15), a_paris(1, 16), "Dentiste")
+    agenda.pannes[TRAVAIL] = (400, "badRequest")
+
+    with pytest.raises(sys.modules["atlas_connecteurs.google_agenda.agenda"].ErreurAgenda):
+        await lire(connecteur, "2026-10-01")
+
+
 async def test_un_rendez_vous_illisible_n_empeche_pas_les_autres(agenda, connecteur):
     agenda.evenement(PERSO, "d1", a_paris(1, 15), a_paris(1, 16), "Dentiste")
     casse = agenda.evenement(PERSO, "x1", a_paris(1, 10), a_paris(1, 11), "Illisible")

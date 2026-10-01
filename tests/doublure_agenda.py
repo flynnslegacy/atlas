@@ -62,6 +62,7 @@ class AgendaGoogle:
         self.agendas: dict[str, dict[str, Any]] = {}
         self.evenements: dict[str, dict[str, dict[str, Any]]] = {}
         self.exceptions: dict[str, dict[str, Any]] = {}
+        self.pannes: dict[str, tuple[int, str]] = {}  # agenda → (statut, raison) de sa lecture
         self._numero = 0
         doublure.route("GET", rf"{HOTE}/users/me/calendarList", self._liste)
         doublure.route("GET", rf"{HOTE}/calendars/([^/]+)/events", self._lire_la_periode)
@@ -147,6 +148,8 @@ class AgendaGoogle:
         agenda = unquote(agenda)
         if agenda not in self.evenements:  # retiré, ou plus partagé
             return erreur(404, "notFound")
+        if agenda in self.pannes:
+            return erreur(*self.pannes[agenda])
         params = requete.url.params
         assert params["singleEvents"] == "true" and params["orderBy"] == "startTime"
         fuseau = ZoneInfo(params.get("timeZone", "UTC"))

@@ -45,6 +45,10 @@ class ErreurAgenda(Exception):
     """Une réponse inattendue de Google : le Core la note, et Claude apprend l'échec."""
 
 
+class AgendaDisparu(ErreurAgenda):
+    """Un agenda de la liste que Google ne connaît plus (404, 410) : retiré, ou plus partagé."""
+
+
 def _id(texte: str) -> str:
     return quote(texte, safe="")
 
@@ -98,7 +102,7 @@ class Calendrier:
             adresse = f"{ADRESSE}/calendars/{_id(lu.cle)}/events"
             try:
                 evenements = self._pages(adresse, params)
-            except ErreurAgenda as e:
+            except AgendaDisparu as e:
                 if agenda is not None:
                     raise
                 # Un agenda retiré ou plus partagé n'empêche pas de lire les autres.
@@ -250,6 +254,8 @@ class Calendrier:
         while True:
             demande = {**params, **({"pageToken": jeton} if jeton else {})}
             reponse = self._autorisation.appeler("GET", adresse, service=SERVICE, params=demande)
+            if reponse.status_code in {404, 410}:
+                raise AgendaDisparu(f"GET : {reponse.status_code}")
             if not reponse.is_success:
                 raise ErreurAgenda(f"GET : {reponse.status_code}")
             page = reponse.json()

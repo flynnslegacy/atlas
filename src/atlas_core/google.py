@@ -46,6 +46,8 @@ CLIENT_REFUSE = (
     "› Connecteurs › Réglages."
 )
 MUET = "Google ne répond pas : réessaie dans un moment."
+# Les limites de débit et de quota, que Google rend aussi en 403.
+LIMITES = {"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "RATE_LIMIT_EXCEEDED"}
 PERMISSION = "L'autorisation d'Atlas ne couvre pas ça : relance make google sur ton Mac."
 SANS_REPONSE = "Pas de réponse de Google en 5 minutes : relance make google."
 AUTRE_DEMANDE = "La réponse ne vient pas de cette demande : relance make google."
@@ -133,6 +135,8 @@ class Autorisation:
                 raise ErreurConnecteur(pas_active(service))
             if raisons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
                 raise ErreurConnecteur(PERMISSION)
+            if raisons & LIMITES:
+                raise ErreurConnecteur(MUET)
         if reponse.status_code == 429 or reponse.status_code >= 500:
             raise ErreurConnecteur(MUET)
         return reponse
